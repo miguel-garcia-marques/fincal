@@ -1,0 +1,159 @@
+Vamos construir uma app de gestão financeira, passo a passo.
+
+Visualmente quero:
+- Uma vista mensal onde tem
+- - Um calendário com os dias do mês e os dias da semana em cima
+- - Um selector para o ano
+- - Um selector para escolher o periodo de que dia até que dia quero que apareça no calendário
+- - - Por exemplo, se eu escolher dia 25 de outubro até 24 de novembro, o calendário deverá mostrar todos os dias dentro desse periodo.
+- - Um botão para adicionar novas despesas/ganhos 
+- - Um botão para ver as transações
+- - - Quando clicado o botão á direita aparecerá uma lista de todas as transações (ganhos e despesas) desse mês
+- - - Essa lista será em forma de tabela, em que aparece o tipo (despesa/ganho), tipologia, valor
+- A lista das transações só aparece quando se clica no botão
+- - Quando não se clica, o calendário aparece no meio da janela
+- - Quando se clica, o calendário move-se um pouco mais para a esquerda e a lista das transacções mais á direita
+- Quando se clica num dia do mês deverá aparecer um pop up com informações sobre esse dia
+- - Despesas do dia, Ganhos do dia, Quanto é que tenho disponível nesse dia e um botão para fechar, isto tudo se essa informação existir
+- No fundo da janela, deverá aparecer quantos ganhos houve naquele mês, e quantas despesas
+- Quando se clica no botão para adicionar nova despesa/ganho
+- - Aparecer um popup com um form para preencher:
+- - - Tipo transação (Ganho ou Despesa) (dois botões com os dois valores, quando um deles é selecionado, fica com cor diferente)
+- - - Data da transação (date picker)
+- - - Descrição (text field, opcional)
+- - - Valor da transação (money field)
+- - - Tipologia da transação (selector)
+- - - - Valores selector (Compras, Café, Combustivel, Subscrição, Dízimo, Carro, Multibanco, Saúde, Comer fora, Miscelaneos, Prendas, Extras, Snacks, Compras Online, Compras roupa, Animais)
+- - Deverá ter um botão para adicionar ou cancelar.
+
+A nível funcional:
+- Em cada dia do mês é suposto mostrar quanto dinheiro terei nesse dia, com base nos ganhos/despesas anteriores
+- - Por exemplo: Digamos que dia 25/01 eu ganhei 1400 euros, dia 26 tenho uma despesa de 400 euros, ou seja nesse dia 26 aparecerá que eu tenho 1000 euros disponíveis.
+- Tendo em conta os selectors selecionados, ou seja, tendo em conta o ano e o dia que começa e acaba a vista do calendário, e as despesas e ganhos dentro desse periodo
+- - Calcular o saldo disponível em cada dia do mês, e associar a esse dia as despensas e ganhos desse dia, tendo em conta aquilo que está disponível.
+- - O calculo de cada dia deve ter em conta todas as despesas e ganhos do dia ou anteriores dentro do periodo onde está inserido. Esse calculo é acumulativo.
+- - Filtrar apenas as despesas/ganhos desse periodo, para a lista de transações
+- - Sempre que um novo selector for selecionado, deverá se calcular outra vez os valores para os dias e a lista filtrada
+- Sempre que uma despesa/ganho for declarado, deverá ser guardado na base de dados.
+- Quando se cria uma transação ela deverá ser guardada na base de dados na tabela de transações, cada objecto com a seguinte informação
+- - Id da transação (gerado automaticamente)
+- - Tipo transação 
+- - Data da transação 
+- - Descrição 
+- - Valor da transação 
+- - Tipologia da transação 
+- - - Valores selector
+- O dia da semana deverá seguir ser calculado usando a seguinte formula
+- - Calcule o dia da semana para uma data específica usando a fórmula de Zeller. Considere os parâmetros: dia (D), mês (M), e ano (A). Para meses de janeiro e fevereiro, considere M como 13 e 14, e o ano deve ser A-1. Use a fórmula: h = (D + floor((13*(M + 1))/5) + K + floor(K/4) + floor(J/4) - 2*J) mod 7 onde K é o ano do século (A mod 100) e J é o século (parte inteira de A/100). 
+Retorne o dia da semana correspondente onde 0 = sábado, 1 = domingo, 2 = segunda-feira, etc.
+
+
+A nível de design:
+- Cria um design de interface de utilizador inspirado num dashboard moderno e sofisticado. O visual deve transmitir elegância e minimalismo através das seguintes características:
+- - Cores: Utiliza uma paleta de cores neutras e suaves, maioritariamente tons de cinza claro, branco e preto, com toques subtis de verde e dourado para detalhes e realces.
+- - Formas: Prefere formas arredondadas e suaves em todos os elementos visuais (caixas, botões), evitando ângulos agudos. Dá prioridade a bordas arredondadas para criar uma sensação amigável e moderna.
+- - Espaço: Deixa espaços generosos entre os elementos, criando uma sensação de leveza e organização. Não sobrecarregues o design, utiliza muito espaço em branco ("white space") para facilitar a leitura e navegação.
+- - Tipografia: Seleciona uma fonte moderna, arredondada e de fácil leitura. O texto deve ser visível sem esforço, com pesos diferentes para diferenciar títulos, subtítulos e corpo do texto, mas sem exagerar.
+- - Ícones e detalhes: Utiliza ícones simples, de traço fino e arredondado, que harmonizem com o restante visual. Os detalhes devem ser sutis e não poluir o layout.
+- - Estilo geral: O design deve ser limpo, sofisticado, com vibe “tech” mas acessível e intuitivo. Deve transmitir confiança e profissionalismo, sem perder o toque acolhedor visual.
+- Garante que quem visualizar a interface intuitivamente perceba que se trata de um produto digital contemporâneo, focado na clareza e na experiência do utilizador.
+
+A nível de tech stack:
+- full stack: flutter
+- - Uma web app
+Podes me criar uma app com estas especificações dados? Planeia tudo bem, ao pormenor para que tudo o que foi detalhado aqui seja implementado.
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Okay, vamos fazer algumas alterações.
+- A nível de design, quero que coloques tudo com tons de preto e branco, algo mais sleek e moderno. Só mantém o verde e o vermelho para componentes financeiros, como saldos positivos e negativos.
+- A nível de funcionalidade, numa transação, sempre que é selecionado o ganho, mostra uma opção checkbox, para saber se é salário ou não. Se a checkbox for selecionada, pergunta qual a percentagem de: gastos, lazer e poupança. Tem em atenção que as percentagens dos 3 tem de dar sempre 100%.Sempre que mostrares nos dias, mostra a separação destes valores. 
+- - Por exemplo, eu coloco uma transação de ganho, em que é o meu salário. Seleciono a check box de salário, e coloco lazer a 30%, poupança a 20% e gastos a 50%. O meu salário é de 1400 portanto gastos será 700, poupança será 280 e lazer será 420. No dia e apartir dai todos os dias, ao clicar eu deveria conseguir ver esta separação de valores e no calendário também.
+- Em seguimento com a nova funcionalidade de cima, agora, ao declarar uma despesa tenho de dizer se foi para poupança, lazer ou gastos. 
+- - Consoante essa informação, esse valor será sempre deduzido no valor a que corresponde, lazer, poupança ou gasto. O calendário, mais uma vez deverá refletir isso, tanto no calendário como na informação do dia.
+- Possibilidade de definir transacções periodicas
+- - Vão existir 3 tipos:
+- - - Transações únicas - são a maior parte das transacções
+- - - Transações semanais - transacções que se repetem todas as semanas, num dia especifico da semana (segunda, terça, quarta, quinta, sexta, sábado ou domingo)
+- - - Transações mensais - transacções que se repetem todos os meses, num dia especifico de cada mês.
+- - Para isto, sempre que se registar:
+- - - Uma transacção semanal, nesse dia da semana deverá sempre ter um transacção registada nesse dia da semana todas as semanas
+- - - - Por exemplo, tenho uma transação de 20€ semanal, todas as quintas. Portanto todas as quintas ferias, independentemente do periodo selecionado, terá lá uma transacção todas as quintas de todas as semanas.
+- - - Uma transacção mensal, nesse dia do mês deverá sempre aparecer uma transacção registada
+- - - - Por exemplo, tenho uma transacção de 30€ mensal, todos os dias 7 de cada mês. SE no periodo selecionada houver um dia 7, deverá lá aparecer uma transacção registada.
+- - Para possibilitar isso, agora, sempre que se regista uma transação deverá perguntar a regularidade e mostrar (única, semanal ou mensal).
+- - - Se for semanal perguntar que dia da semana será (segunda, terça, quarta, quinta, sexta, sábado ou domingo)
+- - - Se for mensal perguntar que dia do mês será. 
+- Os dados têm de ser guardados numa base de dados em mongo db.
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Algumas alterações:
+- Adiciona a possibilidade de editar uma trasação e eliminar também. Isto deverá estar presente na lista de trasações.
+- Os valores gerais do periodo selecionado, deverão ser APENAS daquele periodo e não uma soma de TUDO o que está registado
+- Os valores de gastos, lazer e poupança em cada dia não está a aparecer de uma maneira legivel, a altura de cada dia no calendário deverá ser alterada de forma a que isto seja melhor refletido.
+- A altura do calendário deverá ser ajustavel tendo em conta a altura da janela.
+- As cores baseadas no preto, têm estar conforme a cor do texto. Por exemplo, quando eu seleciono o periodo que quero, o texto é preto e o selecionador do periodo também, o que faz com que eu não consiga ver o texto. Tem em atenção o UI/UX, para ser o mais fluido possivel a experiencia.
+- Sempre que eu entro na plataforma, antes de tudo eu tenho de ser perguntado qual é o periodo que desejo, e não ter um periodo default
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Preciso que concertes algumas coisas:
+- As cores continuam a chocar, o selector de datas é preto e o texto também. Tens de colocar os números dos dias quando selecionados, com uma cor oposta, que dê para ler
+- Quando tento eliminar uma txs, dá erro. "Error deleting transaction: Exception: Transação não encontrada"
+- Quando meto uma tx periodica, ela não deve ser replicada cada vez que abro um novo periodo. Só deve ser replicada se realmente for dentro do mesmo periodo.
+- - Por exemplo, se eu colocar uma tx mensal, ela só deve aparecer uma vez no calendário, e na lista de txs também, e na conta geral em baixo no ecrã também só uma vez. Se eu mudar o periodo, deve resetar isso. Se for semanal deve aparecer no dia da semana especificado nas semanas presentes no calendário, replicando o número de vezes que aparece nesse periodo, mas se mudar o periodo deverá ser resetado outra vez para mostrar só para esse novo periodo
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Preciso que concertes algumas coisas:
+- Eu adiciono um ganho mensal, e ele está a se colocado no dia anterior. Podes corrigir isso?
+- AS cores na seleção do periodo continuam igual, podes ver qual é que é a causa de esse problema continuar? Secalhar vem do Widget de calendario? Não sei 
+- Na lista de transações, quando é periodica, mostra a periodicidade e o dia em que é (dia da semana ou do mês consoante o tipo)
+- Quando a altura da janela estiver num tamanho que não permita mostrar a divisão dos valores, podes oculta-los, quando assim for
+- Muda o tipo de letra geral, para um tipo de letra do género de máquina de escrever, algo assim do género.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Preciso que concertes algumas coisas:
+- No inicio, assume o ano atual para o periodo, não precisas de perguntar
+- Agora não aparece sequer a divisão nos dias, independentemente do tamanho da janela, podes corrgir?
+- Quando o tamanho da janela não permitir mostrar o calendário todo, para prevenir o overflow que está a acontecer, coloca em vista semana, em que mostras semana a semana, com botão que permitem andar entre as semanas.
+- Em relação ás cores do slider, agora está de volta ao verde. Eu acho que para conseguirmos colocar o selector preto e o texto branco, tens de fazer algo assim:
+- DatePickerThemeData(
+          backgroundColor: Colors.black, // Picker dialog background
+          headerBackgroundColor: Colors.black,
+          headerForegroundColor: Colors.white,
+          dayStyle: TextStyle(color: Colors.white), // Days grid text
+          yearStyle: TextStyle(color: Colors.white), // Year's selector text
+        ),
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Preciso que concertes algumas coisas:
+- Agora só aparece a vista semanal, eu quero que, baseado numa height especifica, mostre a vista mensal, se for maior que essa height, e se for menor que mostre a vista semanal. Deves manter o código para as duas vistas.
+- Na vista semanal, a altura dos dias pode ser maior e mostrar mais informação.
+- Juntamente com essa mudança, coloca um botão que muda a vista quando eu quiser ao clicar.
+- Na lista de transações, mostra, como pedi, quando é periodica, mostra a periodicidade e o dia em que é (dia da semana ou do mês consoante o tipo)
+- O tipo de letra continua a não estar como pedi, continua como antes e não quero, coloca como monospace.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Vamos fazer algumas alterações:
+- Muda o tipo de letra para algo parecido como monospace.
+- Na lista de transações, mostra, como pedi, quando é periodica, mostra a periodicidade e o dia em que é (dia da semana ou do mês consoante o tipo)\
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Vamos agora focar-nos no design:
+- Está tudo a parecer muito disperso. Vamos reduzir os paddings e as margins de forma a ficar tudo mais "cozy".
+- Vamso retirar as borders pretas á volta das coisas.
+- Vamos usar o GoogleFonts para os tipos de letras. Depois disso vamos adicionar uma fonte monospace.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Algumas alteração:
+- O buget, invés de aparecer sempre no dia do calendário, vamos mostrar num popup quando fazemos hover no dia, e obviamente quando clicamos no dia também aparecerá lá dentro.
+- Ao iniciar, assume que o ano é o atual, mas pergunta o periodo que quero ver.
