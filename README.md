@@ -1,4 +1,4 @@
-# Finance Management App
+# FinCal - Finance Management App
 
 Uma aplicação web moderna de gestão financeira construída com Flutter e backend Node.js + MongoDB.
 
