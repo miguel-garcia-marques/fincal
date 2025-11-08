@@ -15,18 +15,22 @@ app.use(express.urlencoded({ extended: true }));
 
 // Rotas
 app.use('/api/transactions', require('./routes/transactions'));
+app.use('/api/users', require('./routes/users'));
 
 // Rota de teste
 app.get('/', (req, res) => {
   res.json({ 
-    message: 'Finance Management API',
+    message: 'FinCal API',
     version: '1.0.0',
     endpoints: {
       'GET /api/transactions': 'Obter todas as transações',
       'GET /api/transactions/range?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD': 'Obter transações em um período',
       'POST /api/transactions': 'Criar nova transação',
       'PUT /api/transactions/:id': 'Atualizar transação',
-      'DELETE /api/transactions/:id': 'Deletar transação'
+      'DELETE /api/transactions/:id': 'Deletar transação',
+      'GET /api/users/me': 'Obter dados do usuário atual',
+      'POST /api/users': 'Criar ou atualizar usuário',
+      'PUT /api/users/me': 'Atualizar nome do usuário'
     }
   });
 });

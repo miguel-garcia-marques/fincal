@@ -7,7 +7,8 @@ const SalaryAllocationSchema = new mongoose.Schema({
 }, { _id: false });
 
 const TransactionSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true },
+  id: { type: String, required: true },
+  userId: { type: String, required: true, index: true },
   type: { 
     type: String, 
     required: true, 
@@ -46,9 +47,24 @@ const TransactionSchema = new mongoose.Schema({
 });
 
 // Índices para melhor performance
-TransactionSchema.index({ date: 1 });
-TransactionSchema.index({ type: 1 });
-TransactionSchema.index({ frequency: 1 });
+TransactionSchema.index({ userId: 1, date: 1 });
+TransactionSchema.index({ userId: 1, type: 1 });
+TransactionSchema.index({ userId: 1, frequency: 1 });
+TransactionSchema.index({ userId: 1, id: 1 }, { unique: true });
 
-module.exports = mongoose.model('Transaction', TransactionSchema);
+// Função para obter o modelo dinâmico baseado no userId
+const getTransactionModel = (userId) => {
+  // Criar nome da collection baseado no userId
+  const collectionName = `transactions_${userId.replace(/-/g, '_')}`;
+  
+  // Verificar se o modelo já existe
+  if (mongoose.models[collectionName]) {
+    return mongoose.models[collectionName];
+  }
+  
+  // Criar novo modelo com collection específica
+  return mongoose.model(collectionName, TransactionSchema, collectionName);
+};
+
+module.exports = { TransactionSchema, getTransactionModel };
 

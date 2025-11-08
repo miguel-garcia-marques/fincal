@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/transaction.dart';
-import '../utils/date_utils.dart';
+import 'auth_service.dart';
 
 class ApiService {
+  final AuthService _authService = AuthService();
+
   // Configurar a URL base da API
   // Para desenvolvimento local: 'http://localhost:3000'
   // Para produção: usar o URL do servidor
@@ -14,11 +16,20 @@ class ApiService {
   // iOS Simulator: 'http://localhost:3000/api'
   // Dispositivo físico: 'http://SEU_IP_LOCAL:3000/api'
 
+  // Obter headers com autenticação
+  Map<String, String> _getHeaders() {
+    final token = _authService.currentAccessToken;
+    return {
+      'Content-Type': 'application/json',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
+  }
+
   Future<List<Transaction>> getAllTransactions() async {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/transactions'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
       );
 
       if (response.statusCode == 200) {
@@ -37,7 +48,7 @@ class ApiService {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/transactions'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
         body: json.encode(transaction.toJson()),
       );
 
@@ -55,7 +66,7 @@ class ApiService {
     try {
       final response = await http.put(
         Uri.parse('$baseUrl/transactions/${transaction.id}'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
         body: json.encode(transaction.toJson()),
       );
 
@@ -73,7 +84,7 @@ class ApiService {
     try {
       final response = await http.delete(
         Uri.parse('$baseUrl/transactions/$id'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
       );
 
       if (response.statusCode != 200) {
@@ -96,7 +107,7 @@ class ApiService {
       
       final response = await http.get(
         Uri.parse('$baseUrl/transactions/range?startDate=$startStr&endDate=$endStr'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
       );
 
       if (response.statusCode == 200) {

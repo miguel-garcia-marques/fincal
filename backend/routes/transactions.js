@@ -1,11 +1,16 @@
 const express = require('express');
 const router = express.Router();
-const Transaction = require('../models/Transaction');
+const { getTransactionModel } = require('../models/Transaction');
+const { authenticateUser } = require('../middleware/auth');
+
+// Aplicar middleware de autenticação em todas as rotas
+router.use(authenticateUser);
 
 // GET todas as transações
 router.get('/', async (req, res) => {
   try {
-    const transactions = await Transaction.find().sort({ date: 1 });
+    const Transaction = getTransactionModel(req.userId);
+    const transactions = await Transaction.find({ userId: req.userId }).sort({ date: 1 });
     res.json(transactions);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -15,6 +20,7 @@ router.get('/', async (req, res) => {
 // GET transações em um período
 router.get('/range', async (req, res) => {
   try {
+    const Transaction = getTransactionModel(req.userId);
     const { startDate, endDate } = req.query;
     
     if (!startDate || !endDate) {
@@ -38,8 +44,8 @@ router.get('/range', async (req, res) => {
     );
     end.setHours(23, 59, 59, 999); // Incluir o dia inteiro
 
-    // Buscar todas as transações (incluindo periódicas)
-    const allTransactions = await Transaction.find();
+    // Buscar todas as transações (incluindo periódicas) do usuário
+    const allTransactions = await Transaction.find({ userId: req.userId });
     const result = [];
 
     for (const transaction of allTransactions) {
@@ -148,7 +154,8 @@ router.get('/range', async (req, res) => {
 // POST criar nova transação
 router.post('/', async (req, res) => {
   try {
-    const transactionData = req.body;
+    const Transaction = getTransactionModel(req.userId);
+    const transactionData = { ...req.body, userId: req.userId };
     
     // Validar percentagens se for salário
     if (transactionData.isSalary && transactionData.salaryAllocation) {
@@ -198,7 +205,11 @@ router.post('/', async (req, res) => {
 // DELETE transação
 router.delete('/:id', async (req, res) => {
   try {
-    const transaction = await Transaction.findOneAndDelete({ id: req.params.id });
+    const Transaction = getTransactionModel(req.userId);
+    const transaction = await Transaction.findOneAndDelete({ 
+      id: req.params.id,
+      userId: req.userId 
+    });
     
     if (!transaction) {
       return res.status(404).json({ message: 'Transação não encontrada' });
@@ -213,9 +224,10 @@ router.delete('/:id', async (req, res) => {
 // PUT atualizar transação
 router.put('/:id', async (req, res) => {
   try {
+    const Transaction = getTransactionModel(req.userId);
     const transaction = await Transaction.findOneAndUpdate(
-      { id: req.params.id },
-      req.body,
+      { id: req.params.id, userId: req.userId },
+      { ...req.body, userId: req.userId },
       { new: true, runValidators: true }
     );
     

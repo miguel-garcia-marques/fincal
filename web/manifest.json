@@ -1,11 +1,11 @@
 {
-    "name": "Finance Management",
-    "short_name": "Finance",
+    "name": "FinCal",
+    "short_name": "FinCal",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#FAFAFA",
     "theme_color": "#4CAF50",
-    "description": "A modern finance management web app",
+    "description": "FinCal - A modern finance management web app",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
