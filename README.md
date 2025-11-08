@@ -4,6 +4,8 @@ Uma aplicação web moderna de gestão financeira construída com Flutter e back
 
 ## Características
 
+- 🔐 **Autenticação**: Login seguro com Supabase Auth (email/password)
+- 👤 **Multi-usuário**: Cada usuário tem sua própria collection no MongoDB
 - 📅 **Calendário Inteligente**: Visualização mensal com cálculo automático de saldo disponível por dia
 - 💰 **Gestão de Transações**: Adicione ganhos e despesas com categorias personalizadas
 - 💼 **Gestão de Salário**: Distribuição automática do salário em Gastos, Lazer e Poupança
@@ -39,6 +41,7 @@ Finance Management/
 - Flutter SDK (versão 3.0.0 ou superior)
 - Node.js (v14 ou superior)
 - MongoDB (local ou MongoDB Atlas)
+- Conta no Supabase (gratuita em https://supabase.com)
 
 ### 1. Instalar Dependências Flutter
 
@@ -61,12 +64,44 @@ cp .env.example .env
 Editar `.env` e configurar:
 ```env
 PORT=3000
-MONGODB_URI=mongodb://localhost:27017/finance_management
+MONGODB_URI=mongodb://localhost:27017/fincal
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key-here
 ```
+
+**Nota**: A aplicação usa a database `fincal` (não `test`). O sistema automaticamente substitui `test` por `fincal` se detectado.
 
 Para MongoDB Atlas:
 ```env
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/finance_management?retryWrites=true&w=majority
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/fincal?retryWrites=true&w=majority
+```
+
+### 2.1. Configurar Supabase
+
+1. Crie uma conta em https://supabase.com
+2. Crie um novo projeto
+3. Vá em **Settings** > **API**
+4. Copie a **URL** e a **anon/public key**
+5. Adicione essas credenciais no arquivo `.env` do backend
+
+**Importante**: No Supabase, certifique-se de que:
+- A autenticação por email/password está habilitada (Settings > Auth > Providers)
+- O email confirmation está desabilitado para desenvolvimento (Settings > Auth > Email Templates)
+
+### 2.2. Configurar Flutter com Supabase
+
+Edite `lib/main.dart` e adicione suas credenciais do Supabase:
+
+```dart
+await Supabase.initialize(
+  url: 'https://your-project.supabase.co',
+  anonKey: 'your-anon-key-here',
+);
+```
+
+**Alternativa**: Use variáveis de ambiente ao executar:
+```bash
+flutter run --dart-define=SUPABASE_URL=https://your-project.supabase.co --dart-define=SUPABASE_ANON_KEY=your-anon-key-here
 ```
 
 ### 3. Iniciar Backend
@@ -138,14 +173,31 @@ O calendário mostra:
 
 ## API Endpoints
 
+**Todas as rotas requerem autenticação via Bearer token no header Authorization.**
+
 ### GET /api/transactions
-Obter todas as transações
+Obter todas as transações do usuário autenticado
+
+**Headers:**
+```
+Authorization: Bearer <supabase-access-token>
+```
 
 ### GET /api/transactions/range?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
-Obter transações em um período (inclui transações periódicas geradas)
+Obter transações em um período (inclui transações periódicas geradas) do usuário autenticado
+
+**Headers:**
+```
+Authorization: Bearer <supabase-access-token>
+```
 
 ### POST /api/transactions
-Criar nova transação
+Criar nova transação para o usuário autenticado
+
+**Headers:**
+```
+Authorization: Bearer <supabase-access-token>
+```
 
 **Body exemplo:**
 ```json
@@ -182,6 +234,12 @@ Deletar transação
 - **Express**: Framework web
 - **MongoDB**: Base de dados NoSQL
 - **Mongoose**: ODM para MongoDB
+- **Supabase JS**: Cliente para autenticação
+
+### Autenticação
+- **Supabase Auth**: Autenticação segura com email/password
+- **JWT Tokens**: Tokens de acesso para autenticação nas APIs
+- **Collections por Usuário**: Cada usuário tem sua própria collection no MongoDB
 
 ## Modo de Desenvolvimento vs Produção
 
@@ -209,6 +267,11 @@ O serviço `DatabaseService` suporta dois modos:
 ### Transações periódicas não aparecem
 - Verifique se a transação foi salva com `frequency` correto
 - Confirme que o período selecionado inclui as datas esperadas
+
+### Erro de autenticação
+- Verifique se as credenciais do Supabase estão corretas no `.env` e no `main.dart`
+- Confirme que o token está sendo enviado nas requisições (verifique o console do navegador)
+- Verifique se o Supabase está configurado corretamente (email/password habilitado)
 
 ## Licença
 

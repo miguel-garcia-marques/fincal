@@ -1,6 +1,6 @@
-# Finance Management Backend API
+# FinCal Backend API
 
-Backend Node.js com Express e MongoDB para a aplicação de gestão financeira.
+Backend Node.js com Express e MongoDB para a aplicação FinCal de gestão financeira.
 
 ## Pré-requisitos
 

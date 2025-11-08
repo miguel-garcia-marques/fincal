@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/transaction.dart';
 import '../models/budget_balances.dart';
 import '../services/database.dart';
+import '../services/auth_service.dart';
+import '../services/user_service.dart';
 import '../utils/date_utils.dart';
 import '../widgets/calendar.dart';
 import '../widgets/transaction_list.dart';
@@ -18,6 +20,11 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final DatabaseService _databaseService = DatabaseService();
+  final AuthService _authService = AuthService();
+  final UserService _userService = UserService();
+
+  String? _userName;
+  bool _isLoadingUser = true;
 
   int _selectedYear = DateTime.now().year;
   DateTime _startDate = DateTime(DateTime.now().year, DateTime.now().month, 1);
@@ -36,7 +43,27 @@ class _HomeScreenState extends State<HomeScreen> {
     // Prompt for period selection after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _selectDateRangeOnStartup();
+      _loadUserData();
     });
+  }
+
+  Future<void> _loadUserData() async {
+    try {
+      final user = await _userService.getCurrentUser();
+      if (mounted) {
+        setState(() {
+          _userName = user?.name;
+          _isLoadingUser = false;
+        });
+      }
+    } catch (e) {
+      print('Erro ao carregar dados do usuário: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingUser = false;
+        });
+      }
+    }
   }
 
   Future<void> _selectDateRangeOnStartup() async {
@@ -334,9 +361,104 @@ class _HomeScreenState extends State<HomeScreen> {
               decoration: const BoxDecoration(
                 color: AppTheme.white,
               ),
-              child: Text(
-                'Gestão Financeira',
-                style: Theme.of(context).textTheme.displayMedium,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'FinCal',
+                    style: Theme.of(context).textTheme.displayMedium,
+                  ),
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.account_circle),
+                    onSelected: (value) async {
+                      if (value == 'logout') {
+                        // Mostrar diálogo de confirmação
+                        final shouldLogout = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Confirmar Logout'),
+                            content: const Text('Tem certeza que deseja sair?'),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.of(context).pop(false),
+                                child: const Text('Cancelar'),
+                              ),
+                              ElevatedButton(
+                                onPressed: () =>
+                                    Navigator.of(context).pop(true),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppTheme.expenseRed,
+                                ),
+                                child: const Text('Sair'),
+                              ),
+                            ],
+                          ),
+                        );
+
+                        if (shouldLogout == true && mounted) {
+                          await _authService.signOut();
+                        }
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      // Informações do usuário
+                      PopupMenuItem(
+                        enabled: false,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (_isLoadingUser)
+                              const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            else
+                              Text(
+                                _userName ??
+                                    _authService.currentUser?.email ??
+                                    'Usuário',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                            if (_userName != null &&
+                                _authService.currentUser?.email != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                _authService.currentUser!.email!,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: AppTheme.darkGray,
+                                    ),
+                              ),
+                            ],
+                            const SizedBox(height: 4),
+                            const Divider(),
+                          ],
+                        ),
+                      ),
+                      // Opção de logout
+                      PopupMenuItem(
+                        value: 'logout',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.logout, color: AppTheme.black),
+                            const SizedBox(width: 8),
+                            const Text('Sair'),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
 
@@ -382,7 +504,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         transactions: _transactions,
                                         onTransactionUpdated: _loadTransactions,
                                       ),
-                ),
+                                    ),
                                   ],
                                 ],
                               ),
@@ -450,9 +572,9 @@ class _HomeScreenState extends State<HomeScreen> {
                               if (screenWidth < 1300) {
                                 _showTransactionsAsPopup();
                               } else {
-                            setState(() {
+                                setState(() {
                                   _showTransactions = true;
-                            });
+                                });
                               }
                             }
                           },
@@ -474,7 +596,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ],
-                    ),
+              ),
             ),
 
             // Resumo mensal
@@ -545,25 +667,31 @@ class _SelectorButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppTheme.darkGray,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.black,
-                      ),
-                ),
-              ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.darkGray,
+                        ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    value,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.black,
+                        ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
+            const SizedBox(width: 8),
             Icon(Icons.arrow_drop_down, size: 24, color: AppTheme.black),
           ],
         ),

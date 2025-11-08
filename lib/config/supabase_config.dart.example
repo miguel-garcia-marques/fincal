@@ -1,0 +1,20 @@
+// Copie este arquivo para supabase_config.dart e adicione suas credenciais
+// NÃO commite o arquivo supabase_config.dart com suas credenciais reais!
+
+class SupabaseConfig {
+  // Substitua pelos seus valores do Supabase
+  static const String url = 'https://seu-projeto.supabase.co';
+  static const String anonKey = 'sua-chave-anon-aqui';
+  
+  // Ou use variáveis de ambiente (--dart-define)
+  static String get supabaseUrl {
+    const envUrl = String.fromEnvironment('SUPABASE_URL');
+    return envUrl.isNotEmpty ? envUrl : url;
+  }
+  
+  static String get supabaseAnonKey {
+    const envKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+    return envKey.isNotEmpty ? envKey : anonKey;
+  }
+}
+
