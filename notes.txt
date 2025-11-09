@@ -157,3 +157,42 @@ Vamos agora focar-nos no design:
 Algumas alteração:
 - O buget, invés de aparecer sempre no dia do calendário, vamos mostrar num popup quando fazemos hover no dia, e obviamente quando clicamos no dia também aparecerá lá dentro.
 - Ao iniciar, assume que o ano é o atual, mas pergunta o periodo que quero ver.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Algumas mudanças de design:
+- Vamos passar o selector do periodo e ano, juntamente com os botoes de adicionar transação e o botão de ver transações para baixo, logo em cima dos valores globais.
+- O calendario, não deveria esticar a width mais que um determinado valor. Quando passar esse valor deve ficar centrada no meio.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Algumas modificaçãos:
+- O valor que determina se o calendário não é esticado devia ser menor, ele está a ficar muito esticado.
+- A lista de transações, quando se clica para ver, devia mostrar como popup após um determinado valor, para evitar overflow quando a width está muito pequena
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Algumas modificações:
+- O valor que define se a lista de transações aparece em popup ou não está muito pequeno, devia ser maior, porque ainda está a acontecer overflow, em algumas larguras de página.
+- Dá um revamp á lista de transações para ficar mais aesthetic e ser mais legivel, sendo informativa á mesma
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Vamos trabalhar na versão 0.2.1
+
+Eu quero que:
+- o selector do periodo não ocupe o ecrã todo, que seja mais discrito, tipo um popup ou algo do género.
+- quero criar um histórico de "periodos" passados, para possibilitar o user de puder voltar atrás e ver as transações que ele tem registadas num periodo, e ser mais fácil, para não ter de estar sempre a colocar o periodo.
+- - este historico será guardado no mongo, é identificado com id e tem o periodo e os ids das tx presentes nesse periodo
+- - deverá agora haver um botão para ver o historico de periodos
+- - sempre que o user faz login, se ele tiver periodos passados deverá aparecer uma lista para ele selecionar, ou selecionar um novo periodo.
+- precisamos de arrumar a parte de baixo dos botões de adicionar tx, ver txs, selecionar periodo e agora ver historico de "periodos".
+- - seclhar o adicionar tx e ver txs ser apenas um icon redondo "floating" e o historico de periodos ser um botão e de alguma forma o selecionar periodo e o historico estarem numa só view.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Vamos mudar algumas coisas:
+- Quando se coloca a visão semanal, os dias podem ficar mais altos, mas a altura do container do calendario (Agora semana), deve reduzir para o tamanho adequado.
+- O fundo deve ser branco, e o fundo do calendario dever se um cinza, mas diferente do cinza dos dias do calendario
+- O periodo e o botão do histórico de periodos, deve ser mudado para o lado esquerdo do "Saldo"
+- Coloca uma bordinmha pequenina no ganhos e despesas gerais.
