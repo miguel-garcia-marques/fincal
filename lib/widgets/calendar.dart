@@ -10,6 +10,8 @@ class CalendarWidget extends StatefulWidget {
   final DateTime endDate;
   final List<Transaction> transactions;
   final Function(DateTime) onDayTap;
+  final VoidCallback? onToggleView;
+  final Function(bool)? onViewChanged;
 
   const CalendarWidget({
     super.key,
@@ -17,17 +19,48 @@ class CalendarWidget extends StatefulWidget {
     required this.endDate,
     required this.transactions,
     required this.onDayTap,
+    this.onToggleView,
+    this.onViewChanged,
   });
 
   @override
-  State<CalendarWidget> createState() => _CalendarWidgetState();
+  CalendarWidgetState createState() => _CalendarWidgetState();
 }
 
-class _CalendarWidgetState extends State<CalendarWidget> {
+abstract class CalendarWidgetState extends State<CalendarWidget> {
+  void toggleView();
+}
+
+class _CalendarWidgetState extends CalendarWidgetState {
   int _currentWeekIndex = 0;
   bool? _manualViewOverride; // null = auto, true = weekly, false = monthly
+  bool? _lastNotifiedView; // Track last notified view to avoid unnecessary callbacks
   static const double _heightReduction =
       150.0; // Valor a subtrair da altura disponível para calcular threshold
+
+  void toggleView() {
+    setState(() {
+      if (_manualViewOverride == null) {
+        // Se estava em auto, forçar para a vista oposta
+        final useWeeklyView = _shouldUseWeeklyView(
+          MediaQuery.of(context).size.height - 200,
+          _organizeDaysIntoWeeks(getDaysInRange(widget.startDate, widget.endDate)).length,
+          MediaQuery.of(context).size.height,
+        );
+        _manualViewOverride = !useWeeklyView;
+      } else {
+        // Se estava manual, alternar
+        _manualViewOverride = !_manualViewOverride!;
+      }
+      final weeks = _organizeDaysIntoWeeks(getDaysInRange(widget.startDate, widget.endDate));
+      if (_manualViewOverride == true && _currentWeekIndex >= weeks.length) {
+        _currentWeekIndex = 0;
+      }
+    });
+    if (widget.onToggleView != null) {
+      widget.onToggleView!();
+    }
+  }
 
   bool _shouldUseWeeklyView(
       double availableHeight, int weeksCount, double screenHeight) {
@@ -80,6 +113,16 @@ class _CalendarWidgetState extends State<CalendarWidget> {
         // Determinar se deve usar vista semanal baseado no espaço disponível
         final useWeeklyView =
             _shouldUseWeeklyView(availableHeight, weeks.length, screenHeight);
+        
+        // Notificar mudança de vista apenas se mudou
+        if (_lastNotifiedView != useWeeklyView && widget.onViewChanged != null) {
+          _lastNotifiedView = useWeeklyView;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              widget.onViewChanged!(useWeeklyView);
+            }
+          });
+        }
 
         // Calcular altura dos dias dinamicamente
         final dayHeight = useWeeklyView
@@ -91,63 +134,31 @@ class _CalendarWidgetState extends State<CalendarWidget> {
         return Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: AppTheme.white,
+            color: AppTheme.offWhite,
             borderRadius: BorderRadius.circular(20),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // Cabeçalho com botão de toggle e dias da semana
+              // Cabeçalho com dias da semana
               Row(
-                children: [
-                  // Botão de toggle de vista
-                  IconButton(
-                    icon: Icon(
-                      useWeeklyView
-                          ? Icons.calendar_view_month
-                          : Icons.calendar_view_week,
-                      color: AppTheme.black,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        if (_manualViewOverride == null) {
-                          // Se estava em auto, forçar para a vista oposta
-                          _manualViewOverride = !useWeeklyView;
-                        } else {
-                          // Se estava manual, alternar
-                          _manualViewOverride = !_manualViewOverride!;
-                        }
-                        if (_manualViewOverride == true &&
-                            _currentWeekIndex >= weeks.length) {
-                          _currentWeekIndex = 0;
-                        }
-                      });
-                    },
-                    tooltip: useWeeklyView ? 'Vista Mensal' : 'Vista Semanal',
-                  ),
-                  const SizedBox(width: 8),
-                  // Cabeçalho com dias da semana
-                  Expanded(
-                    child: Row(
-                      children: weekDays.map((day) {
-                        return Expanded(
-                          child: Center(
-                            child: Text(
-                              day,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.black,
-                                  ),
+                children: weekDays.map((day) {
+                  return Expanded(
+                    child: Center(
+                      child: Text(
+                        day,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.black,
                             ),
-                          ),
-                        );
-                      }).toList(),
+                      ),
                     ),
-                  ),
-                ],
+                  );
+                }).toList(),
               ),
               const SizedBox(height: 8),
               // Navegação semanal (se usar vista semanal)
@@ -176,24 +187,22 @@ class _CalendarWidgetState extends State<CalendarWidget> {
                 const SizedBox(height: 8),
               ],
               // Grid do calendário
-              Expanded(
-                child: useWeeklyView && weeks.isNotEmpty
-                    ? _buildWeekView(
-                        weeks[_currentWeekIndex.clamp(0, weeks.length - 1)],
-                        dailyBalances,
-                        dailyBudgetBalances,
-                        dailyTransactions,
-                        context,
-                        dayHeight,
-                      )
-                    : _buildCalendarGrid(
-                        days,
-                        dailyBalances,
-                        dailyBudgetBalances,
-                        dailyTransactions,
-                        context,
-                        dayHeight),
-              ),
+              useWeeklyView && weeks.isNotEmpty
+                  ? _buildWeekView(
+                      weeks[_currentWeekIndex.clamp(0, weeks.length - 1)],
+                      dailyBalances,
+                      dailyBudgetBalances,
+                      dailyTransactions,
+                      context,
+                      dayHeight,
+                    )
+                  : _buildCalendarGrid(
+                      days,
+                      dailyBalances,
+                      dailyBudgetBalances,
+                      dailyTransactions,
+                      context,
+                      dayHeight),
             ],
           ),
         );
@@ -343,64 +352,95 @@ class _CalendarWidgetState extends State<CalendarWidget> {
         }
 
         return Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: Tooltip(
-              message: _buildTooltipMessage(
-                  balance, budgetBalances, dayTransactions),
-              child: GestureDetector(
-                onTap: () => widget.onDayTap(day),
-                child: Container(
-                  height: dayHeight,
-                  decoration: BoxDecoration(
-                    color: dayColor ?? AppTheme.lighterGray.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: borderColor ?? Colors.transparent,
-                      width: hasTransactions ? 2 : 0,
+          child: AspectRatio(
+            aspectRatio: 1.0,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Tooltip(
+                message: _buildTooltipMessage(
+                    balance, budgetBalances, dayTransactions),
+                child: GestureDetector(
+                  onTap: () => widget.onDayTap(day),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: dayColor ?? Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: borderColor ?? Colors.transparent,
+                        width: hasTransactions ? 2 : 0,
+                      ),
                     ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          '${day.day}',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.black,
-                                    fontSize: 16,
+                        // Parte de cima: dia em quadrado interno com outro tom de cinza
+                        Expanded(
+                          flex: 1,
+                          child: Container(
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: AppTheme.darkGray.withOpacity(0.1),
+                              borderRadius: const BorderRadius.only(
+                                topLeft: Radius.circular(8),
+                                topRight: Radius.circular(8),
+                              ),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                              child: Container(
+                                width: double.infinity,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: AppTheme.darkGray.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    '${day.day}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.black,
+                                          fontSize: 16,
+                                        ),
+                                    textAlign: TextAlign.center,
                                   ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          formatCurrency(balance),
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: hasTransactions
-                                        ? (hasGains && !hasExpenses
-                                            ? AppTheme.incomeGreen
-                                            : AppTheme.darkGray)
-                                        : AppTheme.darkGray,
-                                    fontSize: 13,
-                                  ),
-                        ),
-                        if (dayTransactions.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            '${dayTransactions.length} ${dayTransactions.length == 1 ? 'transação' : 'transações'}',
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      fontSize: 10,
-                                      color: AppTheme.darkGray,
-                                      fontWeight: FontWeight.w400,
-                                    ),
+                                ),
+                              ),
+                            ),
                           ),
-                        ],
+                        ),
+                        // Parte de baixo: saldo em cinza
+                        Expanded(
+                          flex: 1,
+                          child: Container(
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: AppTheme.darkGray.withOpacity(0.1),
+                              borderRadius: const BorderRadius.only(
+                                bottomLeft: Radius.circular(8),
+                                bottomRight: Radius.circular(8),
+                              ),
+                            ),
+                            child: Center(
+                              child: Text(
+                                _formatBalanceForDay(balance),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.darkGray,
+                                      fontSize: 11,
+                                    ),
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -502,12 +542,12 @@ class _CalendarWidgetState extends State<CalendarWidget> {
       weeks.add(currentWeek);
     }
 
-    return SingleChildScrollView(
-      child: Column(
-        children: weeks.map((week) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: weeks.map((week) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
               children: week.map((day) {
                 if (day == null) {
                   return const Expanded(child: SizedBox());
@@ -571,64 +611,92 @@ class _CalendarWidgetState extends State<CalendarWidget> {
                 }
 
                 return Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: Tooltip(
-                      message: _buildTooltipMessage(
-                          balance, budgetBalances, dayTransactions),
-                      child: GestureDetector(
-                        onTap: () => widget.onDayTap(day),
-                        child: Container(
-                          height: dayHeight,
-                          decoration: BoxDecoration(
-                            color: dayColor ??
-                                AppTheme.lighterGray.withOpacity(0.3),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: borderColor ?? Colors.transparent,
-                              width: hasTransactions ? 2 : 0,
+                  child: AspectRatio(
+                    aspectRatio: 1.0,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: Tooltip(
+                        message: _buildTooltipMessage(
+                            balance, budgetBalances, dayTransactions),
+                        child: GestureDetector(
+                          onTap: () => widget.onDayTap(day),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: dayColor ?? Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: borderColor ?? Colors.transparent,
+                                width: hasTransactions ? 2 : 0,
+                              ),
                             ),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(4),
                             child: Column(
-                              mainAxisAlignment: MainAxisAlignment.start,
-                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  '${day.day}',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.w600,
-                                        color: AppTheme.black,
-                                        fontSize: 14,
-                                      ),
-                                ),
-                                const SizedBox(height: 4),
+                                // Parte de cima: dia em quadrado interno com outro tom de cinza
                                 Expanded(
-                                  child: SingleChildScrollView(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          formatCurrency(balance),
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w600,
-                                                color: hasTransactions
-                                                    ? (hasGains && !hasExpenses
-                                                        ? AppTheme.incomeGreen
-                                                        : AppTheme.darkGray)
-                                                    : AppTheme.darkGray,
-                                                fontSize: 11,
-                                              ),
+                                  flex: 1,
+                                  child: Container(
+                                    width: double.infinity,
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.darkGray.withOpacity(0.1),
+                                      borderRadius: const BorderRadius.only(
+                                        topLeft: Radius.circular(8),
+                                        topRight: Radius.circular(8),
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                                      child: Container(
+                                        width: double.infinity,
+                                        height: 32,
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.darkGray.withOpacity(0.2),
+                                          borderRadius: BorderRadius.circular(6),
                                         ),
-                                      ],
+                                        child: Center(
+                                          child: Text(
+                                            '${day.day}',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .titleMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppTheme.black,
+                                                  fontSize: 14,
+                                                ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                // Parte de baixo: saldo em cinza
+                                Expanded(
+                                  flex: 1,
+                                  child: Container(
+                                    width: double.infinity,
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.darkGray.withOpacity(0.1),
+                                      borderRadius: const BorderRadius.only(
+                                        bottomLeft: Radius.circular(8),
+                                        bottomRight: Radius.circular(8),
+                                      ),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        _formatBalanceForDay(balance),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                              color: AppTheme.darkGray,
+                                              fontSize: 10,
+                                            ),
+                                        textAlign: TextAlign.center,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -641,10 +709,9 @@ class _CalendarWidgetState extends State<CalendarWidget> {
                   ),
                 );
               }).toList(),
-            ),
-          );
-        }).toList(),
-      ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -680,6 +747,15 @@ class _CalendarWidgetState extends State<CalendarWidget> {
     }
 
     return buffer.toString().trim();
+  }
+
+  String _formatBalanceForDay(double balance) {
+    // Se o valor for muito grande (>= 1000), arredondar e mostrar inteiro
+    if (balance.abs() >= 1000) {
+      return balance.round().toString();
+    }
+    // Caso contrário, mostrar com 2 decimais mas sem símbolo do euro
+    return balance.toStringAsFixed(2);
   }
 
   Map<DateTime, double> _calculateDailyBalances(List<DateTime> days) {

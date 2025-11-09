@@ -16,6 +16,7 @@ app.use(express.urlencoded({ extended: true }));
 // Rotas
 app.use('/api/transactions', require('./routes/transactions'));
 app.use('/api/users', require('./routes/users'));
+app.use('/api/period-history', require('./routes/period_history'));
 
 // Rota de teste
 app.get('/', (req, res) => {

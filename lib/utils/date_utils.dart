@@ -36,3 +36,13 @@ bool isSameDay(DateTime date1, DateTime date2) {
       date1.day == date2.day;
 }
 
+String formatPeriod(DateTime startDate, DateTime endDate) {
+  final startDay = startDate.day.toString().padLeft(2, '0');
+  final startMonth = startDate.month.toString().padLeft(2, '0');
+  final endDay = endDate.day.toString().padLeft(2, '0');
+  final endMonth = endDate.month.toString().padLeft(2, '0');
+  final year = startDate.year;
+  
+  return '$year | $startDay/$startMonth - $endDay/$endMonth';
+}
+
