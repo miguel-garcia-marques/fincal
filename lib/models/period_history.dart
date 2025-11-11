@@ -3,12 +3,14 @@ class PeriodHistory {
   final DateTime startDate;
   final DateTime endDate;
   final List<String> transactionIds;
+  final String name;
 
   PeriodHistory({
     required this.id,
     required this.startDate,
     required this.endDate,
     required this.transactionIds,
+    this.name = '',
   });
 
   Map<String, dynamic> toJson() {
@@ -21,6 +23,7 @@ class PeriodHistory {
           '${endDate.month.toString().padLeft(2, '0')}-'
           '${endDate.day.toString().padLeft(2, '0')}',
       'transactionIds': transactionIds,
+      'name': name,
     };
   }
 
@@ -65,6 +68,7 @@ class PeriodHistory {
               ?.map((e) => e.toString())
               .toList() ??
           [],
+      name: json['name'] as String? ?? '',
     );
   }
 }

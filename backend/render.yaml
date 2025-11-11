@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: finance-management-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false  # Será configurado manualmente no painel do Render
+      - key: SUPABASE_URL
+        sync: false  # Será configurado manualmente no painel do Render
+      - key: SUPABASE_ANON_KEY
+        sync: false  # Será configurado manualmente no painel do Render
+

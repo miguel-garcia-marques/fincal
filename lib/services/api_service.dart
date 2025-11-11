@@ -2,20 +2,14 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/transaction.dart';
 import '../models/period_history.dart';
+import '../config/api_config.dart';
 import 'auth_service.dart';
 
 class ApiService {
   final AuthService _authService = AuthService();
 
-  // Configurar a URL base da API
-  // Para desenvolvimento local: 'http://localhost:3000'
-  // Para produção: usar o URL do servidor
-  static const String baseUrl = 'http://localhost:3000/api';
-  
-  // Se estiver a usar um dispositivo físico/emulador, pode precisar de:
-  // Android Emulator: 'http://10.0.2.2:3000/api'
-  // iOS Simulator: 'http://localhost:3000/api'
-  // Dispositivo físico: 'http://SEU_IP_LOCAL:3000/api'
+  // Usa a configuração centralizada da API
+  static String get baseUrl => ApiConfig.baseUrl;
 
   // Obter headers com autenticação
   Map<String, String> _getHeaders() {
@@ -187,6 +181,27 @@ class ApiService {
     }
   }
 
+  Future<PeriodHistory> updatePeriodHistory(String id, String name) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/period-history/$id'),
+        headers: _getHeaders(),
+        body: json.encode({ 'name': name }),
+      );
+
+      if (response.statusCode != 200) {
+        final errorBody = json.decode(response.body);
+        throw Exception(errorBody['message'] ?? 'Failed to update period history');
+      }
+      
+      final decoded = json.decode(response.body);
+      return PeriodHistory.fromJson(decoded);
+    } catch (e) {
+      print('Error updating period history: $e');
+      rethrow;
+    }
+  }
+
   Future<void> deletePeriodHistory(String id) async {
     try {
       final response = await http.delete(
@@ -200,6 +215,27 @@ class ApiService {
       }
     } catch (e) {
       print('Error deleting period history: $e');
+      rethrow;
+    }
+  }
+
+  // Importar transações em bulk
+  Future<Map<String, dynamic>> importBulkTransactions(List<Map<String, dynamic>> transactions) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/transactions/bulk'),
+        headers: _getHeaders(),
+        body: json.encode({ 'transactions': transactions }),
+      );
+
+      if (response.statusCode != 201) {
+        final errorBody = json.decode(response.body);
+        throw Exception(errorBody['message'] ?? 'Failed to import transactions');
+      }
+      
+      return json.decode(response.body);
+    } catch (e) {
+      print('Error importing bulk transactions: $e');
       rethrow;
     }
   }

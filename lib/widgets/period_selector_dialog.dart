@@ -23,6 +23,7 @@ class _PeriodSelectorDialogState extends State<PeriodSelectorDialog> {
   late int _selectedYear;
   late DateTime _startDate;
   late DateTime _endDate;
+  final TextEditingController _nameController = TextEditingController();
 
   @override
   void initState() {
@@ -30,6 +31,12 @@ class _PeriodSelectorDialogState extends State<PeriodSelectorDialog> {
     _selectedYear = widget.selectedYear;
     _startDate = widget.startDate;
     _endDate = widget.endDate;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
   }
 
   Future<void> _selectYear() async {
@@ -216,6 +223,21 @@ class _PeriodSelectorDialogState extends State<PeriodSelectorDialog> {
                 ),
               ),
             ),
+            const SizedBox(height: 12),
+            // Nome do período
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(
+                labelText: 'Nome do período (opcional)',
+                hintText: 'Ex: Janeiro 2024, Férias, etc.',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                contentPadding: const EdgeInsets.all(16),
+                filled: true,
+                fillColor: AppTheme.white,
+              ),
+            ),
             const SizedBox(height: 20),
             // Botões
             Row(
@@ -234,6 +256,7 @@ class _PeriodSelectorDialogState extends State<PeriodSelectorDialog> {
                         'year': _selectedYear,
                         'startDate': _startDate,
                         'endDate': _endDate,
+                        'name': _nameController.text.trim(),
                       });
                     },
                     style: ElevatedButton.styleFrom(

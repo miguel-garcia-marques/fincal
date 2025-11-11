@@ -74,14 +74,30 @@ class _PeriodSelectionDialogState extends State<PeriodSelectionDialog> {
                         child: Row(
                           children: [
                             Expanded(
-                              child: Text(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (period.name.isNotEmpty)
+                                    Text(
+                                      period.name,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                  if (period.name.isNotEmpty) const SizedBox(height: 4),
+                                  Text(
                                 '${formatDate(period.startDate)} - ${formatDate(period.endDate)}',
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodyMedium
                                     ?.copyWith(
-                                      fontWeight: FontWeight.w500,
+                                          fontWeight: period.name.isNotEmpty ? FontWeight.normal : FontWeight.w500,
+                                        ),
                                     ),
+                                ],
                               ),
                             ),
                             const Icon(
@@ -125,6 +141,7 @@ class _PeriodSelectionDialogState extends State<PeriodSelectionDialog> {
                     'year': result['year'],
                     'startDate': result['startDate'],
                     'endDate': result['endDate'],
+                    'name': result['name'] ?? '',
                   });
                 }
               },

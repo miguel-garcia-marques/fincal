@@ -32,7 +32,18 @@ class FinCalApp extends StatelessWidget {
     return MaterialApp(
       title: 'FinCal',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
+      builder: (context, child) {
+        // Garantir que MediaQuery está disponível e recalcular tema
+        final mediaQuery = MediaQuery.of(context);
+        return MediaQuery(
+          data: mediaQuery,
+          child: Theme(
+            data: AppTheme.lightTheme(context, mediaQuery.size.width),
+            child: child!,
+          ),
+        );
+      },
+      theme: AppTheme.lightTheme(context, 375.0), // Tema inicial padrão
       home: const AuthWrapper(),
     );
   }

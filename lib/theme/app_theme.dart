@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../utils/responsive_fonts.dart';
 
 class AppTheme {
   // Cores - Design sleek preto e branco
@@ -16,20 +17,64 @@ class AppTheme {
   static const Color incomeGreen = Color(0xFF4CAF50);
   static const Color expenseRed = Color(0xFFE57373);
 
+  // Cores para categorias de orçamento
+  static const Color savingsYellow = Color(0xFFFFC107); // Amarelo para poupança
+  static const Color expensesRed = Color(0xFFE57373); // Vermelho para gastos
+  static const Color leisureBlue = Color(0xFF81D4FA); // Azul pastel para lazer
+
   // Fonte monospace para valores numéricos
   static TextStyle monospaceTextStyle({
+    BuildContext? context,
     double fontSize = 14,
     FontWeight fontWeight = FontWeight.w400,
     Color? color,
   }) {
+    final responsiveFontSize = context != null
+        ? ResponsiveFonts.getFontSize(context, fontSize)
+        : fontSize;
+
     return GoogleFonts.robotoMono(
-      fontSize: fontSize,
+      fontSize: responsiveFontSize,
       fontWeight: fontWeight,
       color: color ?? black,
     );
   }
 
-  static ThemeData get lightTheme {
+  static ThemeData lightTheme(BuildContext context, [double? screenWidth]) {
+    // Se screenWidth não for fornecido, tentar obter do MediaQuery
+    final width =
+        screenWidth ?? (MediaQuery.maybeOf(context)?.size.width ?? 375.0);
+
+    // Calcular scaleFactor com a mesma lógica do ResponsiveFonts
+    double scaleFactor;
+
+    if (width < 320) {
+      // Telas muito pequenas (ex: iPhone SE antigo)
+      scaleFactor = 0.65;
+    } else if (width < 360) {
+      // Mobile muito pequeno (320-360px)
+      scaleFactor = 0.65 + ((width - 320) / 40) * 0.1; // 0.65 a 0.75
+    } else if (width < 375) {
+      // Mobile pequeno (360-375px)
+      scaleFactor = 0.75 + ((width - 360) / 15) * 0.1; // 0.75 a 0.85
+    } else if (width < 414) {
+      // Mobile médio (375-414px) - tela de referência
+      scaleFactor = 0.85 + ((width - 375) / 39) * 0.1; // 0.85 a 0.95
+    } else if (width < 768) {
+      // Mobile grande / Tablet pequeno (414-768px)
+      scaleFactor = 0.95 + ((width - 414) / 354) * 0.35; // 0.95 a 1.3
+    } else if (width < 1024) {
+      // Tablet (768-1024px)
+      scaleFactor = 1.3 + ((width - 768) / 256) * 0.2; // 1.3 a 1.5
+    } else if (width < 1440) {
+      // Desktop pequeno (1024-1440px)
+      scaleFactor = 1.5 + ((width - 1024) / 416) * 0.2; // 1.5 a 1.7
+    } else {
+      // Desktop grande (> 1440px)
+      scaleFactor =
+          1.7 + ((width - 1440).clamp(0.0, 560.0) / 560) * 0.2; // 1.7 a 1.9
+      scaleFactor = scaleFactor.clamp(1.7, 1.9);
+    }
     return ThemeData(
       useMaterial3: true,
       colorScheme: const ColorScheme.light(
@@ -44,55 +89,55 @@ class AppTheme {
       ),
       scaffoldBackgroundColor: offWhite,
       textTheme: GoogleFonts.spaceMonoTextTheme(
-        const TextTheme(
+        TextTheme(
           displayLarge: TextStyle(
-            fontSize: 32,
+            fontSize: 32 * scaleFactor,
             fontWeight: FontWeight.w600,
             color: black,
             letterSpacing: -0.5,
           ),
           displayMedium: TextStyle(
-            fontSize: 28,
+            fontSize: 28 * scaleFactor,
             fontWeight: FontWeight.w600,
             color: black,
             letterSpacing: -0.5,
           ),
           displaySmall: TextStyle(
-            fontSize: 24,
+            fontSize: 24 * scaleFactor,
             fontWeight: FontWeight.w600,
             color: black,
             letterSpacing: -0.3,
           ),
           headlineMedium: TextStyle(
-            fontSize: 20,
+            fontSize: 20 * scaleFactor,
             fontWeight: FontWeight.w500,
             color: black,
             letterSpacing: -0.2,
           ),
           titleLarge: TextStyle(
-            fontSize: 18,
+            fontSize: 18 * scaleFactor,
             fontWeight: FontWeight.w500,
             color: black,
           ),
           titleMedium: TextStyle(
-            fontSize: 16,
+            fontSize: 16 * scaleFactor,
             fontWeight: FontWeight.w500,
             color: black,
           ),
           bodyLarge: TextStyle(
-            fontSize: 16,
+            fontSize: 16 * scaleFactor,
             fontWeight: FontWeight.w400,
             color: darkGray,
             height: 1.5,
           ),
           bodyMedium: TextStyle(
-            fontSize: 14,
+            fontSize: 14 * scaleFactor,
             fontWeight: FontWeight.w400,
             color: darkGray,
             height: 1.5,
           ),
           bodySmall: TextStyle(
-            fontSize: 12,
+            fontSize: 12 * scaleFactor,
             fontWeight: FontWeight.w400,
             color: darkGray,
             height: 1.4,
@@ -109,7 +154,7 @@ class AppTheme {
           ),
           elevation: 0,
           textStyle: GoogleFonts.spaceMono(
-            fontSize: 16,
+            fontSize: 16 * scaleFactor,
             fontWeight: FontWeight.w500,
             letterSpacing: 0.5,
           ),
@@ -122,7 +167,7 @@ class AppTheme {
             borderRadius: BorderRadius.circular(12),
           ),
           textStyle: GoogleFonts.spaceMono(
-            fontSize: 14,
+            fontSize: 14 * scaleFactor,
             fontWeight: FontWeight.w500,
           ),
         ),

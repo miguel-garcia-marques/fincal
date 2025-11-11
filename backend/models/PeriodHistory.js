@@ -6,6 +6,7 @@ const PeriodHistorySchema = new mongoose.Schema({
   startDate: { type: Date, required: true },
   endDate: { type: Date, required: true },
   transactionIds: [{ type: String }], // IDs das transações presentes neste período
+  name: { type: String, default: '' }, // Nome opcional do período
 }, {
   timestamps: true
 });

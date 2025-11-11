@@ -24,6 +24,7 @@ const TransactionSchema = new mongoose.Schema({
       'compras', 'cafe', 'combustivel', 'subscricao', 'dizimo',
       'carro', 'multibanco', 'saude', 'comerFora', 'miscelaneos',
       'prendas', 'extras', 'snacks', 'comprasOnline', 'comprasRoupa', 'animais',
+      'comunicacoes',
       // Categorias para ganhos
       'salario', 'alimentacao', 'outro'
     ]
@@ -42,6 +43,7 @@ const TransactionSchema = new mongoose.Schema({
   },
   dayOfWeek: { type: Number }, // 0=Sáb, 1=Dom, 2=Seg, etc.
   dayOfMonth: { type: Number }, // 1-31
+  person: { type: String }, // Campo para pessoa (opcional, padrão "geral" quando não especificado)
 }, {
   timestamps: true
 });

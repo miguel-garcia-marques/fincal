@@ -129,6 +129,7 @@ class DatabaseService {
                 frequency: TransactionFrequency.weekly, // Manter informação de periodicidade
                 dayOfWeek: transaction.dayOfWeek, // Manter informação do dia
                 dayOfMonth: null,
+                person: transaction.person,
               ));
             }
             currentDate = currentDate.add(const Duration(days: 1));
@@ -138,7 +139,12 @@ class DatabaseService {
           
           DateTime currentDate = start;
           while (currentDate.isBefore(end) || currentDate.isAtSameMomentAs(end)) {
-            if (currentDate.day == transaction.dayOfMonth) {
+            // Verificar se o dia existe no mês antes de criar a transação
+            final daysInMonth = DateTime(currentDate.year, currentDate.month + 1, 0).day;
+            final targetDay = transaction.dayOfMonth!;
+            
+            // Se o dia do mês da transação existe neste mês
+            if (targetDay <= daysInMonth && currentDate.day == targetDay) {
               result.add(Transaction(
                 id: '${transaction.id}_${currentDate.millisecondsSinceEpoch}',
                 type: transaction.type,
@@ -152,6 +158,7 @@ class DatabaseService {
                 frequency: TransactionFrequency.monthly, // Manter informação de periodicidade
                 dayOfWeek: null,
                 dayOfMonth: transaction.dayOfMonth, // Manter informação do dia
+                person: transaction.person,
               ));
             }
             currentDate = currentDate.add(const Duration(days: 1));
@@ -181,8 +188,13 @@ class DatabaseService {
         if (values != null) {
           gastos += values.gastos;
           lazer += values.lazer;
-          poupanca += values.poupanca;
+          // Poupança é considerada despesa, então subtrair em vez de adicionar
+          poupanca -= values.poupanca;
         }
+      } else if (transaction.type == TransactionType.ganho && 
+                 transaction.category == TransactionCategory.alimentacao) {
+        // Ganhos de alimentação entram como valor positivo em "gastos"
+        gastos += transaction.amount;
       } else if (transaction.type == TransactionType.despesa) {
         final amount = transaction.amount;
         switch (transaction.expenseBudgetCategory) {

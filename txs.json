@@ -1,0 +1,265 @@
+[
+    {
+        "type": "ganho",
+        "category": "salario",
+        "periodicity": "mensal",
+        "day": 25,
+        "value": 1418,
+        "description": "Salário Miguel",
+        "salary": true,
+        "salaryAllocation": {
+            "gastos": 50,
+            "lazer": 30,
+            "poupanca": 20
+        }
+    },
+    {
+        "type": "ganho",
+        "category": "salario",
+        "periodicity": "mensal",
+        "day": 31,
+        "value": 904,
+        "description": "Salário Bia",
+        "salary": true,
+        "salaryAllocation": {
+            "gastos": 50,
+            "lazer": 30,
+            "poupanca": 20
+        }
+    },
+    {
+        "type": "ganho",
+        "category": "alimentacao",
+        "periodicity": "mensal",
+        "day": 25,
+        "value": 234,
+        "description": "Alimentação Miguel",
+        "salary": false
+    },
+    {
+        "type": "ganho",
+        "category": "alimentacao",
+        "periodicity": "mensal",
+        "day": 31,
+        "value": 224,
+        "description": "Alimentação Bia",
+        "salary": false
+    },
+    {
+        "type": "despesa",
+        "category": "combustivel",
+        "periodicity": "mensal",
+        "day": 3,
+        "value": 90,
+        "description": "Gasolina Renault",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "combustivel",
+        "periodicity": "semanal",
+        "dayofWeek": "quinta",
+        "value": 35,
+        "description": "GPL Dacia",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "carro",
+        "periodicity": "mensal",
+        "day": 15,
+        "value": 460,
+        "description": "Prestação de carro",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "mensal",
+        "day": 10,
+        "value": 18,
+        "description": "Subscrição Netflix",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "comunicacoes",
+        "periodicity": "mensal",
+        "day": 3,
+        "value": 13,
+        "description": "Vodafone Bia",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "comunicacoes",
+        "periodicity": "mensal",
+        "day": 25,
+        "value": 28,
+        "description": "Vodafone Miguel",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "mensal",
+        "day": 25,
+        "value": 13,
+        "description": "Apple One",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "mensal",
+        "day": 27,
+        "value": 40,
+        "description": "MEO",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "animais",
+        "periodicity": "mensal",
+        "day": 7,
+        "value": 21.5,
+        "description": "Seguro Brownie",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "animais",
+        "periodicity": "mensal",
+        "day": 7,
+        "value": 23.5,
+        "description": "Seguro Billie",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "compras",
+        "periodicity": "semanal",
+        "day": "sábado",
+        "value": 60,
+        "description": "Compras Continente",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "mensal",
+        "day": 25,
+        "value": 30,
+        "description": "Passar a ferro",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "mensal",
+        "day": 25,
+        "value": 20,
+        "description": "Luz",
+        "budgetCategory": "gastos"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "mensal",
+        "day": 17,
+        "value": 18,
+        "description": "Cursor",
+        "budgetCategory": "lazer",
+        "person": "Miguel"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "mensal",
+        "day": 12,
+        "value": 11,
+        "description": "Buzzsprout",
+        "budgetCategory": "lazer",
+        "person": "Miguel"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "mensal",
+        "day": 8,
+        "value": 24,
+        "description": "Ginásio Miguel",
+        "budgetCategory": "lazer",
+        "person": "Miguel"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "semanal",
+        "day": "segunda",
+        "value": 15,
+        "description": "Via verde",
+        "budgetCategory": "lazer",
+        "person": "Miguel"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "mensal",
+        "day": 1,
+        "value": 10,
+        "description": "Revolut",
+        "budgetCategory": "lazer",
+        "person": "Miguel"
+    },
+    {
+        "type": "despesa",
+        "category": "dizimo",
+        "periodicity": "mensal",
+        "day": 25,
+        "value": 190,
+        "description": "Dízimo Miguel",
+        "budgetCategory": "lazer",
+        "person": "Miguel"
+    },
+    {
+        "type": "despesa",
+        "category": "dizimo",
+        "periodicity": "mensal",
+        "day": 25,
+        "value": 90,
+        "description": "Dízimo Bia",
+        "budgetCategory": "lazer",
+        "person": "Bia"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "mensal",
+        "day": 8,
+        "value": 20,
+        "description": "Ginásio Bia",
+        "budgetCategory": "lazer",
+        "person": "Bia"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "mensal",
+        "day": 15,
+        "value": 20,
+        "description": "Unhas Bia",
+        "budgetCategory": "lazer",
+        "person": "Bia"
+    },
+    {
+        "type": "despesa",
+        "category": "subscricao",
+        "periodicity": "mensal",
+        "day": 15,
+        "value": 20,
+        "description": "Pés Bia",
+        "budgetCategory": "lazer",
+        "person": "Bia"
+    }
+]

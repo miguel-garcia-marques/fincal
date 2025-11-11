@@ -17,6 +17,7 @@ class AddTransactionDialog extends StatefulWidget {
 class _AddTransactionDialogState extends State<AddTransactionDialog> {
   late TransactionType _selectedType;
   late DateTime _selectedDate;
+  final TextEditingController _nameController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   final TextEditingController _amountController = TextEditingController();
   late TransactionCategory _selectedCategory;
@@ -41,7 +42,8 @@ class _AddTransactionDialogState extends State<AddTransactionDialog> {
       final t = widget.transactionToEdit!;
       _selectedType = t.type;
       _selectedDate = t.date;
-      _descriptionController.text = t.description ?? '';
+      _nameController.text = t.description ?? '';
+      _descriptionController.text = '';
       _amountController.text = t.amount.toStringAsFixed(2);
       _selectedCategory = t.category;
       _isSalary = t.isSalary;
@@ -73,6 +75,7 @@ class _AddTransactionDialogState extends State<AddTransactionDialog> {
 
   @override
   void dispose() {
+    _nameController.dispose();
     _descriptionController.dispose();
     _amountController.dispose();
     _gastosPercentController.dispose();
@@ -219,9 +222,9 @@ class _AddTransactionDialogState extends State<AddTransactionDialog> {
             DateTime.now().millisecondsSinceEpoch.toString(),
         type: _selectedType,
         date: _selectedDate,
-        description: _descriptionController.text.isEmpty
+        description: _nameController.text.isEmpty
             ? null
-            : _descriptionController.text,
+            : _nameController.text,
         amount: amount,
         category: _selectedCategory,
         isSalary: _isSalary,
@@ -542,20 +545,6 @@ class _AddTransactionDialogState extends State<AddTransactionDialog> {
                   const SizedBox(height: 24),
                 ],
 
-                // Descrição
-                Text(
-                  'Descrição (opcional)',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _descriptionController,
-                  decoration: const InputDecoration(
-                    hintText: 'Descrição da transação',
-                  ),
-                ),
-                const SizedBox(height: 24),
-
                 // Valor
                 Text(
                   'Valor',
@@ -581,6 +570,26 @@ class _AddTransactionDialogState extends State<AddTransactionDialog> {
                     final amount = double.tryParse(value.replaceAll(',', '.'));
                     if (amount == null || amount <= 0) {
                       return 'Por favor, insira um valor válido';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 24),
+
+                // Nome
+                Text(
+                  'Nome',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(
+                    hintText: 'Nome da transação',
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Por favor, insira um nome';
                     }
                     return null;
                   },

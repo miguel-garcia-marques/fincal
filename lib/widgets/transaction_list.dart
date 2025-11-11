@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../utils/date_utils.dart';
-import '../utils/zeller_formula.dart';
 import '../theme/app_theme.dart';
 import '../services/database.dart';
 import 'add_transaction_dialog.dart';
+import '../screens/transaction_details_screen.dart';
 
-class TransactionListWidget extends StatelessWidget {
+class TransactionListWidget extends StatefulWidget {
   final List<Transaction> transactions;
   final Function()? onTransactionUpdated;
 
@@ -17,8 +18,92 @@ class TransactionListWidget extends StatelessWidget {
   });
 
   @override
+  State<TransactionListWidget> createState() => _TransactionListWidgetState();
+}
+
+class _TransactionListWidgetState extends State<TransactionListWidget> {
+  bool _showOnlyPeriodic = false;
+  String? _selectedPerson;
+  ExpenseBudgetCategory? _selectedBudgetCategory;
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() {
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<Transaction> get _filteredTransactions {
+    var filtered = widget.transactions;
+    
+    // Filtro de busca por nome/descrição
+    if (_searchController.text.isNotEmpty) {
+      final searchQuery = _searchController.text.toLowerCase();
+      filtered = filtered.where((t) {
+        // Buscar na descrição
+        if (t.description != null && t.description!.isNotEmpty) {
+          if (t.description!.toLowerCase().contains(searchQuery)) {
+            return true;
+          }
+        }
+        // Buscar no nome da categoria
+        if (t.category.displayName.toLowerCase().contains(searchQuery)) {
+          return true;
+        }
+        return false;
+      }).toList();
+    }
+    
+    if (_showOnlyPeriodic) {
+      filtered = filtered.where((t) => 
+        t.frequency == TransactionFrequency.weekly || 
+        t.frequency == TransactionFrequency.monthly
+      ).toList();
+    }
+    
+    if (_selectedPerson != null) {
+      if (_selectedPerson == 'geral') {
+        filtered = filtered.where((t) => t.person == null || t.person == 'geral' || t.person!.isEmpty).toList();
+      } else {
+        filtered = filtered.where((t) => t.person == _selectedPerson).toList();
+      }
+    }
+    
+    if (_selectedBudgetCategory != null) {
+      filtered = filtered.where((t) {
+        // Apenas despesas podem aparecer quando filtramos por categoria de orçamento
+        // Ganhos não devem aparecer na lista de gastos
+        if (t.type == TransactionType.despesa) {
+          return t.expenseBudgetCategory == _selectedBudgetCategory;
+        }
+        return false;
+      }).toList();
+    }
+    
+    return filtered;
+  }
+
+  List<String> get _availablePersons {
+    final persons = <String>{'geral'};
+    for (var tx in widget.transactions) {
+      if (tx.person != null && tx.person!.isNotEmpty) {
+        persons.add(tx.person!);
+      }
+    }
+    return persons.toList()..sort();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (transactions.isEmpty) {
+    if (widget.transactions.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -42,7 +127,7 @@ class TransactionListWidget extends StatelessWidget {
 
     // Agrupar transações por data
     final groupedTransactions = <DateTime, List<Transaction>>{};
-    for (var transaction in transactions) {
+    for (var transaction in _filteredTransactions) {
       final date = DateTime(
         transaction.date.year,
         transaction.date.month,
@@ -58,113 +143,169 @@ class TransactionListWidget extends StatelessWidget {
     final sortedDates = groupedTransactions.keys.toList()
       ..sort((a, b) => b.compareTo(a));
 
+    // Obter o mês da primeira transação (mais recente)
+    final displayMonth = sortedDates.isNotEmpty
+        ? sortedDates.first
+        : DateTime.now();
+
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(0),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppTheme.black.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(12),
+          // Header com mês das transações e filtros
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+              DateFormat('MMMM', Localizations.localeOf(context).toString())
+                  .format(displayMonth),
+              style: AppTheme.monospaceTextStyle(
+                context: context,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.black,
+              ),
                 ),
-                child: Icon(
-                  Icons.receipt_long,
-                  color: AppTheme.black,
-                  size: 24,
+                const SizedBox(height: 12),
+                // Campo de busca
+                TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Pesquisar por nome...',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 20),
+                            onPressed: () {
+                              setState(() {
+                                _searchController.clear();
+                              });
+                            },
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: AppTheme.lighterGray.withOpacity(0.2),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    isDense: true,
+                  ),
+                  style: AppTheme.monospaceTextStyle(
+                    context: context,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w400,
+                    color: AppTheme.black,
+                  ),
+                  onChanged: (value) {
+                    setState(() {});
+                  },
                 ),
-      ),
-              const SizedBox(width: 12),
-              Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Transações',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-                    Text(
-                      '${transactions.length} ${transactions.length == 1 ? 'transação' : 'transações'}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppTheme.darkGray,
-                      ),
+                const SizedBox(height: 12),
+                // Filtros
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    // Filtro de periódicas
+                    FilterChip(
+                      label: const Text('Periódicas', style: TextStyle(fontSize: 12)),
+                      selected: _showOnlyPeriodic,
+                      onSelected: (selected) {
+                        setState(() {
+                          _showOnlyPeriodic = selected;
+                        });
+                      },
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    // Filtro por pessoa - chips para cada pessoa
+                    ..._availablePersons.map((person) => 
+                      FilterChip(
+                        label: Text(
+                          person == 'geral' ? 'Todos' : person,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        selected: _selectedPerson == person,
+                        onSelected: (selected) {
+                          setState(() {
+                            _selectedPerson = selected ? person : null;
+                          });
+                        },
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      )
+                    ),
+                    // Filtros por categoria de orçamento
+                    ...ExpenseBudgetCategory.values.map((category) => 
+                      FilterChip(
+                        label: Text(
+                          category.displayName,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        selected: _selectedBudgetCategory == category,
+                        onSelected: (selected) {
+                        setState(() {
+                            _selectedBudgetCategory = selected ? category : null;
+                        });
+                      },
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      )
                     ),
                   ],
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: 20),
           Expanded(
             child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
               itemCount: sortedDates.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 16),
+              separatorBuilder: (context, index) => Divider(
+                height: 1,
+                thickness: 1,
+                color: AppTheme.lighterGray.withOpacity(0.3),
+              ),
               itemBuilder: (context, index) {
                 final date = sortedDates[index];
                 final dateTransactions = groupedTransactions[date]!;
-                
-                // Calcular total do dia
-                double dayTotal = 0.0;
-                for (var t in dateTransactions) {
-                  if (t.type == TransactionType.ganho) {
-                    dayTotal += t.amount;
-                  } else {
-                    dayTotal -= t.amount;
-                  }
-                }
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Cabeçalho da data
-                    Padding(
-                      padding: const EdgeInsets.only(left: 4, bottom: 8),
-                      child: Row(
-                        children: [
-                          Text(
-                            formatDate(date),
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.black,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: dayTotal >= 0
-                                  ? AppTheme.incomeGreen.withOpacity(0.1)
-                                  : AppTheme.expenseRed.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              formatCurrency(dayTotal.abs()),
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: dayTotal >= 0
-                                    ? AppTheme.incomeGreen
-                                    : AppTheme.expenseRed,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Lista de transações do dia
-                    ...dateTransactions.map((transaction) => _TransactionCard(
+                  children: dateTransactions.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final transaction = entry.value;
+                    return Column(
+                      children: [
+                        _TransactionCard(
                   transaction: transaction,
+                  onTap: () async {
+                    final result = await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => TransactionDetailsScreen(
+                          transaction: transaction,
+                        ),
+                        fullscreenDialog: true,
+                      ),
+                    );
+                    if (result == true && widget.onTransactionUpdated != null) {
+                      widget.onTransactionUpdated!();
+                    }
+                  },
                   onEdit: () async {
                     Transaction? transactionToEdit = transaction;
                     
@@ -193,8 +334,8 @@ class TransactionListWidget extends StatelessWidget {
                         transactionToEdit: transactionToEdit,
                       ),
                     );
-                    if (result == true && onTransactionUpdated != null) {
-                      onTransactionUpdated!();
+                    if (result == true && widget.onTransactionUpdated != null) {
+                      widget.onTransactionUpdated!();
                     }
                   },
                   onDelete: () async {
@@ -239,8 +380,8 @@ class TransactionListWidget extends StatelessWidget {
                             const SnackBar(content: Text('Transação excluída com sucesso')),
                           );
                         }
-                        if (onTransactionUpdated != null) {
-                          onTransactionUpdated!();
+                        if (widget.onTransactionUpdated != null) {
+                          widget.onTransactionUpdated!();
                         }
                       } catch (e) {
                         if (context.mounted) {
@@ -251,8 +392,18 @@ class TransactionListWidget extends StatelessWidget {
                       }
                     }
                   },
-                    )),
-                  ],
+                        ),
+                        if (index < dateTransactions.length - 1)
+                          Divider(
+                            height: 1,
+                            thickness: 1,
+                            color: AppTheme.lighterGray.withOpacity(0.3),
+                            indent: 0,
+                            endIndent: 0,
+                          ),
+                      ],
+                    );
+                  }).toList(),
                 );
               },
             ),
@@ -265,300 +416,265 @@ class TransactionListWidget extends StatelessWidget {
 
 class _TransactionCard extends StatelessWidget {
   final Transaction transaction;
+  final VoidCallback? onTap;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
 
   const _TransactionCard({
     required this.transaction,
+    this.onTap,
     this.onEdit,
     this.onDelete,
   });
 
-  String _getPeriodicityText(Transaction transaction) {
-    if (transaction.frequency == TransactionFrequency.weekly && transaction.dayOfWeek != null) {
-      final dayName = getDayNameFull(transaction.dayOfWeek!);
-      return '${transaction.frequency.displayName} - $dayName';
-    } else if (transaction.frequency == TransactionFrequency.monthly && transaction.dayOfMonth != null) {
-      return '${transaction.frequency.displayName} - Dia ${transaction.dayOfMonth}';
-    }
-    return transaction.frequency.displayName;
+  String _formatTimestamp(BuildContext context, DateTime date) {
+    final dateFormat = DateFormat('d MMM, HH:mm', Localizations.localeOf(context).toString());
+    return dateFormat.format(date);
   }
 
-  IconData _getCategoryIcon(TransactionCategory category) {
+  String _getFrequencyLabel() {
+    switch (transaction.frequency) {
+      case TransactionFrequency.weekly:
+        return 'Semanal';
+      case TransactionFrequency.monthly:
+        return 'Mensal';
+      case TransactionFrequency.unique:
+        return '';
+    }
+  }
+
+  Color _getCategoryColor(ExpenseBudgetCategory? category) {
+    if (category == null) return AppTheme.darkGray;
     switch (category) {
-      case TransactionCategory.compras:
-        return Icons.shopping_cart;
-      case TransactionCategory.cafe:
-        return Icons.local_cafe;
-      case TransactionCategory.combustivel:
-        return Icons.local_gas_station;
-      case TransactionCategory.subscricao:
-        return Icons.subscriptions;
-      case TransactionCategory.dizimo:
-        return Icons.church;
-      case TransactionCategory.carro:
-        return Icons.directions_car;
-      case TransactionCategory.multibanco:
-        return Icons.atm;
-      case TransactionCategory.saude:
-        return Icons.local_hospital;
-      case TransactionCategory.comerFora:
-        return Icons.restaurant;
-      case TransactionCategory.miscelaneos:
-        return Icons.category;
-      case TransactionCategory.prendas:
-        return Icons.card_giftcard;
-      case TransactionCategory.extras:
-        return Icons.star;
-      case TransactionCategory.snacks:
-        return Icons.fastfood;
-      case TransactionCategory.comprasOnline:
-        return Icons.shopping_bag;
-      case TransactionCategory.comprasRoupa:
-        return Icons.checkroom;
-      case TransactionCategory.animais:
-        return Icons.pets;
-      // Categorias de ganhos
-      case TransactionCategory.salario:
-        return Icons.account_balance_wallet;
-      case TransactionCategory.alimentacao:
-        return Icons.restaurant_menu;
-      case TransactionCategory.outro:
-        return Icons.more_horiz;
+      case ExpenseBudgetCategory.gastos:
+        return AppTheme.expensesRed;
+      case ExpenseBudgetCategory.lazer:
+        return AppTheme.leisureBlue;
+      case ExpenseBudgetCategory.poupanca:
+        return AppTheme.savingsYellow;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isGanho = transaction.type == TransactionType.ganho;
-    final categoryIcon = transaction.isSalary
-        ? Icons.account_balance_wallet
-        : _getCategoryIcon(transaction.category);
-    
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: isGanho
-            ? AppTheme.incomeGreen.withOpacity(0.05)
-            : AppTheme.expenseRed.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isGanho
-              ? AppTheme.incomeGreen.withOpacity(0.2)
-              : AppTheme.expenseRed.withOpacity(0.2),
-          width: 1,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.white,
+          borderRadius: BorderRadius.circular(8),
         ),
-      ),
-      child: Row(
-        children: [
-          // Ícone da categoria
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: isGanho 
-                  ? AppTheme.incomeGreen.withOpacity(0.15)
-                  : AppTheme.expenseRed.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              categoryIcon,
-                color: isGanho ? AppTheme.incomeGreen : AppTheme.expenseRed,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 14),
-          // Informações da transação
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Cabeçalho: data e ações
+            Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Row(
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                      transaction.category.displayName,
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.black,
-                    ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                      const SizedBox(width: 8),
-                    // Badge de periodicidade
-                    if (transaction.frequency != TransactionFrequency.unique)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.black.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          _getPeriodicityText(transaction),
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppTheme.black,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
+                Icon(
+                        Icons.circle,
+                        size: 6,
+                        color: AppTheme.lighterGray,
                 ),
-                if (transaction.description != null && transaction.description!.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    transaction.description!,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppTheme.darkGray,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                      const SizedBox(width: 8),
+                Text(
+                  _formatTimestamp(context, transaction.date),
+                  style: AppTheme.monospaceTextStyle(
+                    context: context,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                    color: AppTheme.darkGray,
                   ),
-                ],
-                // Informações adicionais
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    // Badge de tipo
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isGanho
-                            ? AppTheme.incomeGreen.withOpacity(0.2)
-                            : AppTheme.expenseRed.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                    child: Text(
-                        isGanho ? 'Ganho' : 'Despesa',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: isGanho ? AppTheme.incomeGreen : AppTheme.expenseRed,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ),
-                    // Badge de orçamento (se aplicável)
-                    if (transaction.expenseBudgetCategory != null) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                      ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.black.withOpacity(0.08),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          transaction.expenseBudgetCategory!.displayName,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppTheme.black,
-                            fontWeight: FontWeight.w500,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ],
-                    // Badge de salário (se aplicável)
-                    if (transaction.isSalary) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.incomeGreen.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.attach_money,
-                              size: 12,
-                              color: AppTheme.incomeGreen,
-                            ),
-                            const SizedBox(width: 2),
-                            Text(
-                              'Salário',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: AppTheme.incomeGreen,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 11,
-                    ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ],
-                  ),
+                ),
               ],
             ),
-          ),
-          const SizedBox(width: 12),
-          // Valor e ações
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-          Text(
-            formatCurrency(transaction.amount),
-                style: AppTheme.monospaceTextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-              color: isGanho ? AppTheme.incomeGreen : AppTheme.expenseRed,
-            ),
-          ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: onEdit,
-                      borderRadius: BorderRadius.circular(8),
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        child: Icon(
-                          Icons.edit_outlined,
-                          size: 18,
-            color: AppTheme.black,
+                  ),
+                // Ações
+                Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                    // Editar
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                            onTap: onEdit,
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: AppTheme.lighterGray.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                              child: Icon(
+                                Icons.edit_outlined,
+                                size: 16,
+                            color: AppTheme.darkGray,
+                          ),
+                              ),
+                            ),
+                          ),
+                    const SizedBox(width: 6),
+                    // Excluir
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                            onTap: onDelete,
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: AppTheme.lighterGray.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                              child: Icon(
+                                Icons.delete_outline,
+                                size: 16,
+                            color: AppTheme.darkGray,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-          ),
-          const SizedBox(width: 4),
-                  Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: onDelete,
-                      borderRadius: BorderRadius.circular(8),
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        child: Icon(
-                          Icons.delete_outline,
-                          size: 18,
-            color: AppTheme.expenseRed,
-                        ),
-                      ),
-                    ),
+                    ],
                   ),
                 ],
               ),
+            const SizedBox(height: 12),
+            // Descrição e valor
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: transaction.description != null && transaction.description!.isNotEmpty
+                      ? Text(
+                          transaction.description!,
+                  style: AppTheme.monospaceTextStyle(
+                    context: context,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                    color: AppTheme.black,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                        )
+                      : transaction.category.displayName.isNotEmpty
+                          ? Text(
+                              transaction.category.displayName,
+                              style: AppTheme.monospaceTextStyle(
+                                context: context,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.black,
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                ),
+                const SizedBox(width: 12),
+                // Valor destacado
+                Text(
+                  formatCurrency(transaction.amount),
+                  style: AppTheme.monospaceTextStyle(
+                    context: context,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.black,
+                  ),
+                ),
+              ],
+            ),
+            // Tags
+              if (transaction.person != null && transaction.person!.isNotEmpty ||
+                  transaction.frequency != TransactionFrequency.unique ||
+                  transaction.expenseBudgetCategory != null ||
+                  (transaction.isSalary && transaction.salaryValues != null)) ...[
+              const SizedBox(height: 12),
+                Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                  children: [
+                    if (transaction.person != null && transaction.person!.isNotEmpty)
+                      Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                        color: AppTheme.lighterGray.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          transaction.person!,
+                          style: AppTheme.monospaceTextStyle(
+                            context: context,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                            color: AppTheme.darkGray,
+                          ),
+                        ),
+                      ),
+                    if (transaction.frequency != TransactionFrequency.unique)
+                      Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                        color: AppTheme.lighterGray.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          _getFrequencyLabel(),
+                          style: AppTheme.monospaceTextStyle(
+                            context: context,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: AppTheme.darkGray,
+                          ),
+                        ),
+                      ),
+                    if (transaction.expenseBudgetCategory != null)
+                      Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                        color: _getCategoryColor(transaction.expenseBudgetCategory).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: _getCategoryColor(transaction.expenseBudgetCategory).withOpacity(0.3),
+                          width: 1,
+                        ),
+                  ),
+                        child: Text(
+                          transaction.expenseBudgetCategory!.displayName,
+                          style: AppTheme.monospaceTextStyle(
+                            context: context,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: _getCategoryColor(transaction.expenseBudgetCategory),
+                          ),
+                        ),
+                      ),
+                    if (transaction.isSalary && transaction.salaryValues != null)
+                      Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                        color: AppTheme.lighterGray.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          'Salário',
+                  style: AppTheme.monospaceTextStyle(
+                    context: context,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: AppTheme.darkGray,
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ],
             ],
-          ),
-        ],
+        ),
       ),
     );
   }

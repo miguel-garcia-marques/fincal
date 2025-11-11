@@ -18,6 +18,9 @@ class Transaction {
   final int? dayOfWeek; // 0=Dom, 1=Seg, ..., 6=Sáb (apenas para semanais)
   final int? dayOfMonth; // 1-31 (apenas para mensais)
 
+  // Campo para pessoa (string, opcional, padrão "geral")
+  final String? person;
+
   Transaction({
     required this.id,
     required this.type,
@@ -31,6 +34,7 @@ class Transaction {
     this.frequency = TransactionFrequency.unique,
     this.dayOfWeek,
     this.dayOfMonth,
+    this.person,
   });
 
   Map<String, dynamic> toJson() {
@@ -54,6 +58,7 @@ class Transaction {
       'frequency': frequency.name,
       'dayOfWeek': dayOfWeek,
       'dayOfMonth': dayOfMonth,
+      'person': person,
     };
   }
 
@@ -124,6 +129,7 @@ class Transaction {
       ),
       dayOfWeek: json['dayOfWeek'] as int?,
       dayOfMonth: json['dayOfMonth'] as int?,
+      person: json['person'] as String?,
     );
   }
 
@@ -178,6 +184,7 @@ enum TransactionCategory {
   comprasOnline,
   comprasRoupa,
   animais,
+  comunicacoes,
   // Categorias para ganhos
   salario,
   alimentacao,
@@ -217,6 +224,8 @@ enum TransactionCategory {
         return 'Compras roupa';
       case TransactionCategory.animais:
         return 'Animais';
+      case TransactionCategory.comunicacoes:
+        return 'Comunicações';
       case TransactionCategory.salario:
         return 'Salário';
       case TransactionCategory.alimentacao:

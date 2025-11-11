@@ -120,7 +120,12 @@ router.get('/range', async (req, res) => {
         endDateOnly.setHours(0, 0, 0, 0);
         
         while (currentDate <= end) {
-          if (currentDate.getDate() === transaction.dayOfMonth) {
+          // Verificar se o dia existe no mês antes de criar a transação
+          const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+          const targetDay = transaction.dayOfMonth;
+          
+          // Se o dia do mês da transação existe neste mês e corresponde ao dia atual
+          if (targetDay <= daysInMonth && currentDate.getDate() === targetDay) {
             const generatedTransaction = transaction.toObject();
             generatedTransaction._id = `${transaction._id}_${currentDate.getTime()}`;
             generatedTransaction.id = `${transaction.id}_${currentDate.getTime()}`;
@@ -236,6 +241,195 @@ router.put('/:id', async (req, res) => {
     }
     
     res.json(transaction);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// POST importar transações em bulk
+router.post('/bulk', async (req, res) => {
+  try {
+    const Transaction = getTransactionModel(req.userId);
+    const { transactions } = req.body;
+    
+    if (!Array.isArray(transactions)) {
+      return res.status(400).json({ message: 'transactions deve ser um array' });
+    }
+
+    // Mapear dias da semana de string para número
+    // Zeller: 0=Sábado, 1=Domingo, 2=Segunda, 3=Terça, 4=Quarta, 5=Quinta, 6=Sexta
+    const dayOfWeekMap = {
+      'domingo': 1,
+      'segunda': 2,
+      'terça': 2,
+      'terca': 2,
+      'quarta': 4,
+      'quinta': 5,
+      'sexta': 6,
+      'sábado': 0,
+      'sabado': 0,
+      'dom': 1,
+      'seg': 2,
+      'ter': 2,
+      'qua': 4,
+      'qui': 5,
+      'sex': 6,
+      'sab': 0,
+    };
+
+    const convertedTransactions = [];
+    const errors = [];
+
+    for (let i = 0; i < transactions.length; i++) {
+      const tx = transactions[i];
+      try {
+        // Converter periodicity para frequency
+        let frequency = 'unique';
+        if (tx.periodicity === 'mensal') {
+          frequency = 'monthly';
+        } else if (tx.periodicity === 'semanal') {
+          frequency = 'weekly';
+        }
+
+        // Converter day/dayofWeek
+        let dayOfWeek = null;
+        let dayOfMonth = null;
+        if (frequency === 'weekly') {
+          // Aceitar dayofWeek ou day (para compatibilidade)
+          const dayValue = tx.dayofWeek || tx.day;
+          if (dayValue) {
+            const dayStr = dayValue.toString().toLowerCase().trim();
+            dayOfWeek = dayOfWeekMap[dayStr];
+            if (dayOfWeek === undefined) {
+              throw new Error(`Dia da semana inválido: "${dayValue}". Valores válidos: domingo, segunda, terça, quarta, quinta, sexta, sábado`);
+            }
+          } else {
+            throw new Error('Dia da semana é obrigatório para transações semanais (use "dayofWeek" ou "day")');
+          }
+        } else if (frequency === 'monthly') {
+          if (tx.day !== undefined && tx.day !== null) {
+            dayOfMonth = parseInt(tx.day);
+            if (isNaN(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 31) {
+              throw new Error(`Dia do mês inválido: ${tx.day}. Deve ser um número entre 1 e 31`);
+            }
+          } else {
+            throw new Error('Dia do mês é obrigatório para transações mensais (use "day" com um número)');
+          }
+        }
+
+        // Converter value para amount
+        const amount = parseFloat(tx.value || tx.amount || 0);
+        if (isNaN(amount) || amount <= 0) {
+          throw new Error(`Valor inválido: ${tx.value || tx.amount}. Deve ser um número maior que zero`);
+        }
+
+        // Converter salaryAllocation se existir
+        let salaryAllocation = null;
+        if (tx.salaryAllocation) {
+          const gastos = parseFloat(tx.salaryAllocation.gastos || tx.salaryAllocation.gastosPercent || 0);
+          const lazer = parseFloat(tx.salaryAllocation.lazer || tx.salaryAllocation.lazerPercent || 0);
+          const poupanca = parseFloat(tx.salaryAllocation.poupanca || tx.salaryAllocation.poupancaPercent || 0);
+          salaryAllocation = { gastosPercent: gastos, lazerPercent: lazer, poupancaPercent: poupanca };
+        }
+
+        // Converter budgetCategory para expenseBudgetCategory
+        const expenseBudgetCategory = tx.budgetCategory || null;
+
+        // Data padrão: usar data atual se não especificada
+        let date = new Date();
+        if (tx.date) {
+          date = new Date(tx.date);
+        } else if (frequency === 'unique') {
+          // Para transações únicas sem data, usar data atual
+          date = new Date();
+        } else {
+          // Para transações periódicas, usar data atual como referência
+          date = new Date();
+        }
+        date.setHours(0, 0, 0, 0);
+
+        // Gerar ID único
+        const id = `import_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 9)}`;
+
+        const convertedTx = {
+          id,
+          userId: req.userId,
+          type: tx.type,
+          date,
+          description: tx.description || null,
+          amount,
+          category: tx.category,
+          isSalary: tx.salary === true,
+          salaryAllocation,
+          expenseBudgetCategory,
+          frequency,
+          dayOfWeek,
+          dayOfMonth,
+          person: tx.person || null,
+        };
+
+        convertedTransactions.push(convertedTx);
+      } catch (error) {
+        errors.push({ 
+          index: i, 
+          error: error.message, 
+          transaction: tx,
+          missingFields: _identifyMissingFields(tx, error.message)
+        });
+      }
+    }
+
+    // Função auxiliar para identificar campos faltantes
+    function _identifyMissingFields(tx, errorMsg) {
+      const missing = [];
+      if (!tx.type) missing.push('type');
+      if (!tx.category) missing.push('category');
+      if (!tx.value && !tx.amount) missing.push('value');
+      
+      // Para transações semanais, verificar se dayofWeek ou day está presente e é válido
+      if (tx.periodicity === 'semanal') {
+        const dayValue = tx.dayofWeek || tx.day;
+        if (!dayValue) {
+          missing.push('dayofWeek');
+        } else {
+          const dayStr = dayValue.toString().toLowerCase().trim();
+          if (!dayOfWeekMap[dayStr]) {
+            missing.push('dayofWeek'); // Campo existe mas valor é inválido
+          }
+        }
+      }
+      
+      // Para transações mensais, verificar se day está presente e é válido
+      if (tx.periodicity === 'mensal') {
+        if (!tx.day) {
+          missing.push('day');
+        } else {
+          const dayNum = parseInt(tx.day);
+          if (isNaN(dayNum) || dayNum < 1 || dayNum > 31) {
+            missing.push('day'); // Campo existe mas valor é inválido
+          }
+        }
+      }
+      
+      if (tx.type === 'despesa' && !tx.budgetCategory) missing.push('budgetCategory');
+      return missing;
+    }
+
+    if (errors.length > 0 && convertedTransactions.length === 0) {
+      return res.status(400).json({ 
+        message: 'Nenhuma transação foi convertida com sucesso',
+        errors 
+      });
+    }
+
+    // Inserir todas as transações
+    const savedTransactions = await Transaction.insertMany(convertedTransactions);
+
+    res.status(201).json({
+      message: `${savedTransactions.length} transações importadas com sucesso`,
+      imported: savedTransactions.length,
+      errors: errors.length > 0 ? errors : undefined,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

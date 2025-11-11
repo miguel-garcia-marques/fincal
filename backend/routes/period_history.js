@@ -41,7 +41,7 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const PeriodHistory = getPeriodHistoryModel(req.userId);
-    const { startDate, endDate, transactionIds } = req.body;
+    const { startDate, endDate, transactionIds, name } = req.body;
     
     if (!startDate || !endDate) {
       return res.status(400).json({ 
@@ -75,6 +75,7 @@ router.post('/', async (req, res) => {
       startDate: start,
       endDate: end,
       transactionIds: transactionIds || [],
+      name: name || '',
     };
 
     const period = new PeriodHistory(periodData);
@@ -90,11 +91,13 @@ router.post('/', async (req, res) => {
   }
 });
 
-// DELETE deletar história de período
-router.delete('/:id', async (req, res) => {
+// PUT atualizar história de período
+router.put('/:id', async (req, res) => {
   try {
     const PeriodHistory = getPeriodHistoryModel(req.userId);
-    const period = await PeriodHistory.findOneAndDelete({ 
+    const { name } = req.body;
+    
+    const period = await PeriodHistory.findOne({ 
       id: req.params.id,
       userId: req.userId 
     });
@@ -103,7 +106,70 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Período não encontrado' });
     }
     
-    res.json({ message: 'Período deletado com sucesso' });
+    // Atualizar apenas o nome se fornecido
+    if (name !== undefined) {
+      period.name = name || '';
+    }
+    
+    await period.save();
+    
+    res.json(period);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// DELETE deletar história de período
+router.delete('/:id', async (req, res) => {
+  try {
+    const PeriodHistory = getPeriodHistoryModel(req.userId);
+    const { getTransactionModel } = require('../models/Transaction');
+    const Transaction = getTransactionModel(req.userId);
+    
+    const period = await PeriodHistory.findOne({ 
+      id: req.params.id,
+      userId: req.userId 
+    });
+    
+    if (!period) {
+      return res.status(404).json({ message: 'Período não encontrado' });
+    }
+    
+    // Eliminar transações únicas do período
+    const startDate = new Date(period.startDate);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(period.endDate);
+    endDate.setHours(23, 59, 59, 999);
+
+    // Buscar todas as transações únicas no período
+    const uniqueTransactions = await Transaction.find({
+      userId: req.userId,
+      frequency: 'unique',
+      date: {
+        $gte: startDate,
+        $lte: endDate
+      }
+    });
+
+    // Eliminar as transações únicas
+    if (uniqueTransactions.length > 0) {
+      const transactionIds = uniqueTransactions.map(t => t.id);
+      await Transaction.deleteMany({
+        userId: req.userId,
+        id: { $in: transactionIds }
+      });
+    }
+
+    // Eliminar o período
+    await PeriodHistory.findOneAndDelete({ 
+      id: req.params.id,
+      userId: req.userId 
+    });
+    
+    res.json({ 
+      message: 'Período deletado com sucesso',
+      deletedTransactions: uniqueTransactions.length
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

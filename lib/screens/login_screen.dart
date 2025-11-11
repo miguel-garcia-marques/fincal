@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
+import '../utils/responsive_fonts.dart';
 import '../theme/app_theme.dart';
 import 'email_verification_screen.dart';
 
@@ -177,14 +178,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isDesktop = screenWidth >= 1400;
+    
     return Scaffold(
       backgroundColor: AppTheme.white,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
+            padding: EdgeInsets.all(isDesktop ? 32.0 : 24.0),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
+              constraints: BoxConstraints(maxWidth: isDesktop ? 450 : 400),
               child: Form(
                 key: _formKey,
                 child: Column(
@@ -194,19 +198,22 @@ class _LoginScreenState extends State<LoginScreen> {
                     // Logo/Título
                     Icon(
                       Icons.account_balance_wallet,
-                      size: 80,
+                      size: isDesktop ? 60 : 80,
                       color: AppTheme.black,
                     ),
-                    const SizedBox(height: 24),
+                    SizedBox(height: isDesktop ? 16 : 24),
                     Text(
                       'FinCal',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.displayMedium?.copyWith(
+                            fontSize: isDesktop 
+                                ? ResponsiveFonts.getFontSize(context, 24)
+                                : null,
                             fontWeight: FontWeight.bold,
                             color: AppTheme.black,
                           ),
                     ),
-                    const SizedBox(height: 48),
+                    SizedBox(height: isDesktop ? 32 : 48),
                     
                     // Nome field (apenas no signup)
                     if (!_isLoginMode) ...[
@@ -321,8 +328,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             )
                           : Text(
                               _isLoginMode ? 'Entrar' : 'Criar Conta',
-                              style: const TextStyle(
-                                fontSize: 16,
+                              style: TextStyle(
+                                fontSize: ResponsiveFonts.getFontSize(context, 16),
                                 fontWeight: FontWeight.w600,
                               ),
                             ),

@@ -196,3 +196,31 @@ Vamos mudar algumas coisas:
 - O fundo deve ser branco, e o fundo do calendario dever se um cinza, mas diferente do cinza dos dias do calendario
 - O periodo e o botão do histórico de periodos, deve ser mudado para o lado esquerdo do "Saldo"
 - Coloca uma bordinmha pequenina no ganhos e despesas gerais.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Algumas mudanças:
+- Quando a altura do ecrã é menor que um certo valor, vamos ocultar o gráfico e o balanço passar para um popup invés de ser como está atualmente.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Coisas para mudar:
+- Modo desktop
+-- Apartir de uma certa width ativar o modo desktop com uma disposição diferente dos elementos mais existentes, tamanho da letra adequado ao tamanho do ecrã, nem muito grande, nem muito pequeno
+- Adicionar tx em ecrã inteiro e multi step invés de ser tudo de uma vez.
+- List de tx mais acomodada e não tanta coisa junta. Clicar na tx da lista para mais detalhes
+-- Secalhar também não ser popup e ser um ecrã inteiro.
+- Remover o weekly view porque já não faz sentido.
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Algumas coisas a ter em conta:
+- Modo desktop
+-- No login, o texto está enorme e nada adequado ao tamanho do ecrã.
+-- Coloca o login centrado no meio, mas com a letra mais pequena.
+-- Na vista desktop, já faz sentido ter lado esquerdo o calenderio e no direito ter a lista de tx.
+-- A maneira como se faz a adição de novas tx, em modo de desktop já pode ser popup neste caso.
+- No adicionar tx
+-- No mensal, ao escolher o dia, invés de ser lista de opções, mostra  me baixo mesmo um calendário em que dê para escolher o dia, apenas.
+-- Se for semanal, mostra em baixo os 5 dias da semana para se selecionar o dia que se quer
+- A lista de tx, pode ser em ecrã completo, no modo mobile, e tem em atençao porque está a dar overflow
