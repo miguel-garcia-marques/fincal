@@ -62,14 +62,14 @@ Este guia explica como fazer deploy da aplicação completa (backend + frontend)
    - **Plan**: `Free`
 
 5. Configure as variáveis de ambiente:
-   - Clique em **Environment** e adicione:
-     ```
-     MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/fincal
-     SUPABASE_URL=https://fjuedycchyiynyqivkch.supabase.co
-     SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdWVkeWNjaHlpeW55cWl2a2NoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI2MTgwOTIsImV4cCI6MjA3ODE5NDA5Mn0.vIeykvK-puQx8q52AARQY8fLl_7EvzL8Vz7VFANKBNo
-     NODE_ENV=production
-     ```
-   - **IMPORTANTE**: Substitua `MONGODB_URI` pela sua connection string do Atlas
+   - Clique em **Environment** e adicione as seguintes variáveis:
+     - **MONGODB_URI**: Sua connection string do MongoDB Atlas (ex: `mongodb+srv://user:password@cluster.mongodb.net/fincal`)
+     - **SUPABASE_URL**: `https://fjuedycchyiynyqivkch.supabase.co`
+     - **SUPABASE_ANON_KEY**: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdWVkeWNjaHlpeW55cWl2a2NoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI2MTgwOTIsImV4cCI6MjA3ODE5NDA5Mn0.vIeykvK-puQx8q52AARQY8fLl_7EvzL8Vz7VFANKBNo`
+     - **NODE_ENV**: `production` (opcional, mas recomendado)
+   - **IMPORTANTE**: 
+     - Substitua `MONGODB_URI` pela sua connection string do Atlas (com a senha substituída e `/fincal` no final)
+     - Veja o guia detalhado em `backend/CONFIGURAR_RENDER.md` se tiver problemas
 
 6. Clique em **Create Web Service**
 7. Aguarde o deploy (pode levar alguns minutos)

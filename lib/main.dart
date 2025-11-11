@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -9,17 +10,44 @@ import 'config/supabase_config.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Configurar orientação
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
 
-  // Inicializar Supabase
-  // As credenciais vêm de SupabaseConfig ou de --dart-define
-  await Supabase.initialize(
-    url: SupabaseConfig.supabaseUrl,
-    anonKey: SupabaseConfig.supabaseAnonKey,
-  );
+  // Tratamento de erros global
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    print('Flutter Error: ${details.exception}');
+    print('Stack trace: ${details.stack}');
+  };
+
+  // Tratamento de erros assíncronos
+  PlatformDispatcher.instance.onError = (error, stack) {
+    print('Platform Error: $error');
+    print('Stack trace: $stack');
+    return true;
+  };
+
+  try {
+    // Inicializar Supabase
+    // As credenciais vêm de SupabaseConfig ou de --dart-define
+    print('Inicializando Supabase...');
+    print('URL: ${SupabaseConfig.supabaseUrl}');
+    
+    await Supabase.initialize(
+      url: SupabaseConfig.supabaseUrl,
+      anonKey: SupabaseConfig.supabaseAnonKey,
+    );
+    
+    print('Supabase inicializado com sucesso');
+  } catch (e, stack) {
+    print('Erro ao inicializar Supabase: $e');
+    print('Stack trace: $stack');
+    // Continuar mesmo com erro para ver o que acontece
+  }
 
   runApp(const FinCalApp());
 }

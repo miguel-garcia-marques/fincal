@@ -4,13 +4,11 @@ const UserSchema = new mongoose.Schema({
   userId: { 
     type: String, 
     required: true, 
-    unique: true,
-    index: true 
+    unique: true
   },
   email: { 
     type: String, 
-    required: true,
-    index: true 
+    required: true
   },
   name: { 
     type: String, 
@@ -28,8 +26,7 @@ const UserSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Índices
-UserSchema.index({ userId: 1 }, { unique: true });
+// Índices (removido duplicação - unique já cria índice automaticamente)
 UserSchema.index({ email: 1 });
 
 // Função para obter o modelo dinâmico baseado no userId (usando collection única)
