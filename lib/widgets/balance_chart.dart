@@ -44,7 +44,8 @@ class BalanceChart extends StatelessWidget {
     final maxBalance = balances.reduce((a, b) => a > b ? a : b);
     final range = (maxBalance - minBalance).abs();
     // Se todos os valores forem iguais, criar um range mínimo para visualização
-    final padding = range > 0 ? range * 0.1 : 10.0; // 10% de padding ou mínimo de 10
+    final padding =
+        range > 0 ? range * 0.1 : 10.0; // 10% de padding ou mínimo de 10
     final chartMin = minBalance - padding;
     final chartMax = maxBalance + padding;
     final chartRange = (chartMax - chartMin).abs();
@@ -52,17 +53,16 @@ class BalanceChart extends StatelessWidget {
     // Determinar se há valores positivos e negativos
     final hasPositive = maxBalance > 0;
     final hasNegative = minBalance < 0;
-    final zeroLine = hasPositive && hasNegative
-        ? (0 - chartMin) / chartRange
-        : null;
+    final zeroLine =
+        hasPositive && hasNegative ? (0 - chartMin) / chartRange : null;
 
     return LayoutBuilder(
       builder: (context, constraints) {
         // Calcular altura baseada na altura da janela
         final screenHeight = MediaQuery.of(context).size.height;
-        // Usar aproximadamente 12-15% da altura da tela, com mínimo de 80 e máximo de 200
-        final calculatedHeight = (screenHeight * 0.13).clamp(80.0, 200.0);
-        
+        // Usar aproximadamente 10% da altura da tela, com mínimo de 60 e máximo de 150
+        final calculatedHeight = (screenHeight * 0.05).clamp(60.0, 150.0);
+
         return Container(
           height: calculatedHeight,
           width: double.infinity,
@@ -79,7 +79,6 @@ class BalanceChart extends StatelessWidget {
       },
     );
   }
-
 }
 
 class _BalanceChartPainter extends CustomPainter {
@@ -115,8 +114,7 @@ class _BalanceChartPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.5;
 
-    final fillPaint = Paint()
-      ..style = PaintingStyle.fill;
+    final fillPaint = Paint()..style = PaintingStyle.fill;
 
     // Desenhar linha de zero se necessário
     if (zeroLine != null) {
@@ -203,4 +201,3 @@ class _BalanceChartPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
-

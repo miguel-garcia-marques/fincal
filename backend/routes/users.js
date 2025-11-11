@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getUserModel } = require('../models/User');
 const { authenticateUser } = require('../middleware/auth');
+const { validateUser } = require('../middleware/validation');
 
 // Aplicar middleware de autenticação em todas as rotas
 router.use(authenticateUser);
@@ -23,7 +24,7 @@ router.get('/me', async (req, res) => {
 });
 
 // POST criar ou atualizar usuário
-router.post('/', async (req, res) => {
+router.post('/', validateUser, async (req, res) => {
   try {
     const User = getUserModel();
     const { name } = req.body;
@@ -62,7 +63,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT atualizar nome do usuário
-router.put('/me', async (req, res) => {
+router.put('/me', validateUser, async (req, res) => {
   try {
     const User = getUserModel();
     const { name } = req.body;

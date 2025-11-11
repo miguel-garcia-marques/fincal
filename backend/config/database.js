@@ -12,10 +12,24 @@ const connectDB = async () => {
 
     let mongoUri = process.env.MONGODB_URI;
     
+    // Remover qualquer prefixo "MONGODB_URI=" que possa ter sido incluído por engano
+    // Isso pode acontecer se o usuário copiou a variável com o nome no Render
+    mongoUri = mongoUri.replace(/^MONGODB_URI\s*=\s*/i, '');
+    
+    // Remover espaços em branco no início e fim
+    mongoUri = mongoUri.trim();
+    
     // Remover parâmetros desnecessários que podem causar problemas
     // O appName não é necessário e pode causar problemas de conexão
     mongoUri = mongoUri.replace(/\?appName=[^&]*/, '');
     mongoUri = mongoUri.replace(/\?$/, ''); // Remover ? no final se houver
+    
+    // Validar que a URI começa com mongodb:// ou mongodb+srv://
+    if (!mongoUri.match(/^mongodb(\+srv)?:\/\//)) {
+      console.error('❌ ERRO: A connection string deve começar com "mongodb://" ou "mongodb+srv://"');
+      console.error(`URI recebida: ${mongoUri.substring(0, 50)}...`);
+      process.exit(1);
+    }
     
     // Se a URI não especificar uma database, adicionar 'fincal'
     // Padrão: mongodb://host:port/database ou mongodb+srv://host/database
@@ -27,7 +41,12 @@ const connectDB = async () => {
     }
     
     console.log('🔌 Conectando ao MongoDB...');
+    // SEGURANÇA: Não logar URI em produção (mesmo com credenciais ocultas)
+    if (process.env.NODE_ENV !== 'production') {
     console.log(`URI: ${mongoUri.replace(/\/\/[^:]+:[^@]+@/, '//***:***@')}`); // Ocultar credenciais no log
+    } else {
+      console.log('URI: [oculto em produção]');
+    }
     
     // Removidas opções deprecated (useNewUrlParser e useUnifiedTopology)
     // Essas opções não são mais necessárias no Mongoose 8.x

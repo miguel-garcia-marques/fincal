@@ -2,6 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { getTransactionModel } = require('../models/Transaction');
 const { authenticateUser } = require('../middleware/auth');
+const {
+  validateTransaction,
+  validateTransactionRange,
+  validateTransactionId,
+  validateBulkTransactions
+} = require('../middleware/validation');
 
 // Aplicar middleware de autenticação em todas as rotas
 router.use(authenticateUser);
@@ -18,7 +24,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET transações em um período
-router.get('/range', async (req, res) => {
+router.get('/range', validateTransactionRange, async (req, res) => {
   try {
     const Transaction = getTransactionModel(req.userId);
     const { startDate, endDate } = req.query;
@@ -157,7 +163,7 @@ router.get('/range', async (req, res) => {
 });
 
 // POST criar nova transação
-router.post('/', async (req, res) => {
+router.post('/', validateTransaction, async (req, res) => {
   try {
     const Transaction = getTransactionModel(req.userId);
     const transactionData = { ...req.body, userId: req.userId };
@@ -208,7 +214,7 @@ router.post('/', async (req, res) => {
 });
 
 // DELETE transação
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', validateTransactionId, async (req, res) => {
   try {
     const Transaction = getTransactionModel(req.userId);
     const transaction = await Transaction.findOneAndDelete({ 
@@ -227,7 +233,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // PUT atualizar transação
-router.put('/:id', async (req, res) => {
+router.put('/:id', validateTransactionId, validateTransaction, async (req, res) => {
   try {
     const Transaction = getTransactionModel(req.userId);
     const transaction = await Transaction.findOneAndUpdate(
@@ -247,13 +253,18 @@ router.put('/:id', async (req, res) => {
 });
 
 // POST importar transações em bulk
-router.post('/bulk', async (req, res) => {
+router.post('/bulk', validateBulkTransactions, async (req, res) => {
   try {
     const Transaction = getTransactionModel(req.userId);
     const { transactions } = req.body;
     
+    // Validação adicional de tamanho (já validado pelo middleware, mas manter para compatibilidade)
     if (!Array.isArray(transactions)) {
       return res.status(400).json({ message: 'transactions deve ser um array' });
+    }
+    
+    if (transactions.length > 1000) {
+      return res.status(400).json({ message: 'Máximo de 1000 transações por importação' });
     }
 
     // Mapear dias da semana de string para número

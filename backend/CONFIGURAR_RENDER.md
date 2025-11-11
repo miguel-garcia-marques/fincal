@@ -36,17 +36,30 @@ Adicione as seguintes variáveis:
 
 **No Render:**
 - **Key**: `MONGODB_URI`
-- **Value**: A connection string completa (ex: `mongodb+srv://user:pass@cluster.mongodb.net/fincal`)
+- **Value**: A connection string completa **SEM o nome da variável** (ex: `mongodb+srv://user:pass@cluster.mongodb.net/fincal`)
+  - ❌ **ERRADO**: `MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/fincal`
+  - ✅ **CORRETO**: `mongodb+srv://user:pass@cluster.mongodb.net/fincal`
+  - **IMPORTANTE**: No Render, você só coloca o **VALOR**, não o nome da variável!
 
 #### SUPABASE_URL
 
 - **Key**: `SUPABASE_URL`
-- **Value**: `https://fjuedycchyiynyqivkch.supabase.co`
+- **Value**: `https://seu-projeto.supabase.co` (substitua pelo URL do seu projeto Supabase)
+
+**Como obter:**
+1. Acesse [Supabase Dashboard](https://app.supabase.com)
+2. Vá em **Settings** → **API**
+3. Copie a **URL** do projeto
 
 #### SUPABASE_ANON_KEY
 
 - **Key**: `SUPABASE_ANON_KEY`
-- **Value**: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdWVkeWNjaHlpeW55cWl2a2NoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI2MTgwOTIsImV4cCI6MjA3ODE5NDA5Mn0.vIeykvK-puQx8q52AARQY8fLl_7EvzL8Vz7VFANKBNo`
+- **Value**: `sua-chave-anon-aqui` (substitua pela chave anon do seu projeto)
+
+**Como obter:**
+1. Acesse [Supabase Dashboard](https://app.supabase.com)
+2. Vá em **Settings** → **API**
+3. Copie a **anon/public key**
 
 #### NODE_ENV (Opcional, mas recomendado)
 

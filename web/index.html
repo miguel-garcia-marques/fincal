@@ -44,7 +44,9 @@
       
       try {
         // Download main.dart.js
-        var serviceWorkerVersion = "{{flutter_service_worker_version}}";
+        // O Flutter substitui {{flutter_service_worker_version}} pelo número
+        // Convertemos para string para garantir compatibilidade
+        var serviceWorkerVersion = String({{flutter_service_worker_version}});
         _flutter.loader.loadEntrypoint({
           serviceWorker: {
             serviceWorkerVersion: serviceWorkerVersion,

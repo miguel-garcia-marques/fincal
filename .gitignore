@@ -45,4 +45,5 @@ app.*.map.json
 
 # Config files with sensitive data
 lib/config/supabase_config.dart
+.env
 

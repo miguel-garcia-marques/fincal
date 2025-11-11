@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getPeriodHistoryModel } = require('../models/PeriodHistory');
 const { authenticateUser } = require('../middleware/auth');
+const { validatePeriodHistory, validatePeriodId } = require('../middleware/validation');
 
 // Aplicar middleware de autenticação em todas as rotas
 router.use(authenticateUser);
@@ -19,7 +20,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET uma história de período específica por ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', validatePeriodId, async (req, res) => {
   try {
     const PeriodHistory = getPeriodHistoryModel(req.userId);
     const period = await PeriodHistory.findOne({ 
@@ -38,7 +39,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST criar nova história de período
-router.post('/', async (req, res) => {
+router.post('/', validatePeriodHistory, async (req, res) => {
   try {
     const PeriodHistory = getPeriodHistoryModel(req.userId);
     const { startDate, endDate, transactionIds, name } = req.body;
@@ -92,7 +93,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT atualizar história de período
-router.put('/:id', async (req, res) => {
+router.put('/:id', validatePeriodId, async (req, res) => {
   try {
     const PeriodHistory = getPeriodHistoryModel(req.userId);
     const { name } = req.body;
@@ -120,7 +121,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE deletar história de período
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', validatePeriodId, async (req, res) => {
   try {
     const PeriodHistory = getPeriodHistoryModel(req.userId);
     const { getTransactionModel } = require('../models/Transaction');

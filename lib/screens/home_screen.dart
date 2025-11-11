@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
+import 'dart:async';
 import '../models/transaction.dart';
 import '../models/budget_balances.dart';
 import '../models/period_history.dart';
@@ -7,10 +8,12 @@ import '../services/database.dart';
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../services/api_service.dart';
+import '../services/cache_service.dart';
 import '../utils/date_utils.dart';
 import '../utils/responsive_fonts.dart';
 import '../widgets/calendar.dart';
 import '../widgets/transaction_list.dart';
+import '../widgets/loading_screen.dart';
 import 'add_transaction_screen.dart';
 import '../widgets/day_details_dialog.dart';
 import '../widgets/period_selector_dialog.dart';
@@ -34,6 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final AuthService _authService = AuthService();
   final UserService _userService = UserService();
   final ApiService _apiService = ApiService();
+  final CacheService _cacheService = CacheService();
 
   String? _userName;
   bool _isLoadingUser = true;
@@ -46,13 +50,16 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _showTransactions = false;
   List<Transaction> _transactions = [];
   bool _isLoading = true;
+  bool _isInitialLoading = true; // Novo estado para loading inicial
   List<PeriodHistory> _periodHistories = [];
   bool _periodSelected = false;
   final GlobalKey<CalendarWidgetState> _calendarKey =
       GlobalKey<CalendarWidgetState>();
   bool _isFabMenuExpanded = false;
   Future<double>? _initialBalanceFuture;
+  double? _cachedInitialBalance; // Cache do saldo inicial
   String? _filterPerson;
+  Timer? _cacheRefreshTimer;
 
   @override
   void initState() {
@@ -61,10 +68,129 @@ class _HomeScreenState extends State<HomeScreen> {
     _selectedYear = DateTime.now().year;
     // Prompt for period selection after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _loadUserData();
-      await _loadPeriodHistories();
-      await _selectDateRangeOnStartup();
+      await _initializeApp();
+      // Iniciar timer de refresh automático a cada 30 segundos
+      _startCacheRefreshTimer();
     });
+  }
+
+  @override
+  void dispose() {
+    _cacheRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  // Iniciar timer para atualizar cache a cada 30 segundos
+  void _startCacheRefreshTimer() {
+    _cacheRefreshTimer?.cancel();
+    _cacheRefreshTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshDataInBackground(),
+    );
+  }
+
+  // Método de inicialização otimizado com cache
+  Future<void> _initializeApp() async {
+    // 1. Carregar dados do cache primeiro (rápido)
+    await _loadFromCache();
+
+    // 2. Carregar dados do servidor em paralelo
+    await Future.wait([
+      _loadUserData(),
+      _loadPeriodHistories(),
+    ]);
+
+    // 3. Se não tiver período selecionado do cache, selecionar
+    if (!_periodSelected) {
+      await _selectDateRangeOnStartup();
+    } else {
+      // Se já tiver período do cache, carregar transações
+      await _loadTransactions(savePeriod: false, useCache: true);
+    }
+
+    // 4. Marcar loading inicial como completo
+    if (mounted) {
+      setState(() {
+        _isInitialLoading = false;
+      });
+    }
+
+    // 5. Atualizar dados em background se necessário
+    _refreshDataInBackground();
+  }
+
+  // Carregar dados do cache
+  Future<void> _loadFromCache() async {
+    try {
+      // Carregar período atual do cache
+      final cachedPeriod = await _cacheService.getCachedCurrentPeriod();
+      if (cachedPeriod != null) {
+        setState(() {
+          _startDate = cachedPeriod['startDate'] as DateTime;
+          _endDate = cachedPeriod['endDate'] as DateTime;
+          _selectedYear = cachedPeriod['selectedYear'] as int;
+          _periodSelected = true;
+        });
+      }
+
+      // Carregar períodos do cache
+      final cachedPeriods = await _cacheService.getCachedPeriodHistories();
+      if (cachedPeriods != null && cachedPeriods.isNotEmpty) {
+        setState(() {
+          _periodHistories = cachedPeriods;
+        });
+      }
+
+      // Carregar transações do cache se tiver período selecionado
+      if (_periodSelected) {
+        final cachedTransactions = await _cacheService.getCachedTransactions();
+        if (cachedTransactions != null && cachedTransactions.isNotEmpty) {
+          setState(() {
+            _transactions = cachedTransactions;
+            _isLoading = false;
+          });
+          // Inicializar o saldo inicial para o gráfico poder ser exibido
+          _initialBalanceFuture = _calculateInitialBalance();
+        }
+      }
+    } catch (e) {
+      print('Erro ao carregar do cache: $e');
+    }
+  }
+
+  // Atualizar dados em background
+  Future<void> _refreshDataInBackground() async {
+    try {
+      // Verificar se o cache é válido
+      final isCacheValid = await _cacheService.isCacheValid();
+
+      if (!isCacheValid) {
+        // Atualizar períodos
+        final periods = await _apiService.getAllPeriodHistories();
+        if (mounted) {
+          setState(() {
+            _periodHistories = periods;
+          });
+          await _cacheService.cachePeriodHistories(periods);
+        }
+
+        // Atualizar transações se tiver período selecionado
+        if (_periodSelected) {
+          final transactions = await _databaseService.getTransactionsInRange(
+            _startDate,
+            _endDate,
+          );
+          if (mounted) {
+            setState(() {
+              _transactions = transactions;
+            });
+            await _cacheService.cacheTransactions(transactions);
+          }
+        }
+      }
+    } catch (e) {
+      print('Erro ao atualizar dados em background: $e');
+    }
   }
 
   Future<void> _loadUserData() async {
@@ -93,6 +219,8 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _periodHistories = periods;
         });
+        // Salvar no cache
+        await _cacheService.cachePeriodHistories(periods);
       }
     } catch (e) {
       print('Erro ao carregar histórico de períodos: $e');
@@ -125,7 +253,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _selectedYear = period.startDate.year;
             _periodSelected = true;
           });
-          await _loadTransactions(savePeriod: false);
+          await _loadTransactions(savePeriod: false, useCache: false);
         } else if (result['type'] == 'new') {
           setState(() {
             _selectedYear = result['year'];
@@ -134,7 +262,9 @@ class _HomeScreenState extends State<HomeScreen> {
             _periodSelected = true;
           });
           await _loadTransactions(
-              savePeriod: true, periodName: result['name'] as String? ?? '');
+              savePeriod: true,
+              periodName: result['name'] as String? ?? '',
+              useCache: false);
         }
       }
     } else {
@@ -143,10 +273,32 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _loadTransactions(
-      {bool savePeriod = false, String periodName = ''}) async {
+  Future<void> _loadTransactions({
+    bool savePeriod = false,
+    String periodName = '',
+    bool useCache = false,
+  }) async {
     setState(() => _isLoading = true);
-    final transactions = await _databaseService.getTransactionsInRange(
+
+    List<Transaction> transactions = [];
+
+    // Tentar carregar do cache primeiro se solicitado
+    if (useCache) {
+      final cachedTransactions = await _cacheService.getCachedTransactions();
+      if (cachedTransactions != null && cachedTransactions.isNotEmpty) {
+        transactions = cachedTransactions;
+        setState(() {
+          _transactions = transactions;
+          _isLoading = false;
+        });
+        // Continuar em background para atualizar
+        _refreshTransactionsInBackground();
+        return;
+      }
+    }
+
+    // Carregar do servidor
+    transactions = await _databaseService.getTransactionsInRange(
       _startDate,
       _endDate,
     );
@@ -169,13 +321,41 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
+    // Salvar no cache
+    await _cacheService.cacheTransactions(transactions);
+    await _cacheService.cacheCurrentPeriod(
+      startDate: _startDate,
+      endDate: _endDate,
+      selectedYear: _selectedYear,
+    );
+
     // Recriar a Future do saldo inicial quando o período mudar
+    // Invalidar cache do saldo inicial quando período muda
+    _cachedInitialBalance = null;
     _initialBalanceFuture = _calculateInitialBalance();
 
     setState(() {
       _transactions = transactions;
       _isLoading = false;
     });
+  }
+
+  // Atualizar transações em background
+  Future<void> _refreshTransactionsInBackground() async {
+    try {
+      final transactions = await _databaseService.getTransactionsInRange(
+        _startDate,
+        _endDate,
+      );
+      if (mounted) {
+        setState(() {
+          _transactions = transactions;
+        });
+        await _cacheService.cacheTransactions(transactions);
+      }
+    } catch (e) {
+      print('Erro ao atualizar transações em background: $e');
+    }
   }
 
   Future<void> _selectPeriod() async {
@@ -211,7 +391,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _endDate = period.endDate;
             _selectedYear = period.startDate.year;
           });
-          await _loadTransactions(savePeriod: false);
+          await _loadTransactions(savePeriod: false, useCache: false);
         },
         onPeriodDeleted: (id) async {
           try {
@@ -259,7 +439,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (result == true) {
-      await _loadTransactions(savePeriod: false);
+      await _loadTransactions(savePeriod: false, useCache: false);
     }
   }
 
@@ -268,7 +448,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (context) => _ImportTransactionsDialog(
         onImportComplete: () async {
-          await _loadTransactions(savePeriod: false);
+          await _loadTransactions(savePeriod: false, useCache: false);
         },
       ),
     );
@@ -359,7 +539,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: TransactionListWidget(
                     transactions: _transactions,
                     onTransactionUpdated: () async {
-                      await _loadTransactions(savePeriod: false);
+                      await _loadTransactions(
+                          savePeriod: false, useCache: false);
                       if (mounted) {
                         Navigator.of(context).pop();
                         _showTransactionsAsPopup();
@@ -397,7 +578,7 @@ class _HomeScreenState extends State<HomeScreen> {
             body: TransactionListWidget(
               transactions: _transactions,
               onTransactionUpdated: () async {
-                await _loadTransactions(savePeriod: false);
+                await _loadTransactions(savePeriod: false, useCache: false);
                 if (mounted) {
                   Navigator.of(context).pop();
                   _showTransactionsAsPopup();
@@ -627,15 +808,31 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<double> _calculateInitialBalance() async {
+    // Se já temos o saldo em cache e as transações não mudaram, retornar cache
+    if (_cachedInitialBalance != null && _transactions.isNotEmpty) {
+      // Verificar se o período ainda é o mesmo
+      final cachedPeriod = await _cacheService.getCachedCurrentPeriod();
+      if (cachedPeriod != null &&
+          cachedPeriod['startDate'] == _startDate &&
+          cachedPeriod['endDate'] == _endDate) {
+        return _cachedInitialBalance!;
+      }
+    }
+
     // Calcular saldo de todas as transações antes do período começar
     try {
       final beforePeriod = _startDate.subtract(const Duration(days: 1));
+
+      // Tentar usar transações já carregadas se possível
+      double balance = 0.0;
+
+      // Se temos transações carregadas, podemos calcular parcialmente
+      // Mas ainda precisamos das transações antes do período
       final allTransactions = await _databaseService.getTransactionsInRange(
         DateTime(1900, 1, 1), // Data muito antiga para pegar todas
         beforePeriod,
       );
 
-      double balance = 0.0;
       for (var transaction in allTransactions) {
         if (transaction.type == TransactionType.ganho) {
           if (transaction.isSalary && transaction.salaryValues != null) {
@@ -649,6 +846,9 @@ class _HomeScreenState extends State<HomeScreen> {
           balance -= transaction.amount;
         }
       }
+
+      // Cachear o resultado
+      _cachedInitialBalance = balance;
       return balance;
     } catch (e) {
       print('Erro ao calcular saldo inicial: $e');
@@ -720,6 +920,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Mostrar tela de loading durante inicialização
+    if (_isInitialLoading) {
+      return const LoadingScreen(
+        message: 'Carregando seus dados financeiros...',
+      );
+    }
+
     final summary = _calculateSummary();
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth >= 1400;
@@ -825,7 +1032,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 transactions: _transactions,
                                                 onTransactionUpdated: () async {
                                                   await _loadTransactions(
-                                                      savePeriod: false);
+                                                      savePeriod: false,
+                                                      useCache: false);
                                                 },
                                               ),
                                             ),
@@ -848,16 +1056,20 @@ class _HomeScreenState extends State<HomeScreen> {
                                                   ? 2
                                                   : 1,
                                               child: Column(
-                                                mainAxisSize: MainAxisSize.min,
+                                                mainAxisSize: MainAxisSize.max,
                                                 children: [
                                                   // Calendário
-                                                  CalendarWidget(
-                                                    key: _calendarKey,
-                                                    startDate: _startDate,
-                                                    endDate: _endDate,
-                                                    transactions: _transactions,
-                                                    onDayTap: _showDayDetails,
-                                                    filterPerson: _filterPerson,
+                                                  Expanded(
+                                                    child: CalendarWidget(
+                                                      key: _calendarKey,
+                                                      startDate: _startDate,
+                                                      endDate: _endDate,
+                                                      transactions:
+                                                          _transactions,
+                                                      onDayTap: _showDayDetails,
+                                                      filterPerson:
+                                                          _filterPerson,
+                                                    ),
                                                   ),
                                                 ],
                                               ),
@@ -873,7 +1085,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                                   onTransactionUpdated:
                                                       () async {
                                                     await _loadTransactions(
-                                                        savePeriod: false);
+                                                        savePeriod: false,
+                                                        useCache: false);
                                                   },
                                                 ),
                                               ),
@@ -899,43 +1112,34 @@ class _HomeScreenState extends State<HomeScreen> {
                     }
 
                     return Container(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: isDesktop ? 24 : 12,
-                        vertical: isDesktop ? 16 : 8,
-                      ),
+                      // padding: EdgeInsets.symmetric(
+                      //   horizontal: isDesktop ? 24 : 12,
+                      //   vertical: isDesktop ? 16 : 20,
+                      // ),
+                      padding: EdgeInsets.only(
+                          bottom: 10,
+                          top: isDesktop ? 16 : 20,
+                          left: isDesktop ? 24 : 12,
+                          right: isDesktop ? 24 : 12),
                       decoration: const BoxDecoration(
                         color: AppTheme.white,
                       ),
-                      child: _initialBalanceFuture == null
-                          ? SizedBox(
-                              height: (screenHeight * 0.13).clamp(80.0, 200.0),
-                              child: const Center(
-                                child: CircularProgressIndicator(),
-                              ),
-                            )
-                          : FutureBuilder<double>(
-                              future: _initialBalanceFuture,
-                              builder: (context, snapshot) {
-                                if (snapshot.connectionState ==
-                                    ConnectionState.waiting) {
-                                  final calculatedHeight =
-                                      (screenHeight * 0.13).clamp(80.0, 200.0);
-                                  return SizedBox(
-                                    height: calculatedHeight,
-                                    child: const Center(
-                                      child: CircularProgressIndicator(),
-                                    ),
-                                  );
-                                }
-                                return BalanceChart(
-                                  startDate: _startDate,
-                                  endDate: _endDate,
-                                  dailyBalances:
-                                      _calculateDailyBalancesForChart(),
-                                  initialBalance: snapshot.data ?? 0.0,
-                                );
-                              },
-                            ),
+                      child: FutureBuilder<double>(
+                        future: _initialBalanceFuture ?? Future.value(0.0),
+                        builder: (context, snapshot) {
+                          // Sempre mostrar o gráfico, mesmo durante loading
+                          // Usar saldo em cache se disponível, senão usar 0.0
+                          final initialBalance =
+                              _cachedInitialBalance ?? snapshot.data ?? 0.0;
+
+                          return BalanceChart(
+                            startDate: _startDate,
+                            endDate: _endDate,
+                            dailyBalances: _calculateDailyBalancesForChart(),
+                            initialBalance: initialBalance,
+                          );
+                        },
+                      ),
                     );
                   },
                 ),
@@ -1469,6 +1673,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     );
                   },
+                ),
+                // Espaço para a barra de navegação
+                SizedBox(
+                  height: MediaQuery.of(context).padding.bottom > 0
+                      ? MediaQuery.of(context).padding.bottom
+                      : 40,
                 ),
               ],
             ),
