@@ -12,6 +12,11 @@ const connectDB = async () => {
 
     let mongoUri = process.env.MONGODB_URI;
     
+    // Remover parâmetros desnecessários que podem causar problemas
+    // O appName não é necessário e pode causar problemas de conexão
+    mongoUri = mongoUri.replace(/\?appName=[^&]*/, '');
+    mongoUri = mongoUri.replace(/\?$/, ''); // Remover ? no final se houver
+    
     // Se a URI não especificar uma database, adicionar 'fincal'
     // Padrão: mongodb://host:port/database ou mongodb+srv://host/database
     if (!mongoUri.match(/\/[^\/\?]+(\?|$)/)) {
