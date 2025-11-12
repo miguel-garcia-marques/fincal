@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../utils/responsive_fonts.dart';
 import '../theme/app_theme.dart';
 import 'email_verification_screen.dart';
+import 'invite_accept_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final String? inviteToken;
+  
+  const LoginScreen({super.key, this.inviteToken});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -23,6 +27,25 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _isLoginMode = true; // true = login, false = signup
   bool _obscurePassword = true;
+  String? _inviteTokenFromUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    // Verificar se há inviteToken na URL (para casos onde o usuário volta para login)
+    if (kIsWeb) {
+      final uri = Uri.base;
+      final token = uri.queryParameters['token'];
+      if (token != null && token.isNotEmpty) {
+        _inviteTokenFromUrl = token;
+      }
+    }
+  }
+
+  // Getter para obter o inviteToken (prioriza o da URL, depois o do widget)
+  String? get _effectiveInviteToken {
+    return _inviteTokenFromUrl ?? widget.inviteToken;
+  }
 
   @override
   void dispose() {
@@ -77,12 +100,28 @@ class _LoginScreenState extends State<LoginScreen> {
                 print('Erro ao verificar/criar usuário no MongoDB: $e');
               }
               
+              // Se houver inviteToken, redirecionar para a tela de invite após login
+              // IMPORTANTE: Fazer isso ANTES de qualquer refresh de sessão para evitar
+              // que o AuthWrapper interfira com o redirecionamento
+              final inviteToken = _effectiveInviteToken;
+              if (inviteToken != null && mounted) {
+                // Usar pushAndRemoveUntil para garantir que não há rotas anteriores
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(
+                    builder: (context) => InviteAcceptScreen(token: inviteToken),
+                  ),
+                  (route) => false, // Remove todas as rotas anteriores
+                );
+                return;
+              }
+              
               // Forçar refresh da sessão para garantir que o AuthWrapper detecte
               try {
                 await _authService.supabase.auth.refreshSession();
               } catch (_) {
                 // Ignorar erros no refresh
               }
+              
               // O AuthWrapper vai detectar a mudança automaticamente via stream
             }
           } else {
@@ -129,6 +168,7 @@ class _LoginScreenState extends State<LoginScreen> {
               MaterialPageRoute(
                 builder: (context) => EmailVerificationScreen(
                   email: _emailController.text.trim(),
+                  inviteToken: _effectiveInviteToken,
                 ),
               ),
             );

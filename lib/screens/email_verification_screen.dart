@@ -6,10 +6,12 @@ import 'login_screen.dart';
 
 class EmailVerificationScreen extends StatefulWidget {
   final String email;
+  final String? inviteToken;
   
   const EmailVerificationScreen({
     super.key,
     required this.email,
+    this.inviteToken,
   });
 
   @override
@@ -28,9 +30,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   @override
   void initState() {
     super.initState();
-    _checkVerificationStatus();
-    // Verificar periodicamente se o email foi confirmado
-    _startPeriodicCheck();
+    // Não verificar automaticamente - o usuário deve clicar em "já verifiquei"
   }
 
   @override
@@ -39,18 +39,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     super.dispose();
   }
 
-  void _startPeriodicCheck() {
-    if (_isDisposed || !mounted) return;
-    
-    Future.delayed(const Duration(seconds: 3), () {
-      if (!_isDisposed && mounted && !_isVerified) {
-        _checkVerificationStatus();
-        _startPeriodicCheck();
-      }
-    });
-  }
-
-  Future<void> _checkVerificationStatus() async {
+  Future<void> _checkVerificationAndNavigate() async {
     if (_isChecking || _isDisposed || !mounted) return;
     
     setState(() {
@@ -59,47 +48,26 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     });
 
     try {
-      final user = _authService.currentUser;
-      
-      if (user != null && !_isDisposed && mounted) {
-        // Recarregar o usuário para obter o status mais recente
-        await _authService.supabase.auth.refreshSession();
+      // Simplesmente redirecionar para login
+      // O usuário pode tentar fazer login e será informado se o email não foi verificado
+      // Não tentar verificar aqui para evitar erros desnecessários
+      if (!_isDisposed && mounted) {
+        setState(() {
+          _isChecking = false;
+        });
         
-        if (_isDisposed || !mounted) return;
-        
-        final updatedUser = _authService.currentUser;
-        
-        if (updatedUser != null && updatedUser.emailConfirmedAt != null) {
-          if (!_isDisposed && mounted) {
-            setState(() {
-              _isVerified = true;
-              _isChecking = false;
-            });
-            
-            // Aguardar um pouco antes de redirecionar
-            await Future.delayed(const Duration(seconds: 2));
-            
-            if (!_isDisposed && mounted) {
-              // Voltar para login - o usuário pode fazer login agora
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (context) => const LoginScreen()),
-              );
-            }
-          }
-        } else {
-          if (!_isDisposed && mounted) {
-            setState(() {
-              _isChecking = false;
-            });
-          }
-        }
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => LoginScreen(inviteToken: widget.inviteToken),
+          ),
+        );
       }
     } catch (e) {
       if (!_isDisposed && mounted) {
         setState(() {
           _isChecking = false;
           _hasError = true;
-          _errorMessage = e.toString();
+          _errorMessage = 'Erro ao navegar: ${e.toString()}';
         });
       }
     }
@@ -234,13 +202,45 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                   // Instruções
                   if (!_isVerified) ...[
                     Text(
-                      'Por favor, verifique sua caixa de entrada e clique no link de confirmação.',
+                      'Por favor, verifique sua caixa de entrada e clique no link de confirmação no email que enviamos.',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: AppTheme.darkGray,
                           ),
                     ),
                     const SizedBox(height: 32),
+                    
+                    // Botão "Já verifiquei"
+                    ElevatedButton(
+                      onPressed: _isChecking ? null : _checkVerificationAndNavigate,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.black,
+                        foregroundColor: AppTheme.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: _isChecking
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  AppTheme.white,
+                                ),
+                              ),
+                            )
+                          : const Text(
+                              'Já Verifiquei',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                    ),
+                    const SizedBox(height: 16),
                     
                     // Botão reenviar com countdown
                     Column(
@@ -282,23 +282,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                           ),
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Botão voltar para login
-                    TextButton.icon(
-                      onPressed: () {
-                        Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(
-                            builder: (context) => const LoginScreen(),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.arrow_back),
-                      label: const Text('Voltar para Login'),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
                     ),
                   ],
                   

@@ -2,21 +2,35 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:convert';
+import 'dart:io';
 import '../models/transaction.dart';
 import '../services/database.dart';
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/date_utils.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   final Transaction? transactionToEdit;
+  final String walletId;
+  final String userId;
+  final bool skipImportOption;
 
-  const AddTransactionScreen({super.key, this.transactionToEdit});
+  const AddTransactionScreen({
+    super.key,
+    this.transactionToEdit,
+    required this.walletId,
+    required this.userId,
+    this.skipImportOption = false,
+  });
 
   @override
   State<AddTransactionScreen> createState() => _AddTransactionScreenState();
 }
 
 class _AddTransactionScreenState extends State<AddTransactionScreen> {
+  bool _showImportOption = true; // Mostrar opção de importar primeiro
   int _currentStep = 0;
   late TransactionType _selectedType;
   late DateTime _selectedDate;
@@ -42,6 +56,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   @override
   void initState() {
     super.initState();
+    // Se estiver editando ou se skipImportOption for true, não mostrar opção de importar
+    if (widget.transactionToEdit != null || widget.skipImportOption) {
+      _showImportOption = false;
+    }
     if (widget.transactionToEdit != null) {
       final t = widget.transactionToEdit!;
       _selectedType = t.type;
@@ -242,14 +260,17 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       dayOfWeek: dayOfWeek,
       dayOfMonth: dayOfMonth,
       person: _personController.text.isEmpty ? null : _personController.text,
+      walletId: widget.walletId,
+      createdBy: widget.userId,
     );
 
     try {
       final dbService = DatabaseService();
       if (widget.transactionToEdit != null) {
-        await dbService.updateTransaction(transaction);
+        await dbService.updateTransaction(transaction,
+            walletId: widget.walletId);
       } else {
-        await dbService.saveTransaction(transaction);
+        await dbService.saveTransaction(transaction, walletId: widget.walletId);
       }
       if (mounted) {
         Navigator.of(context).pop(true);
@@ -265,141 +286,328 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            constraints: const BoxConstraints(
-              maxWidth: 600,
-              maxHeight: 700,
-            ),
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: _showImportOption
+            ? MediaQuery.of(context).size.height * 0.45
+            : MediaQuery.of(context).size.height * 0.7,
+      ),
+      decoration: const BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle bar
+          Container(
+            margin: const EdgeInsets.only(top: 12),
+            width: 40,
+            height: 4,
             decoration: BoxDecoration(
-              color: AppTheme.white.withOpacity(0.95),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
-                color: AppTheme.lighterGray.withOpacity(0.2),
-                width: 1,
-              ),
+              color: AppTheme.lighterGray,
+              borderRadius: BorderRadius.circular(2),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Header com título e botão fechar
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: const BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        color: AppTheme.lighterGray,
-                        width: 1,
+          ),
+          // Content
+          _showImportOption
+              ? _buildImportOptionScreen()
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Header com título e botão fechar
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 16),
+                      decoration: const BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                            color: AppTheme.lighterGray,
+                            width: 1,
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          widget.transactionToEdit != null
-                              ? 'Editar Transação'
-                              : 'Nova Transação',
-                          style:
-                              Theme.of(context).textTheme.titleLarge?.copyWith(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              widget.transactionToEdit != null
+                                  ? 'Editar Transação'
+                                  : 'Nova Transação',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(
                                     fontWeight: FontWeight.w600,
                                     color: AppTheme.black,
                                   ),
+                            ),
+                          ),
+                          IconButton(
+                            icon:
+                                const Icon(Icons.close, color: AppTheme.black),
+                            onPressed: () => Navigator.of(context).pop(false),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Progress indicator
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 16),
+                      child: Row(
+                        children: List.generate(4, (index) {
+                          return Expanded(
+                            child: Container(
+                              margin: EdgeInsets.only(right: index < 3 ? 8 : 0),
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: index <= _currentStep
+                                    ? AppTheme.black
+                                    : AppTheme.lighterGray.withOpacity(0.3),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+                    // Step content - com altura flexível
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(24),
+                        child: Form(
+                          key: _formKey,
+                          child: _buildStepContent(),
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: AppTheme.black),
-                        onPressed: () => Navigator.of(context).pop(false),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
-                    ],
-                  ),
-                ),
-                // Progress indicator
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  child: Row(
-                    children: List.generate(4, (index) {
-                      return Expanded(
-                        child: Container(
-                          margin: EdgeInsets.only(right: index < 3 ? 8 : 0),
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: index <= _currentStep
-                                ? AppTheme.black
-                                : AppTheme.lighterGray.withOpacity(0.3),
-                            borderRadius: BorderRadius.circular(2),
+                    ),
+                    // Navigation buttons
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: AppTheme.white,
+                        border: Border(
+                          top: BorderSide(
+                            color: AppTheme.lighterGray.withOpacity(0.3),
+                            width: 1,
                           ),
                         ),
-                      );
-                    }),
-                  ),
-                ),
-                // Step content
-                Flexible(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(24),
-                    child: Form(
-                      key: _formKey,
-                      child: _buildStepContent(),
-                    ),
-                  ),
-                ),
-                // Navigation buttons
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: AppTheme.white,
-                    border: Border(
-                      top: BorderSide(
-                        color: AppTheme.lighterGray.withOpacity(0.3),
-                        width: 1,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          if (_currentStep > 0)
+                            TextButton(
+                              onPressed: () {
+                                setState(() {
+                                  _currentStep--;
+                                });
+                              },
+                              child: const Text('Anterior'),
+                            )
+                          else
+                            const SizedBox(),
+                          ElevatedButton(
+                            onPressed: () {
+                              if (_currentStep < 3) {
+                                if (_validateStep(_currentStep)) {
+                                  setState(() {
+                                    _currentStep++;
+                                  });
+                                }
+                              } else {
+                                _saveTransaction();
+                              }
+                            },
+                            child:
+                                Text(_currentStep < 3 ? 'Próximo' : 'Salvar'),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      if (_currentStep > 0)
-                        TextButton(
-                          onPressed: () {
-                            setState(() {
-                              _currentStep--;
-                            });
-                          },
-                          child: const Text('Anterior'),
-                        )
-                      else
-                        const SizedBox(),
-                      ElevatedButton(
-                        onPressed: () {
-                          if (_currentStep < 3) {
-                            if (_validateStep(_currentStep)) {
-                              setState(() {
-                                _currentStep++;
-                              });
-                            }
-                          } else {
-                            _saveTransaction();
-                          }
-                        },
-                        child: Text(_currentStep < 3 ? 'Próximo' : 'Salvar'),
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
-              ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImportOptionScreen() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Header minimalista
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: const BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: AppTheme.lighterGray,
+                width: 1,
+              ),
             ),
           ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Adicionar Transação',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.black,
+                      ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: AppTheme.black, size: 20),
+                onPressed: () => Navigator.of(context).pop(false),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ],
+          ),
         ),
+        // Opções - compacto e minimalista
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Botão criar transação
+              SizedBox(
+                width: double.infinity,
+                child: InkWell(
+                  onTap: () {
+                    // Fechar a bottom sheet atual e abrir uma nova com o formulário
+                    Navigator.of(context).pop();
+                    // Usar um pequeno delay para garantir que a bottom sheet anterior foi fechada
+                    Future.delayed(const Duration(milliseconds: 100), () {
+                      if (mounted) {
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          backgroundColor: Colors.transparent,
+                          isDismissible: true,
+                          enableDrag: true,
+                          builder: (context) => AddTransactionScreen(
+                            walletId: widget.walletId,
+                            userId: widget.userId,
+                            transactionToEdit: widget.transactionToEdit,
+                            skipImportOption: true,
+                          ),
+                        );
+                      }
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.darkGray,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 24,
+                          height: 24,
+                          decoration: const BoxDecoration(
+                            color: AppTheme.white,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.add,
+                            color: AppTheme.darkGray,
+                            size: 16,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Criar Nova Transação',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: AppTheme.white,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              // Botão importar em bulk
+              SizedBox(
+                width: double.infinity,
+                child: InkWell(
+                  onTap: _importBulkTransactions,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: AppTheme.black,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.upload_file,
+                          color: AppTheme.black,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Importar Transações em Bulk',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: AppTheme.black,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(height: 30),
+      ],
+    );
+  }
+
+  Future<void> _importBulkTransactions() async {
+    // Fechar a bottom sheet atual e abrir uma nova para importação
+    Navigator.of(context).pop();
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _ImportBulkTransactionsSheet(
+        walletId: widget.walletId,
+        onImportComplete: () {
+          Navigator.of(context).pop(true);
+        },
       ),
     );
   }
@@ -911,6 +1119,545 @@ class _TypeButton extends StatelessWidget {
                 ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ImportBulkTransactionsSheet extends StatefulWidget {
+  final String walletId;
+  final VoidCallback onImportComplete;
+
+  const _ImportBulkTransactionsSheet({
+    required this.walletId,
+    required this.onImportComplete,
+  });
+
+  @override
+  State<_ImportBulkTransactionsSheet> createState() =>
+      _ImportBulkTransactionsSheetState();
+}
+
+class _ImportBulkTransactionsSheetState
+    extends State<_ImportBulkTransactionsSheet> {
+  bool _isLoading = false;
+  bool _isImporting = false;
+  String? _errorMessage;
+  String? _successMessage;
+  int? _totalTransactions;
+  int? _duplicateCount;
+  int? _errorCount;
+  List<Map<String, dynamic>>? _transactionsToImport;
+
+  // Verificar se uma transação do JSON é duplicada de uma transação existente
+  bool _isDuplicate(Map<String, dynamic> jsonTx, Transaction existingTx) {
+    // Comparar periodicidade
+    String? jsonFrequency;
+    int? jsonDayOfWeek;
+    int? jsonDayOfMonth;
+
+    if (jsonTx['periodicity'] == 'mensal') {
+      jsonFrequency = 'monthly';
+      jsonDayOfMonth = int.tryParse(jsonTx['day']?.toString() ?? '');
+    } else if (jsonTx['periodicity'] == 'semanal') {
+      jsonFrequency = 'weekly';
+      final dayStr = (jsonTx['dayofWeek'] ?? jsonTx['day'] ?? '')
+          .toString()
+          .toLowerCase()
+          .trim();
+      final dayMap = {
+        'domingo': 1,
+        'dom': 1,
+        'segunda': 2,
+        'seg': 2,
+        'terça': 2,
+        'terca': 2,
+        'ter': 2,
+        'quarta': 4,
+        'qua': 4,
+        'quinta': 5,
+        'qui': 5,
+        'sexta': 6,
+        'sex': 6,
+        'sábado': 0,
+        'sabado': 0,
+        'sab': 0,
+      };
+      jsonDayOfWeek = dayMap[dayStr];
+    } else {
+      jsonFrequency = 'unique';
+    }
+
+    // Comparar frequência
+    if (existingTx.frequency.name != jsonFrequency) return false;
+    if (existingTx.frequency == TransactionFrequency.weekly &&
+        existingTx.dayOfWeek != jsonDayOfWeek) return false;
+    if (existingTx.frequency == TransactionFrequency.monthly &&
+        existingTx.dayOfMonth != jsonDayOfMonth) return false;
+
+    // Para transações únicas, comparar data
+    if (jsonFrequency == 'unique') {
+      DateTime? jsonDate;
+      if (jsonTx['date'] != null) {
+        jsonDate = DateTime.tryParse(jsonTx['date'].toString());
+      }
+      if (jsonDate != null) {
+        final jsonDateOnly =
+            DateTime(jsonDate.year, jsonDate.month, jsonDate.day);
+        final existingDateOnly = DateTime(
+            existingTx.date.year, existingTx.date.month, existingTx.date.day);
+        if (jsonDateOnly != existingDateOnly) return false;
+      }
+    }
+
+    // Comparar tipo
+    final jsonType = jsonTx['type']?.toString();
+    if (existingTx.type.name != jsonType) return false;
+
+    // Comparar valor
+    final jsonAmount = (jsonTx['value'] ?? jsonTx['amount'] ?? 0).toString();
+    final jsonAmountNum = double.tryParse(jsonAmount.replaceAll(',', '.')) ?? 0;
+    if ((existingTx.amount - jsonAmountNum).abs() > 0.01) return false;
+
+    // Comparar categoria
+    final jsonCategory = jsonTx['category']?.toString();
+    if (existingTx.category.name != jsonCategory) return false;
+
+    // Comparar descrição (se ambas tiverem)
+    final jsonDesc = jsonTx['description']?.toString() ?? '';
+    final existingDesc = existingTx.description ?? '';
+    if (jsonDesc.isNotEmpty &&
+        existingDesc.isNotEmpty &&
+        jsonDesc != existingDesc) return false;
+
+    // Comparar pessoa
+    final jsonPerson = jsonTx['person']?.toString();
+    final existingPerson = existingTx.person;
+    if (jsonPerson != null && jsonPerson.isNotEmpty) {
+      if (existingPerson != jsonPerson) return false;
+    } else if (existingPerson != null && existingPerson.isNotEmpty) {
+      return false;
+    }
+
+    return true;
+  }
+
+  Future<void> _selectFile() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+      _successMessage = null;
+      _totalTransactions = null;
+      _duplicateCount = null;
+      _errorCount = null;
+      _transactionsToImport = null;
+    });
+
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+      );
+
+      if (result != null && result.files.single.size > 0) {
+        String fileContent;
+
+        // Na web, usar bytes; em outras plataformas, usar path
+        if (result.files.single.bytes != null) {
+          fileContent = utf8.decode(result.files.single.bytes!);
+        } else if (result.files.single.path != null) {
+          final filePath = result.files.single.path!;
+          fileContent = await File(filePath).readAsString();
+        } else {
+          throw Exception('Não foi possível ler o arquivo');
+        }
+
+        final jsonData = json.decode(fileContent) as List<dynamic>;
+        final transactions =
+            jsonData.map((e) => e as Map<String, dynamic>).toList();
+
+        // Verificar duplicatas e erros
+        final dbService = DatabaseService();
+        final existingTransactions =
+            await dbService.getAllTransactions(walletId: widget.walletId);
+
+        final duplicates = <Map<String, dynamic>>[];
+        final duplicateIndices = <int>[];
+        final errors = <Map<String, dynamic>>[];
+
+        for (int i = 0; i < transactions.length; i++) {
+          final tx = transactions[i];
+          bool hasError = false;
+          String? errorMsg;
+
+          // Validar campos obrigatórios
+          if (tx['type'] == null) {
+            hasError = true;
+            errorMsg = 'Tipo não especificado';
+          }
+          if (tx['value'] == null && tx['amount'] == null) {
+            hasError = true;
+            errorMsg = 'Valor não especificado';
+          }
+          if (tx['category'] == null) {
+            hasError = true;
+            errorMsg = 'Categoria não especificada';
+          }
+
+          if (hasError) {
+            errors.add({
+              'index': i,
+              'transaction': tx,
+              'error': errorMsg,
+            });
+            continue;
+          }
+
+          // Verificar duplicatas
+          for (var existingTx in existingTransactions) {
+            if (_isDuplicate(tx, existingTx)) {
+              duplicates.add({
+                'index': i,
+                'transaction': tx,
+                'existingId': existingTx.id,
+              });
+              duplicateIndices.add(i);
+              break;
+            }
+          }
+        }
+
+        // Preparar transações para importar (sem duplicatas e sem erros)
+        final transactionsToImport = <Map<String, dynamic>>[];
+        final errorIndices = errors.map((e) => e['index'] as int).toSet();
+        for (int i = 0; i < transactions.length; i++) {
+          if (!duplicateIndices.contains(i) && !errorIndices.contains(i)) {
+            transactionsToImport.add(transactions[i]);
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _totalTransactions = transactions.length;
+            _duplicateCount = duplicates.length;
+            _errorCount = errors.length;
+            _transactionsToImport = transactionsToImport;
+          });
+        }
+      } else {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Erro ao processar arquivo: $e';
+        });
+      }
+    }
+  }
+
+  Future<void> _confirmImport() async {
+    if (_transactionsToImport == null || _transactionsToImport!.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _isImporting = true;
+    });
+
+    try {
+      final apiService = ApiService();
+      final importResult = await apiService.importBulkTransactions(
+        _transactionsToImport!,
+        walletId: widget.walletId,
+      );
+
+      if (mounted) {
+        final imported = importResult['imported'] as int? ?? 0;
+        final message = importResult['message'] as String?;
+
+        setState(() {
+          _isImporting = false;
+          _successMessage =
+              message ?? '$imported transação(ões) importada(s) com sucesso';
+        });
+
+        // Aguardar um pouco antes de fechar
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted) {
+          widget.onImportComplete();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isImporting = false;
+          _errorMessage = 'Erro ao importar: $e';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final safeAreaBottom = MediaQuery.of(context).padding.bottom;
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.6,
+      ),
+      decoration: const BoxDecoration(
+        color: AppTheme.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle bar
+          Container(
+            margin: const EdgeInsets.only(top: 12),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppTheme.lighterGray,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          // Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: const BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: AppTheme.lighterGray,
+                  width: 1,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Importar Transações',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.black,
+                        ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, color: AppTheme.black),
+                  onPressed: () => Navigator.of(context).pop(),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+          ),
+          // Content
+          Flexible(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: _buildContent(),
+            ),
+          ),
+          // Padding para safe area
+          SizedBox(height: safeAreaBottom > 0 ? safeAreaBottom : 20),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContent() {
+    if (_isLoading) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Processando arquivo...'),
+          ],
+        ),
+      );
+    }
+
+    if (_errorMessage != null) {
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.error_outline,
+            color: AppTheme.expenseRed,
+            size: 48,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _errorMessage!,
+            style: TextStyle(color: AppTheme.expenseRed),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      );
+    }
+
+    if (_successMessage != null) {
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.check_circle_outline,
+            color: AppTheme.incomeGreen,
+            size: 48,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _successMessage!,
+            style: TextStyle(color: AppTheme.incomeGreen),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      );
+    }
+
+    // Mostrar resumo se o arquivo foi processado
+    if (_totalTransactions != null) {
+      final newCount = _transactionsToImport?.length ?? 0;
+      return SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Icon(
+              Icons.info_outline,
+              size: 48,
+              color: AppTheme.black,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Resumo do Arquivo',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            _buildSummaryCard(
+              'Total de Transações',
+              '$_totalTransactions',
+              AppTheme.black,
+            ),
+            const SizedBox(height: 12),
+            _buildSummaryCard(
+              'Novas para Importar',
+              '$newCount',
+              AppTheme.incomeGreen,
+            ),
+            if (_duplicateCount != null && _duplicateCount! > 0) ...[
+              const SizedBox(height: 12),
+              _buildSummaryCard(
+                'Duplicadas',
+                '$_duplicateCount',
+                AppTheme.darkGray,
+              ),
+            ],
+            if (_errorCount != null && _errorCount! > 0) ...[
+              const SizedBox(height: 12),
+              _buildSummaryCard(
+                'Com Erro',
+                '$_errorCount',
+                AppTheme.expenseRed,
+              ),
+            ],
+            const SizedBox(height: 24),
+            if (newCount > 0) ...[
+              ElevatedButton(
+                onPressed: _isImporting ? null : _confirmImport,
+                child: _isImporting
+                    ? const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: 12),
+                          Text('Importando...'),
+                        ],
+                      )
+                    : const Text('Confirmar Importação'),
+              ),
+            ] else ...[
+              Text(
+                'Nenhuma transação nova para importar',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.darkGray),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
+    // Estado inicial - selecionar arquivo
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(
+          Icons.upload_file,
+          size: 48,
+          color: AppTheme.black,
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'Selecione um arquivo JSON para importar transações.',
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 24),
+        ElevatedButton.icon(
+          onPressed: _selectFile,
+          icon: const Icon(Icons.upload_file),
+          label: const Text('Selecionar Arquivo JSON'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSummaryCard(String label, String value, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: color.withOpacity(0.3),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
+          ),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+          ),
+        ],
       ),
     );
   }

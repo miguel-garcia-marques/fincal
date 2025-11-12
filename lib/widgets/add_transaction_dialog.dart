@@ -7,8 +7,15 @@ import '../utils/date_utils.dart';
 
 class AddTransactionDialog extends StatefulWidget {
   final Transaction? transactionToEdit;
+  final String walletId;
+  final String userId;
 
-  const AddTransactionDialog({super.key, this.transactionToEdit});
+  const AddTransactionDialog({
+    super.key,
+    this.transactionToEdit,
+    required this.walletId,
+    required this.userId,
+  });
 
   @override
   State<AddTransactionDialog> createState() => _AddTransactionDialogState();
@@ -235,14 +242,16 @@ class _AddTransactionDialogState extends State<AddTransactionDialog> {
         frequency: _frequency,
         dayOfWeek: dayOfWeek,
         dayOfMonth: dayOfMonth,
+        walletId: widget.walletId,
+        createdBy: widget.userId,
       );
 
       try {
         final dbService = DatabaseService();
         if (widget.transactionToEdit != null) {
-          await dbService.updateTransaction(transaction);
+          await dbService.updateTransaction(transaction, walletId: widget.walletId);
         } else {
-          await dbService.saveTransaction(transaction);
+          await dbService.saveTransaction(transaction, walletId: widget.walletId);
         }
         if (mounted) {
           Navigator.of(context).pop(true);

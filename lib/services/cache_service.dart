@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/transaction.dart';
 import '../models/period_history.dart';
@@ -9,16 +10,15 @@ class CacheService {
   static const String _lastUpdateKey = 'cache_last_update';
   static const String _currentPeriodKey = 'cached_current_period';
   
-  // Cache válido por 30 segundos
-  static const Duration cacheValidityDuration = Duration(seconds: 30);
+  // Cache válido por 5 minutos (aumentado para reduzir requisições)
+  static const Duration cacheValidityDuration = Duration(minutes: 5);
 
-  // Salvar transações no cache
+  // Salvar transações no cache (usando compute para não bloquear UI)
   Future<void> cacheTransactions(List<Transaction> transactions) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final transactionsJson = json.encode(
-        transactions.map((t) => t.toJson()).toList(),
-      );
+      // Usar compute para fazer encoding em background
+      final transactionsJson = await compute(_encodeTransactions, transactions);
       await prefs.setString(_transactionsKey, transactionsJson);
       await prefs.setString(_lastUpdateKey, DateTime.now().toIso8601String());
     } catch (e) {
@@ -26,7 +26,14 @@ class CacheService {
     }
   }
 
-  // Obter transações do cache
+  // Função isolada para encoding
+  static String _encodeTransactions(List<Transaction> transactions) {
+    return json.encode(
+      transactions.map((t) => t.toJson()).toList(),
+    );
+  }
+
+  // Obter transações do cache (usando compute para não bloquear UI)
   Future<List<Transaction>?> getCachedTransactions() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -36,12 +43,19 @@ class CacheService {
         return null;
       }
 
-      final List<dynamic> decoded = json.decode(transactionsJson);
-      return decoded.map((json) => Transaction.fromJson(json)).toList();
+      // Usar compute para fazer decoding em background
+      final decoded = await compute(_decodeTransactions, transactionsJson);
+      return decoded;
     } catch (e) {
       print('Erro ao ler transações do cache: $e');
       return null;
     }
+  }
+
+  // Função isolada para decoding
+  static List<Transaction> _decodeTransactions(String jsonString) {
+    final List<dynamic> decoded = json.decode(jsonString);
+    return decoded.map((json) => Transaction.fromJson(json)).toList();
   }
 
   // Salvar períodos no cache

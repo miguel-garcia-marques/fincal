@@ -8,10 +8,14 @@ import 'add_transaction_screen.dart';
 
 class TransactionDetailsScreen extends StatelessWidget {
   final Transaction transaction;
+  final String walletId;
+  final String userId;
 
   const TransactionDetailsScreen({
     super.key,
     required this.transaction,
+    required this.walletId,
+    required this.userId,
   });
 
   String _getPeriodicityText(Transaction transaction) {
@@ -112,7 +116,7 @@ class TransactionDetailsScreen extends StatelessWidget {
                     final originalId =
                         parts.sublist(0, parts.length - 1).join('_');
                     final allTransactions =
-                        await dbService.getAllTransactions();
+                        await dbService.getAllTransactions(walletId: walletId);
                     transactionToEdit = allTransactions.firstWhere(
                       (t) => t.id == originalId,
                       orElse: () => transaction,
@@ -127,6 +131,8 @@ class TransactionDetailsScreen extends StatelessWidget {
                 MaterialPageRoute(
                   builder: (context) => AddTransactionScreen(
                     transactionToEdit: transactionToEdit,
+                    walletId: walletId,
+                    userId: userId,
                   ),
                   fullscreenDialog: true,
                 ),
@@ -325,7 +331,7 @@ class TransactionDetailsScreen extends StatelessWidget {
                 if (confirmed == true) {
                   try {
                     await DatabaseService()
-                        .deleteTransaction(transactionIdToDelete);
+                        .deleteTransaction(transactionIdToDelete, walletId: walletId);
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(

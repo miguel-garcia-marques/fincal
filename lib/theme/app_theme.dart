@@ -17,6 +17,9 @@ class AppTheme {
   static const Color incomeGreen = Color(0xFF4CAF50);
   static const Color expenseRed = Color(0xFFE57373);
 
+  // Cor primária (usando black como padrão)
+  static const Color primaryColor = black;
+
   // Cores para categorias de orçamento
   static const Color savingsYellow = Color(0xFFFFC107); // Amarelo para poupança
   static const Color expensesRed = Color(0xFFE57373); // Vermelho para gastos

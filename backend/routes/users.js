@@ -7,14 +7,95 @@ const { validateUser } = require('../middleware/validation');
 // Aplicar middleware de autenticação em todas as rotas
 router.use(authenticateUser);
 
+// Helper para garantir que o usuário tenha uma wallet pessoal
+async function ensurePersonalWallet(userId) {
+  const { getWalletModel } = require('../models/Wallet');
+  const { getWalletMemberModel } = require('../models/WalletMember');
+  const Wallet = getWalletModel();
+  const WalletMember = getWalletMemberModel();
+  const User = getUserModel();
+  
+  // Buscar usuário para verificar personalWalletId
+  const user = await User.findOne({ userId: userId });
+  
+  let personalWallet = null;
+  
+  // Se o usuário tem personalWalletId, tentar usar essa wallet
+  if (user && user.personalWalletId) {
+    personalWallet = await Wallet.findById(user.personalWalletId);
+    // Verificar se a wallet existe e pertence ao usuário
+    if (personalWallet && personalWallet.ownerId === userId) {
+      return personalWallet;
+    }
+    // Se a wallet não existe ou não pertence ao usuário, limpar personalWalletId
+    if (user) {
+      user.personalWalletId = null;
+      await user.save();
+    }
+  }
+  
+  // Se não encontrou pelo personalWalletId, buscar por ownerId
+  // Usar findOne para pegar apenas uma (a mais antiga se houver múltiplas)
+  personalWallet = await Wallet.findOne({ ownerId: userId }).sort({ createdAt: 1 });
+  
+  if (personalWallet) {
+    // Atualizar personalWalletId do usuário se não estiver definido
+    if (user && !user.personalWalletId) {
+      user.personalWalletId = personalWallet._id;
+      await user.save();
+    }
+    return personalWallet;
+  }
+  
+  // Criar wallet pessoal apenas se não existir nenhuma
+  personalWallet = new Wallet({
+    name: 'Minha Carteira Calendário',
+    ownerId: userId,
+  });
+  await personalWallet.save();
+  
+  // Criar membership do dono
+  const ownerMember = new WalletMember({
+    walletId: personalWallet._id,
+    userId: userId,
+    permission: 'owner'
+  });
+  await ownerMember.save();
+  
+  // Atualizar personalWalletId do usuário
+  if (user) {
+    user.personalWalletId = personalWallet._id;
+    await user.save();
+  } else {
+    // Se o usuário não existe ainda, será criado depois
+    console.log(`⚠️  Usuário ${userId} não encontrado ao criar wallet pessoal`);
+  }
+  
+  console.log(`✅ Wallet pessoal criada para usuário ${userId}: ${personalWallet._id}`);
+  
+  return personalWallet;
+}
+
 // GET obter dados do usuário atual
 router.get('/me', async (req, res) => {
   try {
     const User = getUserModel();
-    const user = await User.findOne({ userId: req.userId });
+    let user = await User.findOne({ userId: req.userId });
     
     if (!user) {
       return res.status(404).json({ message: 'Usuário não encontrado' });
+    }
+    
+    // Garantir que o usuário tem uma wallet pessoal (para usuários antigos)
+    const personalWallet = await ensurePersonalWallet(req.userId);
+    
+    // Se não tiver personalWalletId, atualizar
+    if (!user.personalWalletId) {
+      user.personalWalletId = personalWallet._id;
+      if (!user.walletsInvited) {
+        user.walletsInvited = [];
+      }
+      await user.save();
     }
     
     res.json(user);
@@ -27,6 +108,10 @@ router.get('/me', async (req, res) => {
 router.post('/', validateUser, async (req, res) => {
   try {
     const User = getUserModel();
+    const { getWalletModel } = require('../models/Wallet');
+    const { getWalletMemberModel } = require('../models/WalletMember');
+    const Wallet = getWalletModel();
+    const WalletMember = getWalletMemberModel();
     const { name } = req.body;
     
     if (!name || name.trim().length === 0) {
@@ -35,21 +120,38 @@ router.post('/', validateUser, async (req, res) => {
     
     // Buscar usuário existente
     let user = await User.findOne({ userId: req.userId });
+    let isNewUser = false;
     
     if (user) {
       // Atualizar usuário existente
       user.name = name.trim();
       user.email = req.user.email || user.email;
       user.updatedAt = new Date();
+      
+      // Se não tiver personalWalletId, garantir que tenha uma wallet pessoal
+      if (!user.personalWalletId) {
+        const personalWallet = await ensurePersonalWallet(req.userId);
+        user.personalWalletId = personalWallet._id;
+      }
+      
       await user.save();
     } else {
       // Criar novo usuário
+      isNewUser = true;
+      
+      // Criar wallet pessoal automaticamente para novos usuários
+      const personalWallet = await ensurePersonalWallet(req.userId);
+      
       user = new User({
         userId: req.userId,
         email: req.user.email,
         name: name.trim(),
+        personalWalletId: personalWallet._id,
+        walletsInvited: []
       });
       await user.save();
+      
+      console.log(`✅ Wallet pessoal criada para novo usuário ${req.userId}: ${personalWallet._id}`);
     }
     
     res.status(201).json(user);

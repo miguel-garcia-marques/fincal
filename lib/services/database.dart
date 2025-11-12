@@ -42,25 +42,25 @@ class DatabaseService {
     await prefs.setString(_transactionsKey, transactionsJson);
   }
 
-  Future<List<Transaction>> getAllTransactions() async {
+  Future<List<Transaction>> getAllTransactions({required String walletId}) async {
     if (useApi) {
-      return await _apiService.getAllTransactions();
+      return await _apiService.getAllTransactions(walletId: walletId);
     } else {
       return await _getAllTransactionsLocal();
     }
   }
 
-  Future<void> saveTransaction(Transaction transaction) async {
+  Future<void> saveTransaction(Transaction transaction, {required String walletId}) async {
     if (useApi) {
-      await _apiService.saveTransaction(transaction);
+      await _apiService.saveTransaction(transaction, walletId: walletId);
     } else {
       await _saveTransactionLocal(transaction);
     }
   }
 
-  Future<void> updateTransaction(Transaction transaction) async {
+  Future<void> updateTransaction(Transaction transaction, {required String walletId}) async {
     if (useApi) {
-      await _apiService.updateTransaction(transaction);
+      await _apiService.updateTransaction(transaction, walletId: walletId);
     } else {
       final transactions = await _getAllTransactionsLocal();
       final index = transactions.indexWhere((t) => t.id == transaction.id);
@@ -71,9 +71,9 @@ class DatabaseService {
     }
   }
 
-  Future<void> deleteTransaction(String id) async {
+  Future<void> deleteTransaction(String id, {required String walletId}) async {
     if (useApi) {
-      await _apiService.deleteTransaction(id);
+      await _apiService.deleteTransaction(id, walletId: walletId);
     } else {
       final transactions = await _getAllTransactionsLocal();
       transactions.removeWhere((t) => t.id == id);
@@ -83,10 +83,11 @@ class DatabaseService {
 
   Future<List<Transaction>> getTransactionsInRange(
     DateTime startDate,
-    DateTime endDate,
-  ) async {
+    DateTime endDate, {
+    required String walletId,
+  }) async {
     if (useApi) {
-      return await _apiService.getTransactionsInRange(startDate, endDate);
+      return await _apiService.getTransactionsInRange(startDate, endDate, walletId: walletId);
     } else {
       // Lógica local (mantida para compatibilidade)
       final allTransactions = await _getAllTransactionsLocal();
@@ -174,9 +175,10 @@ class DatabaseService {
   // Calcular saldos separados por categoria
   Future<Map<String, double>> calculateBudgetBalances(
     DateTime startDate,
-    DateTime endDate,
-  ) async {
-    final transactions = await getTransactionsInRange(startDate, endDate);
+    DateTime endDate, {
+    required String walletId,
+  }) async {
+    final transactions = await getTransactionsInRange(startDate, endDate, walletId: walletId);
     
     double gastos = 0.0;
     double lazer = 0.0;

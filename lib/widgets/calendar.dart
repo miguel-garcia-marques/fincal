@@ -28,6 +28,11 @@ class CalendarWidget extends StatefulWidget {
 
 abstract class CalendarWidgetState extends State<CalendarWidget> {
   void toggleView();
+  void refreshCalendar() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
 }
 
 class _CalendarWidgetState extends CalendarWidgetState {

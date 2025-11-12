@@ -4,22 +4,27 @@ import 'dart:async';
 import '../models/transaction.dart';
 import '../models/budget_balances.dart';
 import '../models/period_history.dart';
+import '../models/wallet.dart';
 import '../services/database.dart';
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../services/api_service.dart';
 import '../services/cache_service.dart';
+import '../services/wallet_service.dart';
+import '../services/wallet_storage_service.dart';
 import '../utils/date_utils.dart';
 import '../utils/responsive_fonts.dart';
 import '../widgets/calendar.dart';
 import '../widgets/transaction_list.dart';
 import '../widgets/loading_screen.dart';
 import 'add_transaction_screen.dart';
+import 'settings_menu_screen.dart';
 import '../widgets/day_details_dialog.dart';
 import '../widgets/period_selector_dialog.dart';
 import '../widgets/period_history_dialog.dart';
 import '../widgets/period_selection_dialog.dart';
 import '../widgets/balance_chart.dart';
+import '../widgets/bottom_nav_bar.dart';
 import '../theme/app_theme.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:convert';
@@ -38,9 +43,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final UserService _userService = UserService();
   final ApiService _apiService = ApiService();
   final CacheService _cacheService = CacheService();
+  final WalletService _walletService = WalletService();
+  final WalletStorageService _walletStorageService = WalletStorageService();
 
-  String? _userName;
-  bool _isLoadingUser = true;
+  // Wallet ativa
+  Wallet? _activeWallet;
 
   int _selectedYear = DateTime.now().year;
   DateTime _startDate = DateTime(DateTime.now().year, DateTime.now().month, 1);
@@ -55,7 +62,6 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _periodSelected = false;
   final GlobalKey<CalendarWidgetState> _calendarKey =
       GlobalKey<CalendarWidgetState>();
-  bool _isFabMenuExpanded = false;
   Future<double>? _initialBalanceFuture;
   double? _cachedInitialBalance; // Cache do saldo inicial
   String? _filterPerson;
@@ -80,27 +86,46 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // Iniciar timer para atualizar cache a cada 30 segundos
+  // Iniciar timer para atualizar cache a cada 5 minutos (reduzido para melhorar performance)
   void _startCacheRefreshTimer() {
     _cacheRefreshTimer?.cancel();
     _cacheRefreshTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) => _refreshDataInBackground(),
+      const Duration(minutes: 5),
+      (_) {
+        if (mounted) {
+          _refreshDataInBackground();
+        } else {
+          _cacheRefreshTimer?.cancel();
+        }
+      },
     );
   }
 
   // Método de inicialização otimizado com cache
   Future<void> _initializeApp() async {
-    // 1. Carregar dados do cache primeiro (rápido)
+    // 1. Carregar wallet ativa primeiro
+    await _loadActiveWallet();
+
+    // Se não houver wallet ativa após carregar, algo deu errado
+    if (_activeWallet == null) {
+      if (mounted) {
+        setState(() {
+          _isInitialLoading = false;
+        });
+      }
+      return;
+    }
+
+    // 2. Carregar dados do cache primeiro (rápido)
     await _loadFromCache();
 
-    // 2. Carregar dados do servidor em paralelo
+    // 3. Carregar dados do servidor em paralelo
     await Future.wait([
       _loadUserData(),
       _loadPeriodHistories(),
     ]);
 
-    // 3. Se não tiver período selecionado do cache, selecionar
+    // 4. Se não tiver período selecionado do cache, selecionar
     if (!_periodSelected) {
       await _selectDateRangeOnStartup();
     } else {
@@ -108,23 +133,158 @@ class _HomeScreenState extends State<HomeScreen> {
       await _loadTransactions(savePeriod: false, useCache: true);
     }
 
-    // 4. Marcar loading inicial como completo
+    // 5. Marcar loading inicial como completo
     if (mounted) {
       setState(() {
         _isInitialLoading = false;
       });
     }
 
-    // 5. Atualizar dados em background se necessário
+    // 6. Atualizar dados em background se necessário
     _refreshDataInBackground();
+  }
+
+  Future<void> _loadActiveWallet() async {
+    try {
+      // Primeiro, carregar dados do usuário para obter personalWalletId
+      final user = await _userService.getCurrentUser();
+
+      // Buscar todas as wallets e criar lista mutável
+      final walletsList = await _walletService.getAllWallets();
+      final wallets = List<Wallet>.from(walletsList);
+
+      // Buscar wallet pessoal - tentar usar personalWalletId primeiro
+      Wallet? personalWallet;
+
+      if (user?.personalWalletId != null) {
+        final personalWalletIdStr = user!.personalWalletId!.toString().trim();
+        try {
+          // Tentar encontrar a wallet pelo personalWalletId (normalizar IDs para comparação)
+          personalWallet = wallets.firstWhere(
+            (w) => w.id.toString().trim() == personalWalletIdStr,
+          );
+          print(
+              '✅ Wallet pessoal encontrada pelo personalWalletId: ${personalWallet.id}');
+        } catch (e) {
+          // Se não encontrar pelo ID na lista, tentar buscar diretamente pela API
+          print('⚠️  Wallet não encontrada na lista, buscando pela API...');
+          try {
+            personalWallet =
+                await _walletService.getWallet(personalWalletIdStr);
+            // Adicionar à lista se não estiver lá
+            if (!wallets.any((w) =>
+                w.id.toString().trim() ==
+                personalWallet!.id.toString().trim())) {
+              wallets.add(personalWallet);
+              print(
+                  '✅ Wallet pessoal adicionada à lista: ${personalWallet.id}');
+            }
+          } catch (e2) {
+            print(
+                '⚠️  Wallet pessoal não encontrada pelo ID na API: $personalWalletIdStr - $e2');
+            // Continuar para tentar encontrar por isOwner
+          }
+        }
+      }
+
+      // Se não encontrou pelo personalWalletId, tentar por isOwner
+      if (personalWallet == null) {
+        final ownedWallets = wallets.where((w) => w.isOwner).toList();
+        if (ownedWallets.isNotEmpty) {
+          // Se houver múltiplas wallets pessoais, usar a primeira (mais antiga)
+          // O backend agora garante que não serão criadas novas, mas pode haver duplicatas antigas
+          personalWallet = ownedWallets.first;
+          print(
+              '✅ Wallet pessoal encontrada por isOwner: ${personalWallet.id}');
+
+          // Se houver múltiplas, logar para debug e remover duplicatas da lista
+          if (ownedWallets.length > 1) {
+            print(
+                '⚠️  Múltiplas wallets pessoais encontradas: ${ownedWallets.length}. Usando a primeira: ${personalWallet.id}');
+            // Remover wallets pessoais duplicadas da lista, mantendo apenas a primeira
+            wallets.removeWhere((w) => w.isOwner && w.id != personalWallet!.id);
+          }
+        } else {
+          // Se não há wallet pessoal, criar uma (o backend retornará a existente se já houver)
+          print(
+              '⚠️  Wallet pessoal não encontrada. Tentando criar/obter wallet pessoal...');
+          try {
+            personalWallet = await _walletService.createWallet();
+            // Adicionar à lista se não estiver lá
+            if (!wallets.any((w) => w.id == personalWallet!.id)) {
+              wallets.add(personalWallet);
+            }
+            print('✅ Wallet pessoal obtida/criada: ${personalWallet.id}');
+          } catch (e2) {
+            print('❌ Erro ao criar/obter wallet pessoal: $e2');
+            if (mounted) {
+              setState(() {
+                _isInitialLoading = false;
+              });
+            }
+            return;
+          }
+        }
+      }
+
+      // Se não houver outras wallets além da pessoal, usar a pessoal automaticamente
+      if (wallets.length == 1 && wallets.first.id == personalWallet.id) {
+        await _walletStorageService.setActiveWalletId(personalWallet.id);
+        if (mounted) {
+          setState(() {
+            _activeWallet = personalWallet;
+          });
+        }
+        return; // Não mostrar dialog, usar diretamente
+      }
+
+      // Se houver outras wallets, verificar se há uma ativa
+      final activeWalletId = await _walletStorageService.getActiveWalletId();
+      if (activeWalletId != null) {
+        try {
+          final wallet = wallets.firstWhere((w) => w.id == activeWalletId);
+          if (mounted) {
+            setState(() {
+              _activeWallet = wallet;
+            });
+          }
+        } catch (e) {
+          // Wallet ativa não existe mais, usar a pessoal por padrão
+          await _walletStorageService.setActiveWalletId(personalWallet.id);
+          if (mounted) {
+            setState(() {
+              _activeWallet = personalWallet;
+            });
+          }
+        }
+      } else {
+        // Se não houver wallet ativa, usar a pessoal por padrão
+        await _walletStorageService.setActiveWalletId(personalWallet.id);
+        if (mounted) {
+          setState(() {
+            _activeWallet = personalWallet;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading active wallet: $e');
+      // Em caso de erro, não criar wallet aqui - deve ser criada no backend
+      if (mounted) {
+        setState(() {
+          _isInitialLoading = false;
+        });
+      }
+    }
   }
 
   // Carregar dados do cache
   Future<void> _loadFromCache() async {
     try {
+      if (!mounted) return;
+
       // Carregar período atual do cache
       final cachedPeriod = await _cacheService.getCachedCurrentPeriod();
-      if (cachedPeriod != null) {
+      if (cachedPeriod != null && mounted) {
         setState(() {
           _startDate = cachedPeriod['startDate'] as DateTime;
           _endDate = cachedPeriod['endDate'] as DateTime;
@@ -133,18 +293,24 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
 
+      if (!mounted) return;
+
       // Carregar períodos do cache
       final cachedPeriods = await _cacheService.getCachedPeriodHistories();
-      if (cachedPeriods != null && cachedPeriods.isNotEmpty) {
+      if (cachedPeriods != null && cachedPeriods.isNotEmpty && mounted) {
         setState(() {
           _periodHistories = cachedPeriods;
         });
       }
 
+      if (!mounted) return;
+
       // Carregar transações do cache se tiver período selecionado
       if (_periodSelected) {
         final cachedTransactions = await _cacheService.getCachedTransactions();
-        if (cachedTransactions != null && cachedTransactions.isNotEmpty) {
+        if (cachedTransactions != null &&
+            cachedTransactions.isNotEmpty &&
+            mounted) {
           setState(() {
             _transactions = cachedTransactions;
             _isLoading = false;
@@ -158,27 +324,37 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Atualizar dados em background
+  // Atualizar dados em background (apenas se cache expirou)
   Future<void> _refreshDataInBackground() async {
     try {
+      if (!mounted) return;
+
       // Verificar se o cache é válido
       final isCacheValid = await _cacheService.isCacheValid();
 
-      if (!isCacheValid) {
-        // Atualizar períodos
-        final periods = await _apiService.getAllPeriodHistories();
-        if (mounted) {
-          setState(() {
-            _periodHistories = periods;
-          });
-          await _cacheService.cachePeriodHistories(periods);
+      if (!mounted) return;
+
+      // Só atualizar se cache expirou
+      if (!isCacheValid && _activeWallet != null) {
+        // Atualizar períodos apenas se necessário
+        if (_periodHistories.isEmpty) {
+          final periods = await _apiService.getAllPeriodHistories();
+          if (mounted) {
+            setState(() {
+              _periodHistories = periods;
+            });
+            await _cacheService.cachePeriodHistories(periods);
+          }
         }
 
-        // Atualizar transações se tiver período selecionado
+        if (!mounted) return;
+
+        // Atualizar transações apenas se tiver período selecionado
         if (_periodSelected) {
           final transactions = await _databaseService.getTransactionsInRange(
             _startDate,
             _endDate,
+            walletId: _activeWallet!.id,
           );
           if (mounted) {
             setState(() {
@@ -195,20 +371,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadUserData() async {
     try {
-      final user = await _userService.getCurrentUser();
-      if (mounted) {
-        setState(() {
-          _userName = user?.name;
-          _isLoadingUser = false;
-        });
-      }
+      await _userService.getCurrentUser();
     } catch (e) {
       print('Erro ao carregar dados do usuário: $e');
-      if (mounted) {
-        setState(() {
-          _isLoadingUser = false;
-        });
-      }
     }
   }
 
@@ -273,11 +438,28 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Função dedicada para reload completo (usada pelo botão de reload e após import)
+  Future<void> _reloadAllData() async {
+    if (!mounted || _activeWallet == null) return;
+
+    // Invalidar cache para forçar reload do servidor
+    await _cacheService.invalidateCache();
+
+    // Recarregar transações
+    await _loadTransactions(savePeriod: false, useCache: false);
+
+    // Forçar atualização do calendário
+    if (mounted && _calendarKey.currentState != null) {
+      _calendarKey.currentState?.refreshCalendar();
+    }
+  }
+
   Future<void> _loadTransactions({
     bool savePeriod = false,
     String periodName = '',
     bool useCache = false,
   }) async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
     List<Transaction> transactions = [];
@@ -287,20 +469,32 @@ class _HomeScreenState extends State<HomeScreen> {
       final cachedTransactions = await _cacheService.getCachedTransactions();
       if (cachedTransactions != null && cachedTransactions.isNotEmpty) {
         transactions = cachedTransactions;
-        setState(() {
-          _transactions = transactions;
-          _isLoading = false;
-        });
-        // Continuar em background para atualizar
-        _refreshTransactionsInBackground();
+        if (mounted) {
+          setState(() {
+            _transactions = transactions;
+            _isLoading = false;
+          });
+          // Continuar em background para atualizar
+          _refreshTransactionsInBackground();
+        }
         return;
       }
     }
 
     // Carregar do servidor
+    if (_activeWallet == null) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+      return;
+    }
+
     transactions = await _databaseService.getTransactionsInRange(
       _startDate,
       _endDate,
+      walletId: _activeWallet!.id,
     );
 
     // Save period history with transaction IDs only if requested
@@ -334,24 +528,37 @@ class _HomeScreenState extends State<HomeScreen> {
     _cachedInitialBalance = null;
     _initialBalanceFuture = _calculateInitialBalance();
 
-    setState(() {
-      _transactions = transactions;
-      _isLoading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _transactions = transactions;
+        _isLoading = false;
+      });
+      // Forçar atualização do calendário após carregar transações
+      if (_calendarKey.currentState != null) {
+        _calendarKey.currentState?.refreshCalendar();
+      }
+    }
   }
 
   // Atualizar transações em background
   Future<void> _refreshTransactionsInBackground() async {
     try {
+      if (_activeWallet == null) return;
+
       final transactions = await _databaseService.getTransactionsInRange(
         _startDate,
         _endDate,
+        walletId: _activeWallet!.id,
       );
       if (mounted) {
         setState(() {
           _transactions = transactions;
         });
         await _cacheService.cacheTransactions(transactions);
+        // Forçar atualização do calendário após atualizar transações
+        if (_calendarKey.currentState != null) {
+          _calendarKey.currentState?.refreshCalendar();
+        }
       }
     } catch (e) {
       print('Erro ao atualizar transações em background: $e');
@@ -381,10 +588,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showPeriodHistory() async {
+    if (_activeWallet == null) return;
+
     await showDialog(
       context: context,
       builder: (context) => PeriodHistoryDialog(
         periods: _periodHistories,
+        walletId: _activeWallet!.id,
         onPeriodSelected: (period) async {
           setState(() {
             _startDate = period.startDate;
@@ -432,26 +642,37 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showAddTransactionDialog() async {
-    final result = await showDialog(
+    if (_activeWallet == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Por favor, selecione uma carteira primeiro')),
+      );
+      return;
+    }
+
+    final userId = _authService.currentUser?.id;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Usuário não autenticado')),
+      );
+      return;
+    }
+
+    final result = await showModalBottomSheet(
       context: context,
-      barrierColor: Colors.black.withOpacity(0.5),
-      builder: (context) => const AddTransactionScreen(),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      isDismissible: true,
+      enableDrag: true,
+      builder: (context) => AddTransactionScreen(
+        walletId: _activeWallet!.id,
+        userId: userId,
+      ),
     );
 
     if (result == true) {
       await _loadTransactions(savePeriod: false, useCache: false);
     }
-  }
-
-  Future<void> _showImportDialog() async {
-    await showDialog(
-      context: context,
-      builder: (context) => _ImportTransactionsDialog(
-        onImportComplete: () async {
-          await _loadTransactions(savePeriod: false, useCache: false);
-        },
-      ),
-    );
   }
 
   List<String> get _availablePersons {
@@ -536,17 +757,22 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 // Lista de transações
                 Expanded(
-                  child: TransactionListWidget(
-                    transactions: _transactions,
-                    onTransactionUpdated: () async {
-                      await _loadTransactions(
-                          savePeriod: false, useCache: false);
-                      if (mounted) {
-                        Navigator.of(context).pop();
-                        _showTransactionsAsPopup();
-                      }
-                    },
-                  ),
+                  child: _activeWallet != null &&
+                          _authService.currentUser?.id != null
+                      ? TransactionListWidget(
+                          transactions: _transactions,
+                          onTransactionUpdated: () async {
+                            await _loadTransactions(
+                                savePeriod: false, useCache: false);
+                            if (mounted) {
+                              Navigator.of(context).pop();
+                              _showTransactionsAsPopup();
+                            }
+                          },
+                          walletId: _activeWallet!.id,
+                          userId: _authService.currentUser!.id,
+                        )
+                      : const Center(child: CircularProgressIndicator()),
                 ),
               ],
             ),
@@ -575,16 +801,21 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               centerTitle: true,
             ),
-            body: TransactionListWidget(
-              transactions: _transactions,
-              onTransactionUpdated: () async {
-                await _loadTransactions(savePeriod: false, useCache: false);
-                if (mounted) {
-                  Navigator.of(context).pop();
-                  _showTransactionsAsPopup();
-                }
-              },
-            ),
+            body: _activeWallet != null && _authService.currentUser?.id != null
+                ? TransactionListWidget(
+                    transactions: _transactions,
+                    onTransactionUpdated: () async {
+                      await _loadTransactions(
+                          savePeriod: false, useCache: false);
+                      if (mounted) {
+                        Navigator.of(context).pop();
+                        _showTransactionsAsPopup();
+                      }
+                    },
+                    walletId: _activeWallet!.id,
+                    userId: _authService.currentUser!.id,
+                  )
+                : const Center(child: CircularProgressIndicator()),
           ),
           fullscreenDialog: true,
         ),
@@ -602,7 +833,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Container(
           constraints: BoxConstraints(
             maxWidth: MediaQuery.of(context).size.width * 0.9,
-            maxHeight: MediaQuery.of(context).size.height * 0.8,
+            maxHeight: MediaQuery.of(context).size.height * 0.6,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -633,12 +864,28 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-              // Conteúdo: Saldo, Ganhos e Despesas
+              // Conteúdo: Gráfico, Saldo, Ganhos e Despesas
               Expanded(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     children: [
+                      // Gráfico de progressão
+                      FutureBuilder<double>(
+                        future: _initialBalanceFuture ?? Future.value(0.0),
+                        builder: (context, snapshot) {
+                          final initialBalance =
+                              _cachedInitialBalance ?? snapshot.data ?? 0.0;
+
+                          return BalanceChart(
+                            startDate: _startDate,
+                            endDate: _endDate,
+                            dailyBalances: _calculateDailyBalancesForChart(),
+                            initialBalance: initialBalance,
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 16),
                       // Card de Saldo
                       _SummaryCard(
                         title: 'Saldo',
@@ -687,11 +934,20 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showDayDetails(DateTime date) async {
-    // Calcular saldo disponível para este dia
-    final allTransactions = await _databaseService.getTransactionsInRange(
-      _startDate,
-      date,
-    );
+    // Usar transações já carregadas em memória em vez de fazer nova requisição
+    // Isso torna a abertura do diálogo instantânea
+    final checkDate = DateTime(date.year, date.month, date.day);
+    final startDateNormalized =
+        DateTime(_startDate.year, _startDate.month, _startDate.day);
+
+    // Filtrar transações até a data clicada (incluindo a data)
+    final allTransactions = _transactions.where((t) {
+      final transactionDate = DateTime(t.date.year, t.date.month, t.date.day);
+      return (transactionDate.isAfter(startDateNormalized) ||
+              transactionDate.isAtSameMomentAs(startDateNormalized)) &&
+          (transactionDate.isBefore(checkDate) ||
+              transactionDate.isAtSameMomentAs(checkDate));
+    }).toList();
 
     double balance = 0.0;
     double gastos = 0.0;
@@ -699,51 +955,41 @@ class _HomeScreenState extends State<HomeScreen> {
     double poupanca = 0.0;
 
     for (var transaction in allTransactions) {
-      final transactionDate = DateTime(
-        transaction.date.year,
-        transaction.date.month,
-        transaction.date.day,
-      );
-      final checkDate = DateTime(date.year, date.month, date.day);
+      if (transaction.type == TransactionType.ganho) {
+        if (transaction.isSalary && transaction.salaryValues != null) {
+          // Para salários, adicionar o valor total mas subtrair a poupança (que é despesa)
+          final poupancaAmount = transaction.salaryValues!.poupanca;
+          balance += transaction.amount - poupancaAmount;
 
-      if (transactionDate.isBefore(checkDate) ||
-          transactionDate.isAtSameMomentAs(checkDate)) {
-        if (transaction.type == TransactionType.ganho) {
-          if (transaction.isSalary && transaction.salaryValues != null) {
-            // Para salários, adicionar o valor total mas subtrair a poupança (que é despesa)
-            final poupancaAmount = transaction.salaryValues!.poupanca;
-            balance += transaction.amount - poupancaAmount;
-
-            // Calcular valores do salário
-            final values = transaction.salaryValues;
-            gastos += values!.gastos;
-            lazer += values.lazer;
-            // Poupança é considerada despesa, então subtrair em vez de adicionar
-            poupanca -= values.poupanca;
-          } else if (transaction.category == TransactionCategory.alimentacao) {
-            // Ganhos de alimentação entram como valor positivo em "gastos"
-            balance += transaction.amount;
-            gastos += transaction.amount;
-          } else {
-            balance += transaction.amount;
-          }
+          // Calcular valores do salário
+          final values = transaction.salaryValues;
+          gastos += values!.gastos;
+          lazer += values.lazer;
+          // Poupança é considerada despesa, então subtrair em vez de adicionar
+          poupanca -= values.poupanca;
+        } else if (transaction.category == TransactionCategory.alimentacao) {
+          // Ganhos de alimentação entram como valor positivo em "gastos"
+          balance += transaction.amount;
+          gastos += transaction.amount;
         } else {
-          balance -= transaction.amount;
+          balance += transaction.amount;
+        }
+      } else {
+        balance -= transaction.amount;
 
-          // Deduzir da categoria correspondente
-          switch (transaction.expenseBudgetCategory) {
-            case ExpenseBudgetCategory.gastos:
-              gastos -= transaction.amount;
-              break;
-            case ExpenseBudgetCategory.lazer:
-              lazer -= transaction.amount;
-              break;
-            case ExpenseBudgetCategory.poupanca:
-              poupanca -= transaction.amount;
-              break;
-            case null:
-              break;
-          }
+        // Deduzir da categoria correspondente
+        switch (transaction.expenseBudgetCategory) {
+          case ExpenseBudgetCategory.gastos:
+            gastos -= transaction.amount;
+            break;
+          case ExpenseBudgetCategory.lazer:
+            lazer -= transaction.amount;
+            break;
+          case ExpenseBudgetCategory.poupanca:
+            poupanca -= transaction.amount;
+            break;
+          case null:
+            break;
         }
       }
     }
@@ -828,9 +1074,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // Se temos transações carregadas, podemos calcular parcialmente
       // Mas ainda precisamos das transações antes do período
+      if (_activeWallet == null) return 0.0;
+
       final allTransactions = await _databaseService.getTransactionsInRange(
         DateTime(1900, 1, 1), // Data muito antiga para pegar todas
         beforePeriod,
+        walletId: _activeWallet!.id,
       );
 
       for (var transaction in allTransactions) {
@@ -962,22 +1211,97 @@ class _HomeScreenState extends State<HomeScreen> {
                           // Filtro por pessoa
                           _buildPersonFilter(),
                           const SizedBox(width: 8),
-                          // Botão do menu (sem o menu expandido aqui)
+                          // Botão de reload
                           IconButton(
-                            onPressed: () {
-                              setState(() {
-                                _isFabMenuExpanded = !_isFabMenuExpanded;
-                              });
+                            onPressed: () async {
+                              await _reloadAllData();
                             },
-                            icon: Icon(
-                              _isFabMenuExpanded ? Icons.close : Icons.menu,
+                            icon: const Icon(
+                              Icons.refresh,
                               color: AppTheme.black,
                             ),
+                            tooltip: 'Recarregar transações e calendário',
                             style: IconButton.styleFrom(
-                              backgroundColor: _isFabMenuExpanded
-                                  ? AppTheme.darkGray.withOpacity(0.1)
-                                  : Colors.transparent,
+                              backgroundColor: Colors.transparent,
                             ),
+                          ),
+                          const SizedBox(width: 8),
+                          // Botão do menu (Definições e Sair)
+                          PopupMenuButton<String>(
+                            icon: const Icon(Icons.menu, color: AppTheme.black),
+                            onSelected: (value) async {
+                              if (value == 'settings') {
+                                if (_activeWallet != null) {
+                                  final result =
+                                      await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (context) => SettingsMenuScreen(
+                                        currentWallet: _activeWallet!,
+                                      ),
+                                    ),
+                                  );
+                                  // Se a wallet foi alterada, recarregar
+                                  if (result == true && mounted) {
+                                    await _loadActiveWallet();
+                                    await _loadTransactions(useCache: false);
+                                  }
+                                }
+                              } else if (value == 'logout') {
+                                // Mostrar diálogo de confirmação
+                                final shouldLogout = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Confirmar Logout'),
+                                    content: const Text(
+                                        'Tem certeza que deseja sair?'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.of(context).pop(false),
+                                        child: const Text('Cancelar'),
+                                      ),
+                                      ElevatedButton(
+                                        onPressed: () =>
+                                            Navigator.of(context).pop(true),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: AppTheme.expenseRed,
+                                        ),
+                                        child: const Text('Sair'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+
+                                if (shouldLogout == true && mounted) {
+                                  await _authService.signOut();
+                                }
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
+                                value: 'settings',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.settings, color: AppTheme.black),
+                                    SizedBox(width: 12),
+                                    Text('Definições'),
+                                  ],
+                                ),
+                              ),
+                              const PopupMenuItem(
+                                value: 'logout',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.logout,
+                                        color: AppTheme.expenseRed),
+                                    SizedBox(width: 12),
+                                    Text('Sair',
+                                        style: TextStyle(
+                                            color: AppTheme.expenseRed)),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -1028,14 +1352,27 @@ class _HomeScreenState extends State<HomeScreen> {
                                             const SizedBox(width: 24),
                                             Expanded(
                                               flex: 2,
-                                              child: TransactionListWidget(
-                                                transactions: _transactions,
-                                                onTransactionUpdated: () async {
-                                                  await _loadTransactions(
-                                                      savePeriod: false,
-                                                      useCache: false);
-                                                },
-                                              ),
+                                              child: _activeWallet != null &&
+                                                      _authService.currentUser
+                                                              ?.id !=
+                                                          null
+                                                  ? TransactionListWidget(
+                                                      transactions:
+                                                          _transactions,
+                                                      onTransactionUpdated:
+                                                          () async {
+                                                        await _loadTransactions(
+                                                            savePeriod: false,
+                                                            useCache: false);
+                                                      },
+                                                      walletId:
+                                                          _activeWallet!.id,
+                                                      userId: _authService
+                                                          .currentUser!.id,
+                                                    )
+                                                  : const Center(
+                                                      child:
+                                                          CircularProgressIndicator()),
                                             ),
                                           ],
                                         );
@@ -1080,15 +1417,27 @@ class _HomeScreenState extends State<HomeScreen> {
                                               const SizedBox(width: 12),
                                               Expanded(
                                                 flex: 1,
-                                                child: TransactionListWidget(
-                                                  transactions: _transactions,
-                                                  onTransactionUpdated:
-                                                      () async {
-                                                    await _loadTransactions(
-                                                        savePeriod: false,
-                                                        useCache: false);
-                                                  },
-                                                ),
+                                                child: _activeWallet != null &&
+                                                        _authService.currentUser
+                                                                ?.id !=
+                                                            null
+                                                    ? TransactionListWidget(
+                                                        transactions:
+                                                            _transactions,
+                                                        onTransactionUpdated:
+                                                            () async {
+                                                          await _loadTransactions(
+                                                              savePeriod: false,
+                                                              useCache: false);
+                                                        },
+                                                        walletId:
+                                                            _activeWallet!.id,
+                                                        userId: _authService
+                                                            .currentUser!.id,
+                                                      )
+                                                    : const Center(
+                                                        child:
+                                                            CircularProgressIndicator()),
                                               ),
                                             ],
                                           ],
@@ -1101,49 +1450,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                 ),
 
-                // Gráfico de progressão
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final screenHeight = MediaQuery.of(context).size.height;
-                    final shouldHideChart = screenHeight < 700;
-
-                    if (shouldHideChart) {
-                      return const SizedBox.shrink();
-                    }
-
-                    return Container(
-                      // padding: EdgeInsets.symmetric(
-                      //   horizontal: isDesktop ? 24 : 12,
-                      //   vertical: isDesktop ? 16 : 20,
-                      // ),
-                      padding: EdgeInsets.only(
-                          bottom: 10,
-                          top: isDesktop ? 16 : 20,
-                          left: isDesktop ? 24 : 12,
-                          right: isDesktop ? 24 : 12),
-                      decoration: const BoxDecoration(
-                        color: AppTheme.white,
-                      ),
-                      child: FutureBuilder<double>(
-                        future: _initialBalanceFuture ?? Future.value(0.0),
-                        builder: (context, snapshot) {
-                          // Sempre mostrar o gráfico, mesmo durante loading
-                          // Usar saldo em cache se disponível, senão usar 0.0
-                          final initialBalance =
-                              _cachedInitialBalance ?? snapshot.data ?? 0.0;
-
-                          return BalanceChart(
-                            startDate: _startDate,
-                            endDate: _endDate,
-                            dailyBalances: _calculateDailyBalancesForChart(),
-                            initialBalance: initialBalance,
-                          );
-                        },
-                      ),
-                    );
-                  },
-                ),
-
                 // Resumo mensal
                 LayoutBuilder(
                   builder: (context, constraints) {
@@ -1151,277 +1457,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     final shouldShowBalanceAsPopup = screenHeight < 700;
 
                     if (shouldShowBalanceAsPopup) {
-                      // Layout em coluna para ecrãs pequenos: Período em cima, Resumo em baixo
+                      // Layout em linha para ecrãs pequenos: Período e Resumo lado a lado
+                      final screenWidth = MediaQuery.of(context).size.width;
+                      final isDesktop = screenWidth >= 1400;
                       return Container(
-                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                        padding: EdgeInsets.fromLTRB(
+                            12, isDesktop ? 16 : 12, 12, isDesktop ? 16 : 12),
                         decoration: const BoxDecoration(
                           color: AppTheme.white,
                         ),
-                        child: Column(
-                          children: [
-                            // Período - em cima
-                            InkWell(
-                              onTap: _selectPeriod,
-                              borderRadius: BorderRadius.circular(12),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.white,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: AppTheme.darkGray.withOpacity(0.2),
-                                  ),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    // "Período" e ano juntos na mesma linha
-                                    Row(
-                                      children: [
-                                        Flexible(
-                                          child: Text(
-                                            'Período',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall
-                                                ?.copyWith(
-                                                  color: AppTheme.darkGray,
-                                                ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 4),
-                                        if (_startDate.year == _endDate.year)
-                                          Flexible(
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 4,
-                                                vertical: 2,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.darkGray
-                                                    .withOpacity(0.1),
-                                                borderRadius:
-                                                    BorderRadius.circular(4),
-                                              ),
-                                              child: Text(
-                                                '${_startDate.year}',
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .bodySmall
-                                                    ?.copyWith(
-                                                      fontSize: ResponsiveFonts
-                                                          .getFontSize(
-                                                              context, 9),
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      color: AppTheme.darkGray,
-                                                    ),
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                          )
-                                        else
-                                          Flexible(
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Flexible(
-                                                  child: Container(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                      horizontal: 4,
-                                                      vertical: 2,
-                                                    ),
-                                                    decoration: BoxDecoration(
-                                                      color: AppTheme.darkGray
-                                                          .withOpacity(0.1),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              4),
-                                                    ),
-                                                    child: Text(
-                                                      '${_startDate.year}',
-                                                      style: Theme.of(context)
-                                                          .textTheme
-                                                          .bodySmall
-                                                          ?.copyWith(
-                                                            fontSize:
-                                                                ResponsiveFonts
-                                                                    .getFontSize(
-                                                                        context,
-                                                                        9),
-                                                            fontWeight:
-                                                                FontWeight.w600,
-                                                            color: AppTheme
-                                                                .darkGray,
-                                                          ),
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                    ),
-                                                  ),
-                                                ),
-                                                Padding(
-                                                  padding: const EdgeInsets
-                                                      .symmetric(horizontal: 2),
-                                                  child: Text(
-                                                    '-',
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .bodySmall
-                                                        ?.copyWith(
-                                                          fontSize:
-                                                              ResponsiveFonts
-                                                                  .getFontSize(
-                                                                      context,
-                                                                      9),
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                          color:
-                                                              AppTheme.darkGray,
-                                                        ),
-                                                  ),
-                                                ),
-                                                Flexible(
-                                                  child: Container(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                      horizontal: 4,
-                                                      vertical: 2,
-                                                    ),
-                                                    decoration: BoxDecoration(
-                                                      color: AppTheme.darkGray
-                                                          .withOpacity(0.1),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              4),
-                                                    ),
-                                                    child: Text(
-                                                      '${_endDate.year}',
-                                                      style: Theme.of(context)
-                                                          .textTheme
-                                                          .bodySmall
-                                                          ?.copyWith(
-                                                            fontSize:
-                                                                ResponsiveFonts
-                                                                    .getFontSize(
-                                                                        context,
-                                                                        9),
-                                                            fontWeight:
-                                                                FontWeight.w600,
-                                                            color: AppTheme
-                                                                .darkGray,
-                                                          ),
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    // Período formatado embaixo
-                                    Text(
-                                      _formatPeriodDates(_startDate, _endDate),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w600,
-                                            color: AppTheme.black,
-                                          ),
-                                      overflow: TextOverflow.ellipsis,
-                                      maxLines: 1,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            // Botão para ver resumo financeiro - em baixo
-                            InkWell(
-                              onTap: _showBalancePopup,
-                              borderRadius: BorderRadius.circular(12),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.darkGray.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: AppTheme.darkGray.withOpacity(0.2),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        'Ver Resumo Financeiro',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w600,
-                                              color: AppTheme.black,
-                                            ),
-                                        overflow: TextOverflow.ellipsis,
-                                        maxLines: 1,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Icon(
-                                      Icons.open_in_new,
-                                      color: AppTheme.darkGray.withOpacity(0.5),
-                                      size: 20,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-
-                    // Mostrar normalmente quando altura >= 700
-                    return Column(
-                      children: [
-                        // Saldo e Período
-                        Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: isDesktop ? 24 : 12,
-                            vertical: isDesktop ? 8 : 4,
-                          ),
-                          decoration: const BoxDecoration(
-                            color: AppTheme.white,
-                          ),
+                        child: IntrinsicHeight(
                           child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              // Saldo - à esquerda
-                              Expanded(
-                                child: _SummaryCard(
-                                  title: 'Saldo',
-                                  value: formatCurrency(
-                                      summary['gains']! - summary['expenses']!),
-                                  color: AppTheme.darkGray,
-                                  isFullWidth: true,
-                                  isTall: true,
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              // Período - à direita (agora ocupa todo o espaço)
+                              // Período - à esquerda
                               Expanded(
                                 child: InkWell(
                                   onTap: _selectPeriod,
@@ -1629,14 +1678,326 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               ),
+                              const SizedBox(width: 8),
+                              // Botão para ver resumo financeiro - à direita
+                              Expanded(
+                                child: InkWell(
+                                  onTap: _showBalancePopup,
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.darkGray.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color:
+                                            AppTheme.darkGray.withOpacity(0.2),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            'Resumo Financeiro',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodyMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppTheme.black,
+                                                ),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Icon(
+                                          Icons.open_in_new,
+                                          color: AppTheme.darkGray
+                                              .withOpacity(0.5),
+                                          size: 18,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ],
+                          ),
+                        ),
+                      );
+                    }
+
+                    // Mostrar normalmente quando altura >= 700
+                    return Column(
+                      children: [
+                        // Saldo e Período
+                        Container(
+                          // padding: EdgeInsets.symmetric(
+                          //   horizontal: isDesktop ? 24 : 12,
+                          //   vertical: isDesktop ? 16 : 12,
+                          // ),
+                          padding: EdgeInsets.only(
+                              bottom: isDesktop ? 6 : 4,
+                              left: isDesktop ? 24 : 12,
+                              right: isDesktop ? 24 : 12,
+                              top: isDesktop ? 16 : 12),
+                          decoration: const BoxDecoration(
+                            color: AppTheme.white,
+                          ),
+                          child: IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                // Saldo - à esquerda
+                                Expanded(
+                                  child: InkWell(
+                                    onTap: _showBalancePopup,
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: _SummaryCard(
+                                      title: 'Saldo',
+                                      value: formatCurrency(summary['gains']! -
+                                          summary['expenses']!),
+                                      color: AppTheme.darkGray,
+                                      isFullWidth: true,
+                                      isTall: true,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                // Período - à direita (agora ocupa todo o espaço)
+                                Expanded(
+                                  child: InkWell(
+                                    onTap: _selectPeriod,
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 10,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.white,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: AppTheme.darkGray
+                                              .withOpacity(0.2),
+                                        ),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          // "Período" e ano juntos na mesma linha
+                                          Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  'Período',
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .bodySmall
+                                                      ?.copyWith(
+                                                        color:
+                                                            AppTheme.darkGray,
+                                                      ),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              if (_startDate.year ==
+                                                  _endDate.year)
+                                                Flexible(
+                                                  child: Container(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                      horizontal: 4,
+                                                      vertical: 2,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color: AppTheme.darkGray
+                                                          .withOpacity(0.1),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              4),
+                                                    ),
+                                                    child: Text(
+                                                      '${_startDate.year}',
+                                                      style: Theme.of(context)
+                                                          .textTheme
+                                                          .bodySmall
+                                                          ?.copyWith(
+                                                            fontSize:
+                                                                ResponsiveFonts
+                                                                    .getFontSize(
+                                                                        context,
+                                                                        9),
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                            color: AppTheme
+                                                                .darkGray,
+                                                          ),
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                )
+                                              else
+                                                Flexible(
+                                                  child: Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Flexible(
+                                                        child: Container(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .symmetric(
+                                                            horizontal: 4,
+                                                            vertical: 2,
+                                                          ),
+                                                          decoration:
+                                                              BoxDecoration(
+                                                            color: AppTheme
+                                                                .darkGray
+                                                                .withOpacity(
+                                                                    0.1),
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                        4),
+                                                          ),
+                                                          child: Text(
+                                                            '${_startDate.year}',
+                                                            style:
+                                                                Theme.of(
+                                                                        context)
+                                                                    .textTheme
+                                                                    .bodySmall
+                                                                    ?.copyWith(
+                                                                      fontSize:
+                                                                          ResponsiveFonts.getFontSize(
+                                                                              context,
+                                                                              9),
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w600,
+                                                                      color: AppTheme
+                                                                          .darkGray,
+                                                                    ),
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      Padding(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .symmetric(
+                                                                horizontal: 2),
+                                                        child: Text(
+                                                          '-',
+                                                          style:
+                                                              Theme.of(context)
+                                                                  .textTheme
+                                                                  .bodySmall
+                                                                  ?.copyWith(
+                                                                    fontSize: ResponsiveFonts
+                                                                        .getFontSize(
+                                                                            context,
+                                                                            9),
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .w600,
+                                                                    color: AppTheme
+                                                                        .darkGray,
+                                                                  ),
+                                                        ),
+                                                      ),
+                                                      Flexible(
+                                                        child: Container(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .symmetric(
+                                                            horizontal: 4,
+                                                            vertical: 2,
+                                                          ),
+                                                          decoration:
+                                                              BoxDecoration(
+                                                            color: AppTheme
+                                                                .darkGray
+                                                                .withOpacity(
+                                                                    0.1),
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                        4),
+                                                          ),
+                                                          child: Text(
+                                                            '${_endDate.year}',
+                                                            style:
+                                                                Theme.of(
+                                                                        context)
+                                                                    .textTheme
+                                                                    .bodySmall
+                                                                    ?.copyWith(
+                                                                      fontSize:
+                                                                          ResponsiveFonts.getFontSize(
+                                                                              context,
+                                                                              9),
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w600,
+                                                                      color: AppTheme
+                                                                          .darkGray,
+                                                                    ),
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 4),
+                                          // Período formatado embaixo
+                                          Text(
+                                            _formatPeriodDates(
+                                                _startDate, _endDate),
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodyMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppTheme.black,
+                                                ),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                         // Ganhos e Despesas
                         Container(
                           padding: EdgeInsets.symmetric(
                             horizontal: isDesktop ? 24 : 12,
-                            vertical: isDesktop ? 12 : 8,
+                            vertical: isDesktop ? 16 : 12,
                           ),
                           decoration: const BoxDecoration(
                             color: AppTheme.white,
@@ -1674,106 +2035,35 @@ class _HomeScreenState extends State<HomeScreen> {
                     );
                   },
                 ),
-                // Espaço para a barra de navegação
-                SizedBox(
-                  height: MediaQuery.of(context).padding.bottom > 0
-                      ? MediaQuery.of(context).padding.bottom
-                      : 40,
-                ),
+                // Espaço para a navbar inferior
+                SizedBox(height: 90),
               ],
             ),
-            // Overlay com blur quando o menu está aberto
-            if (_isFabMenuExpanded)
-              Positioned.fill(
-                child: GestureDetector(
-                  onTap: () {
+            // Navbar inferior
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: BottomNavBar(
+                onHistoryTap: () {
+                  _showPeriodHistory();
+                },
+                onAddTransactionTap: () {
+                  _showAddTransactionDialog();
+                },
+                onTransactionsTap: () {
+                  final screenWidth = MediaQuery.of(context).size.width;
+                  if (screenWidth < 1300) {
+                    _showTransactionsAsPopup();
+                  } else {
                     setState(() {
-                      _isFabMenuExpanded = false;
+                      _showTransactions = !_showTransactions;
                     });
-                  },
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                    child: Container(
-                      color: Colors.black.withOpacity(0.1),
-                    ),
-                  ),
-                ),
+                  }
+                },
+                isTransactionsActive: _showTransactions,
               ),
-            // Menu expandido (sobreposto a tudo)
-            if (_isFabMenuExpanded)
-              Positioned(
-                top: isDesktop ? 88 : 68, // Altura do cabeçalho + padding
-                right: isDesktop ? 24 : 12,
-                child: _TopMenuExpanded(
-                  onAddTransaction: _showAddTransactionDialog,
-                  onImportTransactions: _showImportDialog,
-                  onShowTransactions: () {
-                    if (_showTransactions) {
-                      setState(() {
-                        _showTransactions = false;
-                        _isFabMenuExpanded = false;
-                      });
-                    } else {
-                      final screenWidth = MediaQuery.of(context).size.width;
-                      if (screenWidth < 1300) {
-                        _showTransactionsAsPopup();
-                      } else {
-                        setState(() {
-                          _showTransactions = true;
-                          _isFabMenuExpanded = false;
-                        });
-                      }
-                    }
-                  },
-                  onShowHistory: () {
-                    _showPeriodHistory();
-                    setState(() {
-                      _isFabMenuExpanded = false;
-                    });
-                  },
-                  onLogout: () async {
-                    // Mostrar diálogo de confirmação
-                    final shouldLogout = await showDialog<bool>(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: const Text('Confirmar Logout'),
-                        content: const Text('Tem certeza que deseja sair?'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.of(context).pop(false),
-                            child: const Text('Cancelar'),
-                          ),
-                          ElevatedButton(
-                            onPressed: () => Navigator.of(context).pop(true),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppTheme.expenseRed,
-                            ),
-                            child: const Text('Sair'),
-                          ),
-                        ],
-                      ),
-                    );
-
-                    if (shouldLogout == true && mounted) {
-                      await _authService.signOut();
-                    }
-                    if (mounted) {
-                      setState(() {
-                        _isFabMenuExpanded = false;
-                      });
-                    }
-                  },
-                  showTransactions: _showTransactions,
-                  userName: _userName,
-                  userEmail: _authService.currentUser?.email,
-                  isLoadingUser: _isLoadingUser,
-                  onToggle: () {
-                    setState(() {
-                      _isFabMenuExpanded = false;
-                    });
-                  },
-                ),
-              ),
+            ),
           ],
         ),
       ),
@@ -1804,7 +2094,7 @@ class _SummaryCard extends StatelessWidget {
         !isFullWidth && (title == 'Ganhos' || title == 'Despesas');
 
     return Container(
-      padding: EdgeInsets.all(isTall ? 12 : 8),
+      padding: EdgeInsets.all(isTall ? 12 : (hasBorder ? 12 : 8)),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(12),
@@ -1874,218 +2164,16 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
-class _TopMenuExpanded extends StatefulWidget {
-  final VoidCallback onAddTransaction;
-  final VoidCallback onShowTransactions;
-  final VoidCallback onShowHistory;
-  final VoidCallback onLogout;
-  final VoidCallback onToggle;
-  final VoidCallback onImportTransactions;
-  final bool showTransactions;
-  final String? userName;
-  final String? userEmail;
-  final bool isLoadingUser;
-
-  const _TopMenuExpanded({
-    required this.onAddTransaction,
-    required this.onShowTransactions,
-    required this.onShowHistory,
-    required this.onLogout,
-    required this.onToggle,
-    required this.onImportTransactions,
-    required this.showTransactions,
-    this.userName,
-    this.userEmail,
-    this.isLoadingUser = false,
-  });
-
-  @override
-  State<_TopMenuExpanded> createState() => _TopMenuExpandedState();
-}
-
-class _TopMenuExpandedState extends State<_TopMenuExpanded>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _animationController;
-
-  @override
-  void initState() {
-    super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    _animationController.forward();
-  }
-
-  @override
-  void dispose() {
-    _animationController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        const SizedBox(height: 12),
-        // Botões de ação (aparecem quando expandido, flutuando acima)
-        _buildActionButton(
-          icon: Icons.history,
-          label: 'Histórico',
-          onTap: widget.onShowHistory,
-          delay: 0,
-        ),
-        const SizedBox(height: 12),
-        _buildActionButton(
-          icon: widget.showTransactions ? Icons.receipt_long : Icons.receipt,
-          label: 'Transações',
-          onTap: widget.onShowTransactions,
-          delay: 2,
-          isActive: widget.showTransactions,
-        ),
-        const SizedBox(height: 12),
-        _buildActionButton(
-          icon: Icons.add,
-          label: 'Adicionar',
-          onTap: widget.onAddTransaction,
-          delay: 3,
-        ),
-        const SizedBox(height: 12),
-        _buildActionButton(
-          icon: Icons.upload_file,
-          label: 'Importar',
-          onTap: widget.onImportTransactions,
-          delay: 4,
-        ),
-        const SizedBox(height: 12),
-        _buildActionButton(
-          icon: Icons.logout,
-          label: 'Sair',
-          onTap: widget.onLogout,
-          delay: 5,
-          isDestructive: true,
-        ),
-        const SizedBox(height: 12),
-        // Informações do usuário (abaixo dos botões)
-        _buildUserInfo(),
-      ],
-    );
-  }
-
-  Widget _buildUserInfo() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.black.withOpacity(0.2),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (widget.isLoadingUser)
-            const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else
-            Text(
-              widget.userName ?? widget.userEmail ?? 'Usuário',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-            ),
-          if (widget.userName != null && widget.userEmail != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              widget.userEmail!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppTheme.darkGray,
-                  ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    required int delay,
-    bool isActive = false,
-    bool isDestructive = false,
-  }) {
-    return ScaleTransition(
-      scale: Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(
-          parent: _animationController,
-          curve: Interval(
-            delay * 0.1,
-            0.5 + (delay * 0.1),
-            curve: Curves.easeOutBack,
-          ),
-        ),
-      ),
-      child: FadeTransition(
-        opacity: _animationController,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppTheme.white,
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.black.withOpacity(0.2),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Text(
-                label,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color:
-                          isDestructive ? AppTheme.expenseRed : AppTheme.black,
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            FloatingActionButton(
-              heroTag: null,
-              onPressed: onTap,
-              backgroundColor: isDestructive
-                  ? AppTheme.expenseRed
-                  : (isActive ? AppTheme.darkGray : AppTheme.black),
-              mini: true,
-              child: Icon(icon, color: AppTheme.white),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _ImportTransactionsDialog extends StatefulWidget {
   final VoidCallback onImportComplete;
+  final String walletId;
+  final String userId;
 
-  const _ImportTransactionsDialog({required this.onImportComplete});
+  const _ImportTransactionsDialog({
+    required this.onImportComplete,
+    required this.walletId,
+    required this.userId,
+  });
 
   @override
   State<_ImportTransactionsDialog> createState() =>
@@ -2226,7 +2314,8 @@ class _ImportTransactionsDialogState extends State<_ImportTransactionsDialog> {
 
         // Verificar duplicatas antes de importar
         final dbService = DatabaseService();
-        final existingTransactions = await dbService.getAllTransactions();
+        final existingTransactions =
+            await dbService.getAllTransactions(walletId: widget.walletId);
 
         final duplicates = <Map<String, dynamic>>[];
         final duplicateIndices = <int>[];
@@ -2371,9 +2460,12 @@ class _ImportTransactionsDialogState extends State<_ImportTransactionsDialog> {
                   dayOfWeek: dayOfWeek,
                   dayOfMonth: dayOfMonth,
                   person: tx['person']?.toString(),
+                  walletId: widget.walletId,
+                  createdBy: widget.userId,
                 );
 
-                await apiService.updateTransaction(updatedTx);
+                await apiService.updateTransaction(updatedTx,
+                    walletId: widget.walletId);
               } catch (e) {
                 print('Erro ao atualizar transação duplicada: $e');
               }
@@ -2392,8 +2484,10 @@ class _ImportTransactionsDialogState extends State<_ImportTransactionsDialog> {
 
             if (transactionsToImport.isNotEmpty) {
               final apiService = ApiService();
-              final importResult =
-                  await apiService.importBulkTransactions(transactionsToImport);
+              final importResult = await apiService.importBulkTransactions(
+                transactionsToImport,
+                walletId: widget.walletId,
+              );
 
               if (mounted) {
                 setState(() {
@@ -2446,8 +2540,10 @@ class _ImportTransactionsDialogState extends State<_ImportTransactionsDialog> {
 
             if (transactionsToImport.isNotEmpty) {
               final apiService = ApiService();
-              final importResult =
-                  await apiService.importBulkTransactions(transactionsToImport);
+              final importResult = await apiService.importBulkTransactions(
+                transactionsToImport,
+                walletId: widget.walletId,
+              );
 
               if (mounted) {
                 setState(() {
@@ -2478,8 +2574,10 @@ class _ImportTransactionsDialogState extends State<_ImportTransactionsDialog> {
 
         // Se não houver duplicatas, importar normalmente
         final apiService = ApiService();
-        final importResult =
-            await apiService.importBulkTransactions(transactions);
+        final importResult = await apiService.importBulkTransactions(
+          transactions,
+          walletId: widget.walletId,
+        );
 
         if (mounted) {
           setState(() {
@@ -2505,8 +2603,10 @@ class _ImportTransactionsDialogState extends State<_ImportTransactionsDialog> {
             // Se o usuário corrigiu algumas transações, reenviar
             if (fixed != null && fixed.isNotEmpty) {
               try {
-                final retryResult =
-                    await apiService.importBulkTransactions(fixed);
+                final retryResult = await apiService.importBulkTransactions(
+                  fixed,
+                  walletId: widget.walletId,
+                );
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(

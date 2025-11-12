@@ -10,6 +10,7 @@ class PeriodHistoryDialog extends StatelessWidget {
   final Function(PeriodHistory) onPeriodSelected;
   final Function(String) onPeriodDeleted;
   final Function(PeriodHistory) onPeriodUpdated;
+  final String walletId;
 
   const PeriodHistoryDialog({
     super.key,
@@ -17,6 +18,7 @@ class PeriodHistoryDialog extends StatelessWidget {
     required this.onPeriodSelected,
     required this.onPeriodDeleted,
     required this.onPeriodUpdated,
+    required this.walletId,
   });
 
   @override
@@ -78,6 +80,7 @@ class PeriodHistoryDialog extends StatelessWidget {
                         final period = periods[index];
                         return _PeriodHistoryItem(
                           period: period,
+                          walletId: walletId,
                           onTap: () {
                             onPeriodSelected(period);
                             Navigator.of(context).pop();
@@ -101,12 +104,14 @@ class PeriodHistoryDialog extends StatelessWidget {
 
 class _PeriodHistoryItem extends StatefulWidget {
   final PeriodHistory period;
+  final String walletId;
   final VoidCallback onTap;
   final VoidCallback onDelete;
   final Function(PeriodHistory) onUpdate;
 
   const _PeriodHistoryItem({
     required this.period,
+    required this.walletId,
     required this.onTap,
     required this.onDelete,
     required this.onUpdate,
@@ -145,6 +150,7 @@ class _PeriodHistoryItemState extends State<_PeriodHistoryItem> {
       final transactions = await _databaseService.getTransactionsInRange(
         widget.period.startDate,
         widget.period.endDate,
+        walletId: widget.walletId,
       );
       if (mounted) {
         setState(() {

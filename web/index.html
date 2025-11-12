@@ -39,9 +39,6 @@
 <body>
   <script>
     window.addEventListener('load', function(ev) {
-      // Mostrar mensagem de carregamento
-      document.body.innerHTML = '<div style="display: flex; justify-content: center; align-items: center; height: 100vh; font-family: Arial, sans-serif;"><div style="text-align: center;"><div style="border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div><p>Carregando FinCal...</p></div></div><style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>';
-      
       try {
         // Download main.dart.js
         // O Flutter substitui {{flutter_service_worker_version}} pelo número
@@ -68,11 +65,31 @@
     
     // Tratamento de erros não capturados
     window.addEventListener('error', function(event) {
+      // Filtrar erros conhecidos do Flutter Web durante hot restart
+      const errorStr = event.error ? event.error.toString() : '';
+      const isDisposedError = errorStr.includes('Trying to render a disposed EngineFlutterView') ||
+                             errorStr.includes('isDisposed');
+      const isLegacyJsError = errorStr.includes('LegacyJavaScriptObject') ||
+                             errorStr.includes('DiagnosticsNode');
+      
+      // Ignorar erros conhecidos do Flutter Web que não afetam funcionalidade
+      if (!isDisposedError && !isLegacyJsError) {
       console.error('Erro não capturado:', event.error);
+      }
     });
     
     window.addEventListener('unhandledrejection', function(event) {
+      // Filtrar erros conhecidos do Flutter Web
+      const reasonStr = event.reason ? event.reason.toString() : '';
+      const isDisposedError = reasonStr.includes('Trying to render a disposed EngineFlutterView') ||
+                             reasonStr.includes('isDisposed');
+      const isLegacyJsError = reasonStr.includes('LegacyJavaScriptObject') ||
+                             reasonStr.includes('DiagnosticsNode');
+      
+      // Ignorar erros conhecidos do Flutter Web
+      if (!isDisposedError && !isLegacyJsError) {
       console.error('Promise rejeitada não tratada:', event.reason);
+      }
     });
   </script>
 </body>

@@ -14,6 +14,15 @@ const UserSchema = new mongoose.Schema({
     type: String, 
     required: true 
   },
+  personalWalletId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Wallet',
+    default: null
+  },
+  walletsInvited: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Wallet'
+  }],
   createdAt: { 
     type: Date, 
     default: Date.now 

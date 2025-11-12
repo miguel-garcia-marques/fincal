@@ -10,11 +10,15 @@ import '../screens/transaction_details_screen.dart';
 class TransactionListWidget extends StatefulWidget {
   final List<Transaction> transactions;
   final Function()? onTransactionUpdated;
+  final String walletId;
+  final String userId;
 
   const TransactionListWidget({
     super.key,
     required this.transactions,
     this.onTransactionUpdated,
+    required this.walletId,
+    required this.userId,
   });
 
   @override
@@ -298,6 +302,8 @@ class _TransactionListWidgetState extends State<TransactionListWidget> {
                       MaterialPageRoute(
                         builder: (context) => TransactionDetailsScreen(
                           transaction: transaction,
+                          walletId: widget.walletId,
+                          userId: widget.userId,
                         ),
                         fullscreenDialog: true,
                       ),
@@ -317,7 +323,7 @@ class _TransactionListWidgetState extends State<TransactionListWidget> {
                         final parts = transaction.id.split('_');
                         if (parts.length >= 2) {
                           final originalId = parts.sublist(0, parts.length - 1).join('_');
-                          final allTransactions = await dbService.getAllTransactions();
+                          final allTransactions = await dbService.getAllTransactions(walletId: widget.walletId);
                           transactionToEdit = allTransactions.firstWhere(
                             (t) => t.id == originalId,
                             orElse: () => transaction,
@@ -332,6 +338,8 @@ class _TransactionListWidgetState extends State<TransactionListWidget> {
                       context: context,
                       builder: (context) => AddTransactionDialog(
                         transactionToEdit: transactionToEdit,
+                        walletId: widget.walletId,
+                        userId: widget.userId,
                       ),
                     );
                     if (result == true && widget.onTransactionUpdated != null) {
@@ -374,7 +382,7 @@ class _TransactionListWidgetState extends State<TransactionListWidget> {
                     );
                     if (confirmed == true) {
                       try {
-                        await DatabaseService().deleteTransaction(transactionIdToDelete);
+                        await DatabaseService().deleteTransaction(transactionIdToDelete, walletId: widget.walletId);
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Transação excluída com sucesso')),

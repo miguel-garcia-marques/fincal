@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const { getTransactionModel } = require('../models/Transaction');
 const { authenticateUser } = require('../middleware/auth');
+const { checkWalletAccess, checkWritePermission } = require('../middleware/walletAuth');
 const {
   validateTransaction,
   validateTransactionRange,
@@ -12,21 +14,79 @@ const {
 // Aplicar middleware de autenticação em todas as rotas
 router.use(authenticateUser);
 
-// GET todas as transações
-router.get('/', async (req, res) => {
+// Middleware para verificar walletId e permissões
+const requireWalletId = async (req, res, next) => {
   try {
-    const Transaction = getTransactionModel(req.userId);
-    const transactions = await Transaction.find({ userId: req.userId }).sort({ date: 1 });
+    const walletId = req.query.walletId || req.body.walletId;
+    
+    if (!walletId) {
+      return res.status(400).json({ message: 'Wallet ID é obrigatório' });
+    }
+
+    req.query.walletId = walletId;
+    req.body.walletId = walletId;
+    
+    // Verificar acesso à wallet
+    req.params.walletId = walletId;
+    
+    // Usar checkWalletAccess de forma correta
+    const { getWalletModel } = require('../models/Wallet');
+    const { getWalletMemberModel } = require('../models/WalletMember');
+    
+    const Wallet = getWalletModel();
+    const WalletMember = getWalletMemberModel();
+
+    const wallet = await Wallet.findById(walletId);
+    if (!wallet) {
+      return res.status(404).json({ message: 'Wallet não encontrada' });
+    }
+
+    if (wallet.ownerId === req.userId) {
+      req.walletPermission = 'owner';
+      req.walletId = walletId;
+      return next();
+    }
+
+    const member = await WalletMember.findOne({ 
+      walletId: walletId, 
+      userId: req.userId 
+    });
+
+    if (!member) {
+      return res.status(403).json({ message: 'Você não tem acesso a esta wallet' });
+    }
+
+    req.walletPermission = member.permission;
+    req.walletId = walletId;
+    next();
+  } catch (error) {
+    console.error('Erro ao verificar acesso à wallet:', error);
+    return res.status(500).json({ message: 'Erro ao verificar acesso à wallet' });
+  }
+};
+
+// GET todas as transações
+router.get('/', requireWalletId, async (req, res) => {
+  try {
+    // Usar collection específica para este walletId
+    const Transaction = getTransactionModel(req.walletId);
+    
+    // Buscar todas as transações da collection desta wallet
+    const transactions = await Transaction.find({}).sort({ date: 1 });
+    
+    console.log(`📊 Retornando ${transactions.length} transações para walletId: ${req.walletId}`);
     res.json(transactions);
   } catch (error) {
+    console.error('Erro ao buscar transações:', error);
     res.status(500).json({ message: error.message });
   }
 });
 
 // GET transações em um período
-router.get('/range', validateTransactionRange, async (req, res) => {
+router.get('/range', validateTransactionRange, requireWalletId, async (req, res) => {
   try {
-    const Transaction = getTransactionModel(req.userId);
+    // Usar collection específica para este walletId
+    const Transaction = getTransactionModel(req.walletId);
     const { startDate, endDate } = req.query;
     
     if (!startDate || !endDate) {
@@ -50,8 +110,10 @@ router.get('/range', validateTransactionRange, async (req, res) => {
     );
     end.setHours(23, 59, 59, 999); // Incluir o dia inteiro
 
-    // Buscar todas as transações (incluindo periódicas) do usuário
-    const allTransactions = await Transaction.find({ userId: req.userId });
+    // Buscar todas as transações (incluindo periódicas) da collection desta wallet
+    const allTransactions = await Transaction.find({});
+    
+    console.log(`📊 Processando ${allTransactions.length} transações para range (walletId: ${req.walletId})`);
     const result = [];
 
     for (const transaction of allTransactions) {
@@ -163,10 +225,16 @@ router.get('/range', validateTransactionRange, async (req, res) => {
 });
 
 // POST criar nova transação
-router.post('/', validateTransaction, async (req, res) => {
+router.post('/', validateTransaction, requireWalletId, checkWritePermission, async (req, res) => {
   try {
-    const Transaction = getTransactionModel(req.userId);
-    const transactionData = { ...req.body, userId: req.userId };
+    // Usar collection específica para este walletId
+    const Transaction = getTransactionModel(req.walletId);
+    const transactionData = { 
+      ...req.body, 
+      userId: req.userId, // Mantido para compatibilidade
+      walletId: req.walletId,
+      createdBy: req.userId
+    };
     
     // Validar percentagens se for salário
     if (transactionData.isSalary && transactionData.salaryAllocation) {
@@ -214,17 +282,26 @@ router.post('/', validateTransaction, async (req, res) => {
 });
 
 // DELETE transação
-router.delete('/:id', validateTransactionId, async (req, res) => {
+router.delete('/:id', validateTransactionId, requireWalletId, checkWritePermission, async (req, res) => {
   try {
-    const Transaction = getTransactionModel(req.userId);
-    const transaction = await Transaction.findOneAndDelete({ 
-      id: req.params.id,
-      userId: req.userId 
+    // Usar collection específica para este walletId
+    const Transaction = getTransactionModel(req.walletId);
+    const transaction = await Transaction.findOne({ 
+      id: req.params.id
     });
     
     if (!transaction) {
       return res.status(404).json({ message: 'Transação não encontrada' });
     }
+
+    // Verificar se é o criador ou tem permissão de owner
+    if (transaction.createdBy !== req.userId && req.walletPermission !== 'owner') {
+      return res.status(403).json({ message: 'Você só pode deletar transações que você criou' });
+    }
+    
+    await Transaction.findOneAndDelete({ 
+      id: req.params.id
+    });
     
     res.json({ message: 'Transação deletada com sucesso' });
   } catch (error) {
@@ -233,18 +310,28 @@ router.delete('/:id', validateTransactionId, async (req, res) => {
 });
 
 // PUT atualizar transação
-router.put('/:id', validateTransactionId, validateTransaction, async (req, res) => {
+router.put('/:id', validateTransactionId, validateTransaction, requireWalletId, checkWritePermission, async (req, res) => {
   try {
-    const Transaction = getTransactionModel(req.userId);
-    const transaction = await Transaction.findOneAndUpdate(
-      { id: req.params.id, userId: req.userId },
-      { ...req.body, userId: req.userId },
-      { new: true, runValidators: true }
-    );
+    // Usar collection específica para este walletId
+    const Transaction = getTransactionModel(req.walletId);
+    const existingTransaction = await Transaction.findOne({ 
+      id: req.params.id
+    });
     
-    if (!transaction) {
+    if (!existingTransaction) {
       return res.status(404).json({ message: 'Transação não encontrada' });
     }
+
+    // Verificar se é o criador ou tem permissão de owner
+    if (existingTransaction.createdBy !== req.userId && req.walletPermission !== 'owner') {
+      return res.status(403).json({ message: 'Você só pode atualizar transações que você criou' });
+    }
+
+    const transaction = await Transaction.findOneAndUpdate(
+      { id: req.params.id },
+      { ...req.body, userId: req.userId, walletId: req.walletId },
+      { new: true, runValidators: true }
+    );
     
     res.json(transaction);
   } catch (error) {
@@ -253,9 +340,10 @@ router.put('/:id', validateTransactionId, validateTransaction, async (req, res) 
 });
 
 // POST importar transações em bulk
-router.post('/bulk', validateBulkTransactions, async (req, res) => {
+router.post('/bulk', validateBulkTransactions, requireWalletId, checkWritePermission, async (req, res) => {
   try {
-    const Transaction = getTransactionModel(req.userId);
+    // Usar collection específica para este walletId
+    const Transaction = getTransactionModel(req.walletId);
     const { transactions } = req.body;
     
     // Validação adicional de tamanho (já validado pelo middleware, mas manter para compatibilidade)
@@ -364,7 +452,9 @@ router.post('/bulk', validateBulkTransactions, async (req, res) => {
 
         const convertedTx = {
           id,
-          userId: req.userId,
+          userId: req.userId, // Mantido para compatibilidade
+          walletId: req.walletId,
+          createdBy: req.userId,
           type: tx.type,
           date,
           description: tx.description || null,

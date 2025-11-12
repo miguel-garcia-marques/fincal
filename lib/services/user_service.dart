@@ -2,11 +2,13 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/user.dart';
 import 'auth_service.dart';
+import '../config/api_config.dart';
 
 class UserService {
   final AuthService _authService = AuthService();
 
-  static const String baseUrl = 'http://localhost:3000/api';
+  // Usa a configuração centralizada da API
+  static String get baseUrl => ApiConfig.baseUrl;
 
   // Obter headers com autenticação
   Map<String, String> _getHeaders() {
@@ -20,6 +22,13 @@ class UserService {
   // Obter dados do usuário atual
   Future<User?> getCurrentUser() async {
     try {
+      // Verificar se há token antes de fazer a requisição
+      final token = _authService.currentAccessToken;
+      if (token == null) {
+        // Sem token, não há usuário autenticado
+        return null;
+      }
+
       final response = await http.get(
         Uri.parse('$baseUrl/users/me'),
         headers: _getHeaders(),
@@ -29,13 +38,26 @@ class UserService {
         final decoded = json.decode(response.body);
         return User.fromJson(decoded);
       } else if (response.statusCode == 404) {
-        // Usuário não encontrado no MongoDB
+        // Usuário não encontrado no MongoDB - isso é normal para novos usuários
+        return null;
+      } else if (response.statusCode == 401) {
+        // Não autenticado - retornar null silenciosamente
         return null;
       } else {
-        throw Exception('Failed to load user: ${response.statusCode}');
+        // Outros erros - logar apenas em desenvolvimento
+        if (response.statusCode >= 500) {
+          print('Error fetching user: ${response.statusCode}');
+        }
+        return null;
       }
     } catch (e) {
-      print('Error fetching user: $e');
+      // Erros de rede - apenas logar se não for um erro esperado
+      final errorString = e.toString().toLowerCase();
+      if (!errorString.contains('failed host lookup') && 
+          !errorString.contains('connection refused') &&
+          !errorString.contains('socketexception')) {
+        print('Error fetching user: $e');
+      }
       return null;
     }
   }

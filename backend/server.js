@@ -27,38 +27,7 @@ app.use(helmet({
 }));
 
 // ============================================
-// SEGURANÇA: Rate Limiting
-// ============================================
-// Rate limiter geral - 100 requisições por 15 minutos por IP
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // máximo 100 requisições por IP
-  message: 'Muitas requisições deste IP, tente novamente mais tarde.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Rate limiter mais restritivo para endpoints de bulk/import
-const strictLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 10, // máximo 10 requisições por IP
-  message: 'Muitas requisições de importação, tente novamente mais tarde.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Slow down - adiciona delay progressivo após muitas requisições
-const speedLimiter = slowDown({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  delayAfter: 50, // começa a adicionar delay após 50 requisições
-  delayMs: 500, // adiciona 500ms de delay por requisição após o limite
-});
-
-app.use(generalLimiter);
-app.use(speedLimiter);
-
-// ============================================
-// SEGURANÇA: CORS Configurado
+// SEGURANÇA: CORS Configurado (ANTES do rate limiting)
 // ============================================
     // Lista de origens permitidas
     const allowedOrigins = [
@@ -72,15 +41,24 @@ if (process.env.ALLOWED_ORIGINS) {
   allowedOrigins.push(...process.env.ALLOWED_ORIGINS.split(','));
 }
 
+const isDevelopment = process.env.NODE_ENV !== 'production';
+
 const corsOptions = {
   origin: function (origin, callback) {
     // Permitir requisições sem origin (ex: mobile apps, Postman em dev)
-    if (!origin && process.env.NODE_ENV !== 'production') {
+    if (!origin && isDevelopment) {
       return callback(null, true);
     }
     
     if (!origin) {
-      return callback(new Error('CORS: Origin não permitida'));
+      return callback(null, true); // Permitir requisições sem origin em dev
+    }
+    
+    // Em desenvolvimento, permitir qualquer porta do localhost ou 127.0.0.1
+    if (isDevelopment) {
+      if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+        return callback(null, true);
+      }
     }
     
     // Em produção, aceitar origens do Firebase se configuradas
@@ -94,14 +72,87 @@ const corsOptions = {
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
+      // Em desenvolvimento, ser mais permissivo
+      if (isDevelopment) {
+      callback(null, true);
+    } else {
       callback(new Error('CORS: Origin não permitida'));
+      }
     }
   },
   credentials: true,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  preflightContinue: false,
+  maxAge: 86400 // 24 horas
 };
 
+// Aplicar CORS ANTES do rate limiting
 app.use(cors(corsOptions));
+
+// ============================================
+// SEGURANÇA: Rate Limiting
+// ============================================
+// Rate limiter geral - mais permissivo em desenvolvimento
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: isDevelopment ? 1000 : 100, // muito mais permissivo em dev (1000 req/15min)
+  message: 'Muitas requisições deste IP, tente novamente mais tarde.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    // Pular rate limiting para preflight requests (OPTIONS)
+    if (req.method === 'OPTIONS') {
+      return true;
+    }
+    // Em desenvolvimento, pular rate limiting para localhost
+    if (isDevelopment && (req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1')) {
+      return true;
+    }
+    return false;
+  },
+});
+
+// Rate limiter mais restritivo para endpoints de bulk/import
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: isDevelopment ? 100 : 10, // mais permissivo em dev
+  message: 'Muitas requisições de importação, tente novamente mais tarde.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    // Pular rate limiting para preflight requests
+    return req.method === 'OPTIONS';
+  },
+});
+
+// Slow down - desabilitado em desenvolvimento para melhor performance
+const speedLimiter = slowDown({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  delayAfter: isDevelopment ? 500 : 50, // muito mais permissivo em dev
+  delayMs: isDevelopment 
+    ? () => 0  // Nova sintaxe para express-slow-down v2
+    : (used, req) => {
+        const delayAfter = req.slowDown?.limit || 50;
+        return (used - delayAfter) * 500;
+      },
+  skip: (req) => {
+    // Pular slow down para preflight requests
+    if (req.method === 'OPTIONS') {
+      return true;
+    }
+    // Em desenvolvimento, pular slow down para localhost
+    if (isDevelopment && (req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1')) {
+      return true;
+    }
+    return false;
+  },
+});
+
+app.use(generalLimiter);
+app.use(speedLimiter);
 
 // ============================================
 // SEGURANÇA: Limitar tamanho de payload
@@ -118,6 +169,8 @@ app.use('/api/transactions/bulk', strictLimiter);
 app.use('/api/transactions', require('./routes/transactions'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/period-history', require('./routes/period_history'));
+app.use('/api/wallets', require('./routes/wallets'));
+app.use('/api/invites', require('./routes/invites'));
 
 // Rota de teste
 app.get('/', (req, res) => {

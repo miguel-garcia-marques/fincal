@@ -21,6 +21,10 @@ class Transaction {
   // Campo para pessoa (string, opcional, padrão "geral")
   final String? person;
 
+  // Campos para wallet e criador
+  final String? walletId;
+  final String? createdBy;
+
   Transaction({
     required this.id,
     required this.type,
@@ -35,6 +39,8 @@ class Transaction {
     this.dayOfWeek,
     this.dayOfMonth,
     this.person,
+    this.walletId,
+    this.createdBy,
   });
 
   Map<String, dynamic> toJson() {
@@ -59,6 +65,8 @@ class Transaction {
       'dayOfWeek': dayOfWeek,
       'dayOfMonth': dayOfMonth,
       'person': person,
+      'walletId': walletId,
+      'createdBy': createdBy,
     };
   }
 
@@ -130,6 +138,8 @@ class Transaction {
       dayOfWeek: json['dayOfWeek'] as int?,
       dayOfMonth: json['dayOfMonth'] as int?,
       person: json['person'] as String?,
+      walletId: json['walletId']?.toString(),
+      createdBy: json['createdBy'] as String?,
     );
   }
 

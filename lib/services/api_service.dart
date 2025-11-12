@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/transaction.dart';
 import '../models/period_history.dart';
@@ -20,16 +21,16 @@ class ApiService {
     };
   }
 
-  Future<List<Transaction>> getAllTransactions() async {
+  Future<List<Transaction>> getAllTransactions({required String walletId}) async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/transactions'),
+        Uri.parse('$baseUrl/transactions?walletId=$walletId'),
         headers: _getHeaders(),
       );
 
       if (response.statusCode == 200) {
-        final List<dynamic> decoded = json.decode(response.body);
-        return decoded.map((json) => Transaction.fromJson(json)).toList();
+        // Usar compute para parsing em background (não bloquear UI)
+        return await compute(_parseTransactions, response.body);
       } else {
         throw Exception('Failed to load transactions: ${response.statusCode}');
       }
@@ -39,12 +40,15 @@ class ApiService {
     }
   }
 
-  Future<void> saveTransaction(Transaction transaction) async {
+  Future<void> saveTransaction(Transaction transaction, {required String walletId}) async {
     try {
+      final transactionJson = transaction.toJson();
+      transactionJson['walletId'] = walletId;
+      
       final response = await http.post(
         Uri.parse('$baseUrl/transactions'),
         headers: _getHeaders(),
-        body: json.encode(transaction.toJson()),
+        body: json.encode(transactionJson),
       );
 
       if (response.statusCode != 201 && response.statusCode != 200) {
@@ -57,12 +61,15 @@ class ApiService {
     }
   }
 
-  Future<void> updateTransaction(Transaction transaction) async {
+  Future<void> updateTransaction(Transaction transaction, {required String walletId}) async {
     try {
+      final transactionJson = transaction.toJson();
+      transactionJson['walletId'] = walletId;
+      
       final response = await http.put(
         Uri.parse('$baseUrl/transactions/${transaction.id}'),
         headers: _getHeaders(),
-        body: json.encode(transaction.toJson()),
+        body: json.encode(transactionJson),
       );
 
       if (response.statusCode != 200) {
@@ -75,10 +82,10 @@ class ApiService {
     }
   }
 
-  Future<void> deleteTransaction(String id) async {
+  Future<void> deleteTransaction(String id, {required String walletId}) async {
     try {
       final response = await http.delete(
-        Uri.parse('$baseUrl/transactions/$id'),
+        Uri.parse('$baseUrl/transactions/$id?walletId=$walletId'),
         headers: _getHeaders(),
       );
 
@@ -94,20 +101,21 @@ class ApiService {
 
   Future<List<Transaction>> getTransactionsInRange(
     DateTime startDate,
-    DateTime endDate,
-  ) async {
+    DateTime endDate, {
+    required String walletId,
+  }) async {
     try {
       final startStr = _formatDateForApi(startDate);
       final endStr = _formatDateForApi(endDate);
       
       final response = await http.get(
-        Uri.parse('$baseUrl/transactions/range?startDate=$startStr&endDate=$endStr'),
+        Uri.parse('$baseUrl/transactions/range?startDate=$startStr&endDate=$endStr&walletId=$walletId'),
         headers: _getHeaders(),
       );
 
       if (response.statusCode == 200) {
-        final List<dynamic> decoded = json.decode(response.body);
-        return decoded.map((json) => Transaction.fromJson(json)).toList();
+        // Usar compute para parsing em background (não bloquear UI)
+        return await compute(_parseTransactions, response.body);
       } else {
         throw Exception('Failed to load transactions: ${response.statusCode}');
       }
@@ -220,12 +228,25 @@ class ApiService {
   }
 
   // Importar transações em bulk
-  Future<Map<String, dynamic>> importBulkTransactions(List<Map<String, dynamic>> transactions) async {
+  Future<Map<String, dynamic>> importBulkTransactions(
+    List<Map<String, dynamic>> transactions, {
+    required String walletId,
+  }) async {
     try {
+      // Adicionar walletId a todas as transações
+      final transactionsWithWallet = transactions.map((tx) {
+        tx['walletId'] = walletId;
+        return tx;
+      }).toList();
+      
+      // Incluir walletId no body principal para o middleware
       final response = await http.post(
-        Uri.parse('$baseUrl/transactions/bulk'),
+        Uri.parse('$baseUrl/transactions/bulk?walletId=$walletId'),
         headers: _getHeaders(),
-        body: json.encode({ 'transactions': transactions }),
+        body: json.encode({ 
+          'transactions': transactionsWithWallet,
+          'walletId': walletId, // Também no body para garantir
+        }),
       );
 
       if (response.statusCode != 201) {
@@ -238,6 +259,12 @@ class ApiService {
       print('Error importing bulk transactions: $e');
       rethrow;
     }
+  }
+
+  // Função isolada para parsing de transações
+  static List<Transaction> _parseTransactions(String responseBody) {
+    final List<dynamic> decoded = json.decode(responseBody);
+    return decoded.map((json) => Transaction.fromJson(json)).toList();
   }
 }
 
