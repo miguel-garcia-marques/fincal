@@ -30,10 +30,8 @@ const authenticateUser = async (req, res, next) => {
     
     next();
   } catch (error) {
-    console.error('Erro na autenticação:', error);
     return res.status(500).json({ message: 'Erro ao verificar autenticação' });
   }
 };
 
 module.exports = { authenticateUser };
-

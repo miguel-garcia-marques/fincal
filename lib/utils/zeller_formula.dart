@@ -75,4 +75,3 @@ String getDayNameFull(int dayOfWeek) {
       return '';
   }
 }
-

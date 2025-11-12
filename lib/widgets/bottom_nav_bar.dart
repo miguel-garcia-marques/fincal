@@ -134,4 +134,3 @@ class _NavBarCenterButton extends StatelessWidget {
     );
   }
 }
-

@@ -3,9 +3,11 @@ import 'package:http/http.dart' as http;
 import '../models/user.dart';
 import 'auth_service.dart';
 import '../config/api_config.dart';
+import 'cache_service.dart';
 
 class UserService {
   final AuthService _authService = AuthService();
+  final CacheService _cacheService = CacheService();
 
   // Usa a configuração centralizada da API
   static String get baseUrl => ApiConfig.baseUrl;
@@ -19,8 +21,8 @@ class UserService {
     };
   }
 
-  // Obter dados do usuário atual
-  Future<User?> getCurrentUser() async {
+  // Obter dados do usuário atual (com cache)
+  Future<User?> getCurrentUser({bool forceRefresh = false}) async {
     try {
       // Verificar se há token antes de fazer a requisição
       final token = _authService.currentAccessToken;
@@ -29,6 +31,15 @@ class UserService {
         return null;
       }
 
+      // Tentar obter do cache primeiro (se não for refresh forçado)
+      if (!forceRefresh) {
+        final cachedUser = await _cacheService.getCachedUser();
+        if (cachedUser != null) {
+          return cachedUser;
+        }
+      }
+
+      // Se não houver cache válido, buscar da API
       final response = await http.get(
         Uri.parse('$baseUrl/users/me'),
         headers: _getHeaders(),
@@ -36,27 +47,29 @@ class UserService {
 
       if (response.statusCode == 200) {
         final decoded = json.decode(response.body);
-        return User.fromJson(decoded);
+        final user = User.fromJson(decoded);
+        
+        // Salvar no cache
+        await _cacheService.cacheUser(user);
+        
+        return user;
       } else if (response.statusCode == 404) {
         // Usuário não encontrado no MongoDB - isso é normal para novos usuários
         return null;
       } else if (response.statusCode == 401) {
-        // Não autenticado - retornar null silenciosamente
+        // Não autenticado - invalidar cache e retornar null
+        await _cacheService.invalidateUserCache();
         return null;
       } else {
-        // Outros erros - logar apenas em desenvolvimento
-        if (response.statusCode >= 500) {
-          print('Error fetching user: ${response.statusCode}');
-        }
-        return null;
+        // Outros erros - retornar cache se disponível
+        final cachedUser = await _cacheService.getCachedUser();
+        return cachedUser;
       }
     } catch (e) {
-      // Erros de rede - apenas logar se não for um erro esperado
-      final errorString = e.toString().toLowerCase();
-      if (!errorString.contains('failed host lookup') && 
-          !errorString.contains('connection refused') &&
-          !errorString.contains('socketexception')) {
-        print('Error fetching user: $e');
+      // Em caso de erro de rede, tentar retornar do cache
+      final cachedUser = await _cacheService.getCachedUser();
+      if (cachedUser != null) {
+        return cachedUser;
       }
       return null;
     }
@@ -73,13 +86,18 @@ class UserService {
 
       if (response.statusCode == 201 || response.statusCode == 200) {
         final decoded = json.decode(response.body);
-        return User.fromJson(decoded);
+        final user = User.fromJson(decoded);
+        
+        // Atualizar cache
+        await _cacheService.cacheUser(user);
+        
+        return user;
       } else {
         final errorBody = json.decode(response.body);
         throw Exception(errorBody['message'] ?? 'Failed to save user');
       }
     } catch (e) {
-      print('Error saving user: $e');
+
       rethrow;
     }
   }
@@ -95,15 +113,19 @@ class UserService {
 
       if (response.statusCode == 200) {
         final decoded = json.decode(response.body);
-        return User.fromJson(decoded);
+        final user = User.fromJson(decoded);
+        
+        // Atualizar cache
+        await _cacheService.cacheUser(user);
+        
+        return user;
       } else {
         final errorBody = json.decode(response.body);
         throw Exception(errorBody['message'] ?? 'Failed to update user');
       }
     } catch (e) {
-      print('Error updating user: $e');
+
       rethrow;
     }
   }
 }
-

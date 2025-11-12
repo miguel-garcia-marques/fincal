@@ -1,7 +1,9 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'cache_service.dart';
 
 class AuthService {
   final SupabaseClient _supabase = Supabase.instance.client;
+  final CacheService _cacheService = CacheService();
   
   // Getter público para acessar o cliente Supabase
   SupabaseClient get supabase => _supabase;
@@ -49,6 +51,10 @@ class AuthService {
   // Fazer logout
   Future<void> signOut() async {
     await _supabase.auth.signOut();
+    // Limpar todos os caches ao fazer logout
+    await _cacheService.invalidateUserCache();
+    await _cacheService.clearAllWalletMembersCache();
+    await _cacheService.clearCache();
   }
 
   // Recuperar senha
@@ -71,4 +77,3 @@ class AuthService {
     }
   }
 }
-

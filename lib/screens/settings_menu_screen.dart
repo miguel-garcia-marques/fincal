@@ -42,7 +42,8 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
     });
     
     try {
-      final user = await _userService.getCurrentUser();
+      // Usar cache primeiro (não forçar refresh)
+      final user = await _userService.getCurrentUser(forceRefresh: false);
       if (mounted) {
         setState(() {
           _currentUserName = user?.name ?? 'Usuário';
@@ -50,7 +51,7 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
         });
       }
     } catch (e) {
-      print('Erro ao carregar nome do usuário: $e');
+
       if (mounted) {
         setState(() {
           _currentUserName = 'Usuário';
@@ -66,8 +67,8 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
     });
     
     try {
-      // Buscar membros da wallet para obter o nome do dono
-      final members = await _walletService.getWalletMembers(widget.currentWallet.id);
+      // Buscar membros da wallet para obter o nome do dono (usar cache primeiro)
+      final members = await _walletService.getWalletMembers(widget.currentWallet.id, forceRefresh: false);
       final owner = members.firstWhere((m) => m.isOwner, orElse: () => members.first);
       
       if (mounted) {
@@ -77,7 +78,7 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
         });
       }
     } catch (e) {
-      print('Erro ao carregar nome do dono: $e');
+
       if (mounted) {
         setState(() {
           _ownerName = 'Usuário';
@@ -281,4 +282,3 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
     );
   }
 }
-

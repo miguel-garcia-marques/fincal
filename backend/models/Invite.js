@@ -82,4 +82,3 @@ const getInviteModel = () => {
 };
 
 module.exports = { InviteSchema, getInviteModel };
-

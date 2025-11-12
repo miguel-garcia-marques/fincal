@@ -179,4 +179,3 @@ module.exports = {
   validatePeriodId,
   handleValidationErrors
 };
-

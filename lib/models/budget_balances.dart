@@ -9,4 +9,3 @@ class BudgetBalances {
     required this.poupanca,
   });
 }
-

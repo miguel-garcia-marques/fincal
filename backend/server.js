@@ -194,15 +194,7 @@ app.get('/', (req, res) => {
 // SEGURANÇA: Tratamento de Erros
 // ============================================
 app.use((err, req, res, next) => {
-  // Log completo apenas em desenvolvimento
-  if (process.env.NODE_ENV !== 'production') {
-    console.error('Erro completo:', err);
-    console.error('Stack:', err.stack);
-  } else {
-    // Em produção, logar apenas informações essenciais
-    console.error('Erro:', err.message);
-    // Não logar stack trace em produção para não expor informações
-  }
+  // Error handler
   
   // Resposta genérica para não expor detalhes do sistema
   const statusCode = err.statusCode || 500;
@@ -219,7 +211,5 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`API available at http://localhost:${PORT}/api/transactions`);
+  // Server started
 });
-

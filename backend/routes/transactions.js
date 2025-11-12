@@ -60,7 +60,6 @@ const requireWalletId = async (req, res, next) => {
     req.walletId = walletId;
     next();
   } catch (error) {
-    console.error('Erro ao verificar acesso à wallet:', error);
     return res.status(500).json({ message: 'Erro ao verificar acesso à wallet' });
   }
 };
@@ -74,10 +73,8 @@ router.get('/', requireWalletId, async (req, res) => {
     // Buscar todas as transações da collection desta wallet
     const transactions = await Transaction.find({}).sort({ date: 1 });
     
-    console.log(`📊 Retornando ${transactions.length} transações para walletId: ${req.walletId}`);
     res.json(transactions);
   } catch (error) {
-    console.error('Erro ao buscar transações:', error);
     res.status(500).json({ message: error.message });
   }
 });
@@ -113,7 +110,6 @@ router.get('/range', validateTransactionRange, requireWalletId, async (req, res)
     // Buscar todas as transações (incluindo periódicas) da collection desta wallet
     const allTransactions = await Transaction.find({});
     
-    console.log(`📊 Processando ${allTransactions.length} transações para range (walletId: ${req.walletId})`);
     const result = [];
 
     for (const transaction of allTransactions) {
@@ -537,4 +533,3 @@ router.post('/bulk', validateBulkTransactions, requireWalletId, checkWritePermis
 });
 
 module.exports = router;
-

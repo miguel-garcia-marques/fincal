@@ -3,15 +3,24 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/transaction.dart';
 import '../models/period_history.dart';
+import '../models/user.dart';
+import '../models/wallet_member.dart';
 
 class CacheService {
   static const String _transactionsKey = 'cached_transactions';
   static const String _periodHistoriesKey = 'cached_period_histories';
   static const String _lastUpdateKey = 'cache_last_update';
   static const String _currentPeriodKey = 'cached_current_period';
+  static const String _userKey = 'cached_user';
+  static const String _userLastUpdateKey = 'cache_user_last_update';
+  static const String _walletMembersPrefix = 'cached_wallet_members_';
   
   // Cache válido por 5 minutos (aumentado para reduzir requisições)
   static const Duration cacheValidityDuration = Duration(minutes: 5);
+  // Cache de usuário válido por 10 minutos (muda menos frequentemente)
+  static const Duration userCacheValidityDuration = Duration(minutes: 10);
+  // Cache de membros da wallet válido por 5 minutos
+  static const Duration walletMembersCacheValidityDuration = Duration(minutes: 5);
 
   // Salvar transações no cache (usando compute para não bloquear UI)
   Future<void> cacheTransactions(List<Transaction> transactions) async {
@@ -22,7 +31,7 @@ class CacheService {
       await prefs.setString(_transactionsKey, transactionsJson);
       await prefs.setString(_lastUpdateKey, DateTime.now().toIso8601String());
     } catch (e) {
-      print('Erro ao salvar transações no cache: $e');
+
     }
   }
 
@@ -47,7 +56,7 @@ class CacheService {
       final decoded = await compute(_decodeTransactions, transactionsJson);
       return decoded;
     } catch (e) {
-      print('Erro ao ler transações do cache: $e');
+
       return null;
     }
   }
@@ -67,7 +76,7 @@ class CacheService {
       );
       await prefs.setString(_periodHistoriesKey, periodsJson);
     } catch (e) {
-      print('Erro ao salvar períodos no cache: $e');
+
     }
   }
 
@@ -84,7 +93,7 @@ class CacheService {
       final List<dynamic> decoded = json.decode(periodsJson);
       return decoded.map((json) => PeriodHistory.fromJson(json)).toList();
     } catch (e) {
-      print('Erro ao ler períodos do cache: $e');
+
       return null;
     }
   }
@@ -121,7 +130,7 @@ class CacheService {
         'selectedYear': selectedYear,
       }));
     } catch (e) {
-      print('Erro ao salvar período atual no cache: $e');
+
     }
   }
 
@@ -142,7 +151,7 @@ class CacheService {
         'selectedYear': decoded['selectedYear'] as int,
       };
     } catch (e) {
-      print('Erro ao ler período atual do cache: $e');
+
       return null;
     }
   }
@@ -156,7 +165,7 @@ class CacheService {
       await prefs.remove(_lastUpdateKey);
       await prefs.remove(_currentPeriodKey);
     } catch (e) {
-      print('Erro ao limpar cache: $e');
+
     }
   }
 
@@ -166,8 +175,149 @@ class CacheService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_lastUpdateKey);
     } catch (e) {
-      print('Erro ao invalidar cache: $e');
+
+    }
+  }
+
+  // ========== CACHE DE USUÁRIO ==========
+  
+  // Salvar usuário no cache
+  Future<void> cacheUser(User user) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_userKey, json.encode(user.toJson()));
+      await prefs.setString(_userLastUpdateKey, DateTime.now().toIso8601String());
+    } catch (e) {
+      // Ignorar erros de cache
+    }
+  }
+
+  // Obter usuário do cache
+  Future<User?> getCachedUser() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userJson = prefs.getString(_userKey);
+      final lastUpdateStr = prefs.getString(_userLastUpdateKey);
+      
+      if (userJson == null || lastUpdateStr == null) {
+        return null;
+      }
+
+      // Verificar se o cache é válido
+      final lastUpdate = DateTime.parse(lastUpdateStr);
+      final now = DateTime.now();
+      if (now.difference(lastUpdate) > userCacheValidityDuration) {
+        return null; // Cache expirado
+      }
+
+      final decoded = json.decode(userJson) as Map<String, dynamic>;
+      return User.fromJson(decoded);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Verificar se o cache de usuário é válido
+  Future<bool> isUserCacheValid() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastUpdateStr = prefs.getString(_userLastUpdateKey);
+      
+      if (lastUpdateStr == null) {
+        return false;
+      }
+
+      final lastUpdate = DateTime.parse(lastUpdateStr);
+      final now = DateTime.now();
+      return now.difference(lastUpdate) < userCacheValidityDuration;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Invalidar cache de usuário
+  Future<void> invalidateUserCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_userKey);
+      await prefs.remove(_userLastUpdateKey);
+    } catch (e) {
+      // Ignorar erros
+    }
+  }
+
+  // ========== CACHE DE MEMBROS DA WALLET ==========
+  
+  // Salvar membros da wallet no cache
+  Future<void> cacheWalletMembers(String walletId, List<WalletMember> members) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_walletMembersPrefix$walletId';
+      final lastUpdateKey = '${_walletMembersPrefix}${walletId}_last_update';
+      
+      final membersJson = json.encode(
+        members.map((m) => m.toJson()).toList(),
+      );
+      await prefs.setString(key, membersJson);
+      await prefs.setString(lastUpdateKey, DateTime.now().toIso8601String());
+    } catch (e) {
+      // Ignorar erros de cache
+    }
+  }
+
+  // Obter membros da wallet do cache
+  Future<List<WalletMember>?> getCachedWalletMembers(String walletId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_walletMembersPrefix$walletId';
+      final lastUpdateKey = '${_walletMembersPrefix}${walletId}_last_update';
+      
+      final membersJson = prefs.getString(key);
+      final lastUpdateStr = prefs.getString(lastUpdateKey);
+      
+      if (membersJson == null || lastUpdateStr == null) {
+        return null;
+      }
+
+      // Verificar se o cache é válido
+      final lastUpdate = DateTime.parse(lastUpdateStr);
+      final now = DateTime.now();
+      if (now.difference(lastUpdate) > walletMembersCacheValidityDuration) {
+        return null; // Cache expirado
+      }
+
+      final List<dynamic> decoded = json.decode(membersJson);
+      return decoded.map((json) => WalletMember.fromJson(json)).toList();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Invalidar cache de membros da wallet
+  Future<void> invalidateWalletMembersCache(String walletId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_walletMembersPrefix$walletId';
+      final lastUpdateKey = '${_walletMembersPrefix}${walletId}_last_update';
+      await prefs.remove(key);
+      await prefs.remove(lastUpdateKey);
+    } catch (e) {
+      // Ignorar erros
+    }
+  }
+
+  // Limpar todos os caches de membros de wallets
+  Future<void> clearAllWalletMembersCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getKeys();
+      for (final key in keys) {
+        if (key.startsWith(_walletMembersPrefix)) {
+          await prefs.remove(key);
+        }
+      }
+    } catch (e) {
+      // Ignorar erros
     }
   }
 }
-

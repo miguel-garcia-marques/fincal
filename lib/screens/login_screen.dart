@@ -81,7 +81,6 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleSubmit() async {
     // Prevenir múltiplos cliques
     if (_isLoading) {
-      print('⚠️ Login já em progresso, ignorando clique');
       return;
     }
     
@@ -172,8 +171,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   try {
                     await _authService.updateDisplayName(userName);
                   } catch (e) {
-                    // Log mas não bloquear - Display Name é menos crítico
-                    print('Aviso: Não foi possível atualizar Display Name no Supabase: $e');
+                    // Display Name é menos crítico
                   }
                 }
               } catch (e) {
@@ -192,8 +190,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     try {
                       await _authService.updateDisplayName(userName);
                     } catch (e) {
-                      // Log mas não bloquear - Display Name é menos crítico
-                      print('Aviso: Não foi possível atualizar Display Name no Supabase: $e');
+                      // Display Name é menos crítico
                     }
                   }
                 } catch (retryError) {
@@ -351,7 +348,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   await _authService.updateDisplayName(userName);
                 } catch (e) {
                   // Log mas não bloquear - Display Name é menos crítico
-                  print('Aviso: Não foi possível atualizar Display Name no Supabase: $e');
+
                 }
                 
                 // Criar usuário no MongoDB enquanto temos sessão ativa
@@ -387,7 +384,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 await _authService.updateDisplayName(userName);
               } catch (e) {
                 // Ignorar - sem sessão não podemos atualizar
-                print('Aviso: Não foi possível atualizar Display Name sem sessão: $e');
               }
             }
             
@@ -632,4 +628,3 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
-

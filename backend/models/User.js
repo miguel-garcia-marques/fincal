@@ -53,4 +53,3 @@ const getUserModel = () => {
 };
 
 module.exports = { UserSchema, getUserModel };
-

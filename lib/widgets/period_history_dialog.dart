@@ -159,7 +159,7 @@ class _PeriodHistoryItemState extends State<_PeriodHistoryItem> {
         });
       }
     } catch (e) {
-      print('Erro ao carregar contagem de transações: $e');
+
       if (mounted) {
         setState(() {
           _transactionCount = widget.period.transactionIds.length;
@@ -232,7 +232,7 @@ class _PeriodHistoryItemState extends State<_PeriodHistoryItem> {
         widget.onUpdate(updatedPeriod);
       }
     } catch (e) {
-      print('Erro ao atualizar nome do período: $e');
+
       if (mounted) {
         setState(() {
           _isUpdating = false;
@@ -357,4 +357,3 @@ class _PeriodHistoryItemState extends State<_PeriodHistoryItem> {
     );
   }
 }
-

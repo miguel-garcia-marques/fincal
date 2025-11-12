@@ -42,13 +42,12 @@ class _WalletInvitesScreenState extends State<WalletInvitesScreen> {
         });
       }
     } catch (e) {
-      print('Error loading invites: $e');
+
       if (mounted) {
         setState(() => _isLoading = false);
       }
     }
   }
-
 
   Future<void> _createInviteLink() async {
     String selectedPermission = 'read';
@@ -703,4 +702,3 @@ class _WalletInvitesScreenState extends State<WalletInvitesScreen> {
     );
   }
 }
-

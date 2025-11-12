@@ -5,9 +5,11 @@ import '../models/invite.dart';
 import '../models/wallet_member.dart';
 import '../config/api_config.dart';
 import 'auth_service.dart';
+import 'cache_service.dart';
 
 class WalletService {
   final AuthService _authService = AuthService();
+  final CacheService _cacheService = CacheService();
 
   static String get baseUrl => ApiConfig.baseUrl;
 
@@ -34,7 +36,7 @@ class WalletService {
         throw Exception('Failed to load wallets: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error fetching wallets: $e');
+
       return [];
     }
   }
@@ -54,7 +56,7 @@ class WalletService {
         throw Exception(errorBody['message'] ?? 'Failed to load wallet');
       }
     } catch (e) {
-      print('Error fetching wallet: $e');
+
       rethrow;
     }
   }
@@ -75,7 +77,7 @@ class WalletService {
         throw Exception(errorBody['message'] ?? 'Failed to create wallet');
       }
     } catch (e) {
-      print('Error creating wallet: $e');
+
       rethrow;
     }
   }
@@ -96,7 +98,7 @@ class WalletService {
         throw Exception(errorBody['message'] ?? 'Failed to update wallet');
       }
     } catch (e) {
-      print('Error updating wallet: $e');
+
       rethrow;
     }
   }
@@ -113,13 +115,22 @@ class WalletService {
         throw Exception(errorBody['message'] ?? 'Failed to delete wallet');
       }
     } catch (e) {
-      print('Error deleting wallet: $e');
+
       rethrow;
     }
   }
 
-  Future<List<WalletMember>> getWalletMembers(String walletId) async {
+  Future<List<WalletMember>> getWalletMembers(String walletId, {bool forceRefresh = false}) async {
     try {
+      // Tentar obter do cache primeiro (se não for refresh forçado)
+      if (!forceRefresh) {
+        final cachedMembers = await _cacheService.getCachedWalletMembers(walletId);
+        if (cachedMembers != null) {
+          return cachedMembers;
+        }
+      }
+
+      // Se não houver cache válido, buscar da API
       final response = await http.get(
         Uri.parse('$baseUrl/wallets/$walletId/members'),
         headers: _getHeaders(),
@@ -127,12 +138,26 @@ class WalletService {
 
       if (response.statusCode == 200) {
         final List<dynamic> decoded = json.decode(response.body);
-        return decoded.map((json) => WalletMember.fromJson(json)).toList();
+        final members = decoded.map((json) => WalletMember.fromJson(json)).toList();
+        
+        // Salvar no cache
+        await _cacheService.cacheWalletMembers(walletId, members);
+        
+        return members;
       } else {
+        // Em caso de erro, tentar retornar do cache
+        final cachedMembers = await _cacheService.getCachedWalletMembers(walletId);
+        if (cachedMembers != null) {
+          return cachedMembers;
+        }
         throw Exception('Failed to load wallet members: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error fetching wallet members: $e');
+      // Em caso de erro de rede, tentar retornar do cache
+      final cachedMembers = await _cacheService.getCachedWalletMembers(walletId);
+      if (cachedMembers != null) {
+        return cachedMembers;
+      }
       return [];
     }
   }
@@ -148,8 +173,11 @@ class WalletService {
         final errorBody = json.decode(response.body);
         throw Exception(errorBody['message'] ?? 'Failed to remove member');
       }
+      
+      // Invalidar cache de membros da wallet
+      await _cacheService.invalidateWalletMembersCache(walletId);
     } catch (e) {
-      print('Error removing wallet member: $e');
+
       rethrow;
     }
   }
@@ -166,8 +194,11 @@ class WalletService {
         final errorBody = json.decode(response.body);
         throw Exception(errorBody['message'] ?? 'Failed to update permission');
       }
+      
+      // Invalidar cache de membros da wallet
+      await _cacheService.invalidateWalletMembersCache(walletId);
     } catch (e) {
-      print('Error updating member permission: $e');
+
       rethrow;
     }
   }
@@ -197,7 +228,7 @@ class WalletService {
         throw Exception(errorBody['message'] ?? 'Failed to create invite');
       }
     } catch (e) {
-      print('Error creating invite: $e');
+
       rethrow;
     }
   }
@@ -216,7 +247,7 @@ class WalletService {
         throw Exception('Failed to load invites: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error fetching invites: $e');
+
       return [];
     }
   }
@@ -235,7 +266,7 @@ class WalletService {
         throw Exception('Failed to load pending invites: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error fetching pending invites: $e');
+
       return [];
     }
   }
@@ -255,7 +286,7 @@ class WalletService {
         throw Exception(errorBody['message'] ?? 'Failed to load invite');
       }
     } catch (e) {
-      print('Error fetching invite: $e');
+
       rethrow;
     }
   }
@@ -274,7 +305,7 @@ class WalletService {
         throw Exception(errorBody['message'] ?? 'Failed to accept invite');
       }
     } catch (e) {
-      print('Error accepting invite: $e');
+
       rethrow;
     }
   }
@@ -291,9 +322,8 @@ class WalletService {
         throw Exception(errorBody['message'] ?? 'Failed to cancel invite');
       }
     } catch (e) {
-      print('Error canceling invite: $e');
+
       rethrow;
     }
   }
 }
-

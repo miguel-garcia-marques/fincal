@@ -69,7 +69,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
           return;
         }
       } catch (e) {
-        print('Erro ao verificar sessão: $e');
+
       }
       
       // Se não houver sessão ativa, redirecionar para login
@@ -336,4 +336,3 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     );
   }
 }
-

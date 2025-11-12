@@ -177,4 +177,3 @@ router.delete('/:id', validatePeriodId, async (req, res) => {
 });
 
 module.exports = router;
-

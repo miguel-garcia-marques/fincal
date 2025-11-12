@@ -90,4 +90,3 @@ const getTransactionModel = (walletId) => {
 };
 
 module.exports = { TransactionSchema, getTransactionModel };
-

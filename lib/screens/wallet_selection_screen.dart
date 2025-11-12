@@ -61,7 +61,7 @@ class _WalletSelectionScreenState extends State<WalletSelectionScreen> {
         
         // Se houver múltiplas, logar para debug
         if (ownedWallets.length > 1) {
-          print('⚠️  Múltiplas wallets pessoais encontradas: ${ownedWallets.length}. Usando a primeira: ${personalWallet.id}');
+
         }
       }
       
@@ -113,7 +113,7 @@ class _WalletSelectionScreenState extends State<WalletSelectionScreen> {
         });
       }
     } catch (e) {
-      print('Error loading wallets: $e');
+
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -299,4 +299,3 @@ class _WalletSelectionScreenState extends State<WalletSelectionScreen> {
     );
   }
 }
-

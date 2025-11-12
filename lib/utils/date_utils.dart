@@ -45,4 +45,3 @@ String formatPeriod(DateTime startDate, DateTime endDate) {
   
   return '$year | $startDay/$startMonth - $endDay/$endMonth';
 }
-

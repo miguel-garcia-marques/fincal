@@ -41,7 +41,7 @@ class _WalletSelectionDialogState extends State<WalletSelectionDialog> {
         
         // Se houver múltiplas, logar para debug
         if (ownedWallets.length > 1) {
-          print('⚠️  Múltiplas wallets pessoais encontradas: ${ownedWallets.length}. Usando a primeira: ${personalWallet.id}');
+
         }
       } else {
         // Não há carteira pessoal, criar uma (o backend retornará a existente se já houver)
@@ -81,7 +81,7 @@ class _WalletSelectionDialogState extends State<WalletSelectionDialog> {
         });
       }
     } catch (e) {
-      print('Error loading wallets: $e');
+
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -207,4 +207,3 @@ class _WalletSelectionDialogState extends State<WalletSelectionDialog> {
     );
   }
 }
-

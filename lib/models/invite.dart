@@ -64,21 +64,21 @@ class Invite {
       try {
         // Se for null ou não existir, retornar data atual como fallback
         if (dateValue == null) {
-          print('Warning: $fieldName is null, using current date as fallback');
+
           return DateTime.now();
         }
         
         if (dateValue is String) {
           final trimmed = dateValue.trim();
           if (trimmed.isEmpty || trimmed == 'null' || trimmed == 'undefined') {
-            print('Warning: $fieldName is empty or "null" string, using current date as fallback');
+
             return DateTime.now();
           }
           try {
             return DateTime.parse(trimmed);
           } catch (e) {
             // Se falhar o parse, retornar data atual
-            print('Error parsing $fieldName: "$dateValue", error: $e');
+
             return DateTime.now();
           }
         } else if (dateValue is Map) {
@@ -86,19 +86,18 @@ class Invite {
           try {
             return DateTime.parse(dateStr);
           } catch (e) {
-            print('Error parsing $fieldName from map: $dateValue, error: $e');
+
             return DateTime.now();
           }
         } else if (dateValue is DateTime) {
           return dateValue;
         } else {
           // Fallback para data atual se não conseguir parsear
-          print('Unknown $fieldName format: $dateValue (${dateValue.runtimeType}), using current date as fallback');
           return DateTime.now();
         }
       } catch (e) {
         // Catch-all para qualquer erro inesperado
-        print('Critical error parsing $fieldName: $e, using current date as fallback');
+
         return DateTime.now();
       }
     }
@@ -134,7 +133,7 @@ class Invite {
         wallet = Wallet.fromJson(json['walletId'] as Map<String, dynamic>);
       }
     } catch (e) {
-      print('Error parsing wallet in invite: $e');
+
       wallet = null;
     }
 
@@ -146,14 +145,14 @@ class Invite {
     try {
       expiresAt = parseDate(json['expiresAt'], 'expiresAt');
     } catch (e) {
-      print('Critical error parsing expiresAt: $e, using fallback');
+
       expiresAt = DateTime.now();
     }
     
     try {
       createdAt = parseDate(json['createdAt'], 'createdAt');
     } catch (e) {
-      print('Critical error parsing createdAt: $e, using fallback');
+
       createdAt = DateTime.now();
     }
 
@@ -177,4 +176,3 @@ class Invite {
     );
   }
 }
-

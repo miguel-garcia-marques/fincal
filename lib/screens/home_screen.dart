@@ -164,11 +164,10 @@ class _HomeScreenState extends State<HomeScreen> {
           personalWallet = wallets.firstWhere(
             (w) => w.id.toString().trim() == personalWalletIdStr,
           );
-          print(
-              '✅ Wallet pessoal encontrada pelo personalWalletId: ${personalWallet.id}');
+
         } catch (e) {
           // Se não encontrar pelo ID na lista, tentar buscar diretamente pela API
-          print('⚠️  Wallet não encontrada na lista, buscando pela API...');
+
           try {
             personalWallet =
                 await _walletService.getWallet(personalWalletIdStr);
@@ -177,12 +176,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 w.id.toString().trim() ==
                 personalWallet!.id.toString().trim())) {
               wallets.add(personalWallet);
-              print(
-                  '✅ Wallet pessoal adicionada à lista: ${personalWallet.id}');
+
             }
           } catch (e2) {
-            print(
-                '⚠️  Wallet pessoal não encontrada pelo ID na API: $personalWalletIdStr - $e2');
+
             // Continuar para tentar encontrar por isOwner
           }
         }
@@ -195,29 +192,25 @@ class _HomeScreenState extends State<HomeScreen> {
           // Se houver múltiplas wallets pessoais, usar a primeira (mais antiga)
           // O backend agora garante que não serão criadas novas, mas pode haver duplicatas antigas
           personalWallet = ownedWallets.first;
-          print(
-              '✅ Wallet pessoal encontrada por isOwner: ${personalWallet.id}');
 
           // Se houver múltiplas, logar para debug e remover duplicatas da lista
           if (ownedWallets.length > 1) {
-            print(
-                '⚠️  Múltiplas wallets pessoais encontradas: ${ownedWallets.length}. Usando a primeira: ${personalWallet.id}');
+
             // Remover wallets pessoais duplicadas da lista, mantendo apenas a primeira
             wallets.removeWhere((w) => w.isOwner && w.id != personalWallet!.id);
           }
         } else {
           // Se não há wallet pessoal, criar uma (o backend retornará a existente se já houver)
-          print(
-              '⚠️  Wallet pessoal não encontrada. Tentando criar/obter wallet pessoal...');
+
           try {
             personalWallet = await _walletService.createWallet();
             // Adicionar à lista se não estiver lá
             if (!wallets.any((w) => w.id == personalWallet!.id)) {
               wallets.add(personalWallet);
             }
-            print('✅ Wallet pessoal obtida/criada: ${personalWallet.id}');
+
           } catch (e2) {
-            print('❌ Erro ao criar/obter wallet pessoal: $e2');
+
             if (mounted) {
               setState(() {
                 _isInitialLoading = false;
@@ -268,7 +261,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     } catch (e) {
-      print('Error loading active wallet: $e');
+
       // Em caso de erro, não criar wallet aqui - deve ser criada no backend
       if (mounted) {
         setState(() {
@@ -321,7 +314,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     } catch (e) {
-      print('Erro ao carregar do cache: $e');
+
     }
   }
 
@@ -366,7 +359,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     } catch (e) {
-      print('Erro ao atualizar dados em background: $e');
+
     }
   }
 
@@ -374,7 +367,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await _userService.getCurrentUser();
     } catch (e) {
-      print('Erro ao carregar dados do usuário: $e');
+
     }
   }
 
@@ -389,7 +382,7 @@ class _HomeScreenState extends State<HomeScreen> {
         await _cacheService.cachePeriodHistories(periods);
       }
     } catch (e) {
-      print('Erro ao carregar histórico de períodos: $e');
+
     }
   }
 
@@ -512,7 +505,7 @@ class _HomeScreenState extends State<HomeScreen> {
         await _apiService.savePeriodHistory(periodHistory);
         await _loadPeriodHistories();
       } catch (e) {
-        print('Erro ao salvar histórico de período: $e');
+
       }
     }
 
@@ -562,7 +555,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     } catch (e) {
-      print('Erro ao atualizar transações em background: $e');
+
     }
   }
 
@@ -1115,7 +1108,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _cachedInitialBalance = balance;
       return balance;
     } catch (e) {
-      print('Erro ao calcular saldo inicial: $e');
+
       return 0.0;
     }
   }
@@ -2529,7 +2522,7 @@ class _ImportTransactionsDialogState extends State<_ImportTransactionsDialog> {
                 await apiService.updateTransaction(updatedTx,
                     walletId: widget.walletId);
               } catch (e) {
-                print('Erro ao atualizar transação duplicada: $e');
+
               }
             }
 

@@ -67,4 +67,3 @@ WalletSchema.pre('save', async function(next) {
 });
 
 module.exports = { WalletSchema, getWalletModel };
-

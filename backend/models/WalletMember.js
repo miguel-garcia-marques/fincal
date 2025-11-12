@@ -48,4 +48,3 @@ const getWalletMemberModel = () => {
 };
 
 module.exports = { WalletMemberSchema, getWalletMemberModel };
-

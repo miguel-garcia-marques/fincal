@@ -39,7 +39,6 @@ const checkWalletAccess = async (req, res, next) => {
     req.walletId = walletId;
     next();
   } catch (error) {
-    console.error('Erro ao verificar acesso à wallet:', error);
     return res.status(500).json({ message: 'Erro ao verificar acesso à wallet' });
   }
 };
@@ -55,7 +54,6 @@ const checkWritePermission = async (req, res, next) => {
 
     next();
   } catch (error) {
-    console.error('Erro ao verificar permissão de escrita:', error);
     return res.status(500).json({ message: 'Erro ao verificar permissão' });
   }
 };
@@ -71,7 +69,6 @@ const checkOwnerPermission = async (req, res, next) => {
 
     next();
   } catch (error) {
-    console.error('Erro ao verificar permissão de dono:', error);
     return res.status(500).json({ message: 'Erro ao verificar permissão' });
   }
 };
@@ -81,4 +78,3 @@ module.exports = {
   checkWritePermission, 
   checkOwnerPermission 
 };
-

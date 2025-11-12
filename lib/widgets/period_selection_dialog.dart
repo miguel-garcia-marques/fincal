@@ -159,4 +159,3 @@ class _PeriodSelectionDialogState extends State<PeriodSelectionDialog> {
     );
   }
 }
-

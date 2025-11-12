@@ -30,4 +30,3 @@ const getPeriodHistoryModel = (userId) => {
 };
 
 module.exports = { PeriodHistorySchema, getPeriodHistoryModel };
-

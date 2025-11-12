@@ -46,7 +46,6 @@ router.get('/', async (req, res) => {
       if (personalWallet && user) {
         user.personalWalletId = personalWallet._id;
         await user.save();
-        console.log(`✅ personalWalletId atualizado para usuário ${req.userId}: ${personalWallet._id}`);
       }
     }
     
@@ -375,4 +374,3 @@ router.put('/:walletId/members/:userId', checkWalletAccess, checkOwnerPermission
 });
 
 module.exports = router;
-

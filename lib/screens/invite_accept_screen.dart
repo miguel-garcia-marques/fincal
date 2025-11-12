@@ -775,4 +775,3 @@ class _InviteAcceptScreenState extends State<InviteAcceptScreen> {
     return '${date.day}/${date.month}/${date.year}';
   }
 }
-

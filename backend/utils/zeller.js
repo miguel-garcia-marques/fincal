@@ -32,4 +32,3 @@ function getDayOfWeek(day, month, year) {
 }
 
 module.exports = { getDayOfWeek };
-

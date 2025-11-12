@@ -35,7 +35,7 @@ class ApiService {
         throw Exception('Failed to load transactions: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error fetching transactions: $e');
+
       return [];
     }
   }
@@ -56,7 +56,7 @@ class ApiService {
         throw Exception(errorBody['message'] ?? 'Failed to save transaction');
       }
     } catch (e) {
-      print('Error saving transaction: $e');
+
       rethrow;
     }
   }
@@ -77,7 +77,7 @@ class ApiService {
         throw Exception(errorBody['message'] ?? 'Failed to update transaction');
       }
     } catch (e) {
-      print('Error updating transaction: $e');
+
       rethrow;
     }
   }
@@ -94,7 +94,7 @@ class ApiService {
         throw Exception(errorBody['message'] ?? 'Failed to delete transaction');
       }
     } catch (e) {
-      print('Error deleting transaction: $e');
+
       rethrow;
     }
   }
@@ -120,7 +120,7 @@ class ApiService {
         throw Exception('Failed to load transactions: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error fetching transactions in range: $e');
+
       return [];
     }
   }
@@ -144,7 +144,7 @@ class ApiService {
         throw Exception('Failed to load period histories: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error fetching period histories: $e');
+
       return [];
     }
   }
@@ -163,7 +163,7 @@ class ApiService {
         throw Exception('Failed to load period history: ${response.statusCode}');
       }
     } catch (e) {
-      print('Error fetching period history: $e');
+
       rethrow;
     }
   }
@@ -184,7 +184,7 @@ class ApiService {
       final decoded = json.decode(response.body);
       return PeriodHistory.fromJson(decoded);
     } catch (e) {
-      print('Error saving period history: $e');
+
       rethrow;
     }
   }
@@ -205,7 +205,7 @@ class ApiService {
       final decoded = json.decode(response.body);
       return PeriodHistory.fromJson(decoded);
     } catch (e) {
-      print('Error updating period history: $e');
+
       rethrow;
     }
   }
@@ -222,7 +222,7 @@ class ApiService {
         throw Exception(errorBody['message'] ?? 'Failed to delete period history');
       }
     } catch (e) {
-      print('Error deleting period history: $e');
+
       rethrow;
     }
   }
@@ -256,7 +256,7 @@ class ApiService {
       
       return json.decode(response.body);
     } catch (e) {
-      print('Error importing bulk transactions: $e');
+
       rethrow;
     }
   }
@@ -267,4 +267,3 @@ class ApiService {
     return decoded.map((json) => Transaction.fromJson(json)).toList();
   }
 }
-

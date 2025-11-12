@@ -240,8 +240,6 @@ router.post('/', validateUser, async (req, res) => {
         walletsInvited: []
       });
       await user.save();
-      
-      console.log(`✅ Wallet pessoal criada para novo usuário ${req.userId}: ${personalWallet._id}`);
     }
     
     res.status(201).json(user);
@@ -281,4 +279,3 @@ router.put('/me', validateUser, async (req, res) => {
 });
 
 module.exports = router;
-

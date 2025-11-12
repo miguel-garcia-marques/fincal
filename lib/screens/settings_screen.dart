@@ -43,7 +43,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         });
       }
     } catch (e) {
-      print('Error loading invites: $e');
+
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -392,4 +392,3 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 }
-

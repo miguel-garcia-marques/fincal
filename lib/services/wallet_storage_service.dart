@@ -8,7 +8,7 @@ class WalletStorageService {
       final prefs = await SharedPreferences.getInstance();
       return prefs.getString(_activeWalletIdKey);
     } catch (e) {
-      print('Error getting active wallet ID: $e');
+
       return null;
     }
   }
@@ -18,7 +18,7 @@ class WalletStorageService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_activeWalletIdKey, walletId);
     } catch (e) {
-      print('Error setting active wallet ID: $e');
+
     }
   }
 
@@ -27,8 +27,7 @@ class WalletStorageService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_activeWalletIdKey);
     } catch (e) {
-      print('Error clearing active wallet ID: $e');
+
     }
   }
 }
-

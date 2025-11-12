@@ -71,7 +71,6 @@ class _CustomCalendarPickerState extends State<CustomCalendarPicker> {
     });
   }
 
-
   bool _isDateStartOrEnd(DateTime date) {
     if (_selectedStartDate == null) return false;
     if (_selectedEndDate == null) {
@@ -432,4 +431,3 @@ class _CustomCalendarPickerState extends State<CustomCalendarPicker> {
     );
   }
 }
-
