@@ -31,10 +31,13 @@ class _WalletInvitesScreenState extends State<WalletInvitesScreen> {
     _loadInvites();
   }
 
-  Future<void> _loadInvites() async {
+  Future<void> _loadInvites({bool forceRefresh = false}) async {
     setState(() => _isLoading = true);
     try {
-      final invites = await _walletService.getWalletInvites(widget.currentWallet.id);
+      final invites = await _walletService.getWalletInvites(
+        widget.currentWallet.id,
+        forceRefresh: forceRefresh,
+      );
       if (mounted) {
         setState(() {
           _invites = invites;
@@ -110,7 +113,7 @@ class _WalletInvitesScreenState extends State<WalletInvitesScreen> {
           // Usar query parameter para compatibilidade com Flutter web
           final inviteUrl = '${Uri.base.origin}/invite.html?token=${invite.token}';
           await _showInviteDialog(inviteUrl, invite);
-          _loadInvites();
+          _loadInvites(forceRefresh: true);
         }
       } catch (e) {
         if (mounted) {
@@ -363,7 +366,7 @@ class _WalletInvitesScreenState extends State<WalletInvitesScreen> {
               ),
             ),
           );
-          _loadInvites();
+          _loadInvites(forceRefresh: true);
         }
       } catch (e) {
         if (mounted) {
@@ -399,12 +402,12 @@ class _WalletInvitesScreenState extends State<WalletInvitesScreen> {
 
     if (confirmed == true) {
       try {
-        await _walletService.cancelInvite(token);
+        await _walletService.cancelInvite(token, widget.currentWallet.id);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Convite cancelado')),
           );
-          _loadInvites();
+          _loadInvites(forceRefresh: true);
         }
       } catch (e) {
         if (mounted) {

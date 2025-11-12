@@ -22,8 +22,17 @@ class WalletService {
   }
 
   // Wallets
-  Future<List<Wallet>> getAllWallets() async {
+  Future<List<Wallet>> getAllWallets({bool forceRefresh = false}) async {
     try {
+      // Tentar obter do cache primeiro (se não for refresh forçado)
+      if (!forceRefresh) {
+        final cachedWallets = await _cacheService.getCachedWallets();
+        if (cachedWallets != null) {
+          return cachedWallets;
+        }
+      }
+
+      // Se não houver cache válido, buscar da API
       final response = await http.get(
         Uri.parse('$baseUrl/wallets'),
         headers: _getHeaders(),
@@ -31,12 +40,26 @@ class WalletService {
 
       if (response.statusCode == 200) {
         final List<dynamic> decoded = json.decode(response.body);
-        return decoded.map((json) => Wallet.fromJson(json)).toList();
+        final wallets = decoded.map((json) => Wallet.fromJson(json)).toList();
+        
+        // Salvar no cache
+        await _cacheService.cacheWallets(wallets);
+        
+        return wallets;
       } else {
+        // Em caso de erro, tentar retornar do cache
+        final cachedWallets = await _cacheService.getCachedWallets();
+        if (cachedWallets != null) {
+          return cachedWallets;
+        }
         throw Exception('Failed to load wallets: ${response.statusCode}');
       }
     } catch (e) {
-
+      // Em caso de erro de rede, tentar retornar do cache
+      final cachedWallets = await _cacheService.getCachedWallets();
+      if (cachedWallets != null) {
+        return cachedWallets;
+      }
       return [];
     }
   }
@@ -195,8 +218,9 @@ class WalletService {
         throw Exception(errorBody['message'] ?? 'Failed to update permission');
       }
       
-      // Invalidar cache de membros da wallet
+      // Invalidar cache de membros da wallet e invites (permissão pode afetar invites)
       await _cacheService.invalidateWalletMembersCache(walletId);
+      await _cacheService.invalidateInvitesCache(walletId);
     } catch (e) {
 
       rethrow;
@@ -222,7 +246,12 @@ class WalletService {
 
       if (response.statusCode == 201) {
         final decoded = json.decode(response.body);
-        return Invite.fromJson(decoded);
+        final invite = Invite.fromJson(decoded);
+        
+        // Invalidar cache de invites para forçar refresh na próxima vez
+        await _cacheService.invalidateInvitesCache(walletId);
+        
+        return invite;
       } else {
         final errorBody = json.decode(response.body);
         throw Exception(errorBody['message'] ?? 'Failed to create invite');
@@ -233,8 +262,17 @@ class WalletService {
     }
   }
 
-  Future<List<Invite>> getWalletInvites(String walletId) async {
+  Future<List<Invite>> getWalletInvites(String walletId, {bool forceRefresh = false}) async {
     try {
+      // Tentar obter do cache primeiro (se não for refresh forçado)
+      if (!forceRefresh) {
+        final cachedInvites = await _cacheService.getCachedInvites(walletId);
+        if (cachedInvites != null) {
+          return cachedInvites;
+        }
+      }
+
+      // Se não houver cache válido, buscar da API
       final response = await http.get(
         Uri.parse('$baseUrl/invites/wallet/$walletId'),
         headers: _getHeaders(),
@@ -242,12 +280,26 @@ class WalletService {
 
       if (response.statusCode == 200) {
         final List<dynamic> decoded = json.decode(response.body);
-        return decoded.map((json) => Invite.fromJson(json)).toList();
+        final invites = decoded.map((json) => Invite.fromJson(json)).toList();
+        
+        // Salvar no cache
+        await _cacheService.cacheInvites(walletId, invites);
+        
+        return invites;
       } else {
+        // Em caso de erro, tentar retornar do cache
+        final cachedInvites = await _cacheService.getCachedInvites(walletId);
+        if (cachedInvites != null) {
+          return cachedInvites;
+        }
         throw Exception('Failed to load invites: ${response.statusCode}');
       }
     } catch (e) {
-
+      // Em caso de erro de rede, tentar retornar do cache
+      final cachedInvites = await _cacheService.getCachedInvites(walletId);
+      if (cachedInvites != null) {
+        return cachedInvites;
+      }
       return [];
     }
   }
@@ -310,7 +362,7 @@ class WalletService {
     }
   }
 
-  Future<void> cancelInvite(String token) async {
+  Future<void> cancelInvite(String token, String walletId) async {
     try {
       final response = await http.delete(
         Uri.parse('$baseUrl/invites/$token'),
@@ -321,6 +373,9 @@ class WalletService {
         final errorBody = json.decode(response.body);
         throw Exception(errorBody['message'] ?? 'Failed to cancel invite');
       }
+      
+      // Invalidar cache de invites para forçar refresh na próxima vez
+      await _cacheService.invalidateInvitesCache(walletId);
     } catch (e) {
 
       rethrow;

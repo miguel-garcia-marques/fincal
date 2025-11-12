@@ -93,6 +93,17 @@ class _InviteAcceptScreenState extends State<InviteAcceptScreen> {
     }
 
     if (choice == 'login') {
+      // Fazer logout da conta atual antes de fazer login com outra conta
+      // Isso evita conflitos de sessão no Supabase
+      try {
+        await _authService.signOut();
+      } catch (e) {
+        // Ignorar erros no logout - continuar mesmo assim
+      }
+      
+      // Aguardar um pouco para garantir que o logout foi processado
+      await Future.delayed(const Duration(milliseconds: 300));
+      
       // Redirecionar para login com o token do invite
       if (mounted) {
         Navigator.of(context).pushReplacement(

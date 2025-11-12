@@ -15,14 +15,21 @@ getWalletMemberModel();
 getUserModel();
 
 // Helper para converter invite para JSON com datas formatadas
-async function inviteToJson(invite, invitedByName = null) {
+// usersMap é opcional e deve conter userId -> User para otimização (evita N+1 queries)
+async function inviteToJson(invite, invitedByName = null, usersMap = null) {
   // Se não tiver o nome do usuário e tiver o ID, buscar
   if (!invitedByName && invite.invitedBy) {
     try {
-      const User = getUserModel();
-      const user = await User.findOne({ userId: invite.invitedBy });
-      if (user) {
-        invitedByName = user.name;
+      if (usersMap && usersMap.has(invite.invitedBy)) {
+        // Usar mapa se fornecido (otimização)
+        invitedByName = usersMap.get(invite.invitedBy)?.name || null;
+      } else {
+        // Fallback para query individual (caso usersMap não seja fornecido)
+        const User = getUserModel();
+        const user = await User.findOne({ userId: invite.invitedBy });
+        if (user) {
+          invitedByName = user.name;
+        }
       }
     } catch (error) {
       console.warn(`Warning: Could not fetch user name for invitedBy ${invite.invitedBy}: ${error.message}`);
@@ -33,10 +40,16 @@ async function inviteToJson(invite, invitedByName = null) {
   let acceptedByName = null;
   if (invite.acceptedBy) {
     try {
-      const User = getUserModel();
-      const user = await User.findOne({ userId: invite.acceptedBy });
-      if (user) {
-        acceptedByName = user.name;
+      if (usersMap && usersMap.has(invite.acceptedBy)) {
+        // Usar mapa se fornecido (otimização)
+        acceptedByName = usersMap.get(invite.acceptedBy)?.name || null;
+      } else {
+        // Fallback para query individual (caso usersMap não seja fornecido)
+        const User = getUserModel();
+        const user = await User.findOne({ userId: invite.acceptedBy });
+        if (user) {
+          acceptedByName = user.name;
+        }
       }
     } catch (error) {
       console.warn(`Warning: Could not fetch user name for acceptedBy ${invite.acceptedBy}: ${error.message}`);
@@ -179,10 +192,26 @@ router.use(authenticateUser);
 router.get('/wallet/:walletId', checkWalletAccess, checkOwnerPermission, async (req, res) => {
   try {
     const Invite = getInviteModel();
+    const User = getUserModel();
     const invites = await Invite.find({ walletId: req.walletId })
       .sort({ createdAt: -1 });
 
-    const invitesJson = await Promise.all(invites.map(invite => inviteToJson(invite)));
+    // Otimização: buscar todos os usuários de uma vez em vez de N+1 queries
+    const userIds = new Set();
+    invites.forEach(invite => {
+      if (invite.invitedBy) userIds.add(invite.invitedBy);
+      if (invite.acceptedBy) userIds.add(invite.acceptedBy);
+    });
+    
+    const usersMap = new Map();
+    if (userIds.size > 0) {
+      const users = await User.find({ userId: { $in: Array.from(userIds) } });
+      users.forEach(user => {
+        usersMap.set(user.userId, user);
+      });
+    }
+
+    const invitesJson = await Promise.all(invites.map(invite => inviteToJson(invite, null, usersMap)));
     res.json(invitesJson);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -212,7 +241,22 @@ router.get('/pending', async (req, res) => {
     // Filtrar convites expirados
     const validInvites = invites.filter(invite => !invite.isExpired());
 
-    const invitesJson = await Promise.all(validInvites.map(invite => inviteToJson(invite)));
+    // Otimização: buscar todos os usuários de uma vez em vez de N+1 queries
+    const userIds = new Set();
+    validInvites.forEach(invite => {
+      if (invite.invitedBy) userIds.add(invite.invitedBy);
+      if (invite.acceptedBy) userIds.add(invite.acceptedBy);
+    });
+    
+    const usersMap = new Map();
+    if (userIds.size > 0) {
+      const users = await User.find({ userId: { $in: Array.from(userIds) } });
+      users.forEach(user => {
+        usersMap.set(user.userId, user);
+      });
+    }
+
+    const invitesJson = await Promise.all(validInvites.map(invite => inviteToJson(invite, null, usersMap)));
     res.json(invitesJson);
   } catch (error) {
     res.status(500).json({ message: error.message });

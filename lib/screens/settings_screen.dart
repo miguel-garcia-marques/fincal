@@ -32,10 +32,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadInvites();
   }
 
-  Future<void> _loadInvites() async {
+  Future<void> _loadInvites({bool forceRefresh = false}) async {
     setState(() => _isLoading = true);
     try {
-      final invites = await _walletService.getWalletInvites(widget.currentWallet.id);
+      final invites = await _walletService.getWalletInvites(
+        widget.currentWallet.id,
+        forceRefresh: forceRefresh,
+      );
       if (mounted) {
         setState(() {
           _invites = invites;
@@ -122,7 +125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Convite enviado com sucesso!')),
           );
-          _loadInvites();
+          _loadInvites(forceRefresh: true);
         }
       } catch (e) {
         if (mounted) {
@@ -222,7 +225,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           );
-          _loadInvites();
+          _loadInvites(forceRefresh: true);
         }
       } catch (e) {
         if (mounted) {
@@ -258,12 +261,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (confirmed == true) {
       try {
-        await _walletService.cancelInvite(token);
+        await _walletService.cancelInvite(token, widget.currentWallet.id);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Convite cancelado')),
           );
-          _loadInvites();
+          _loadInvites(forceRefresh: true);
         }
       } catch (e) {
         if (mounted) {

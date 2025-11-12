@@ -91,6 +91,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       if (_isLoginMode) {
+        // Se houver inviteToken e usuário já estiver autenticado com outra conta,
+        // fazer logout primeiro para evitar conflitos
+        if (_effectiveInviteToken != null && _authService.isAuthenticated) {
+          try {
+            await _authService.signOut();
+            // Aguardar um pouco para garantir que o logout foi processado
+            await Future.delayed(const Duration(milliseconds: 300));
+          } catch (e) {
+            // Ignorar erros no logout - continuar mesmo assim
+          }
+        }
+        
         AuthResponse response;
         try {
           response = await _authService.signInWithEmail(
@@ -420,17 +432,30 @@ class _LoginScreenState extends State<LoginScreen> {
           errorMessage = 'Por favor, verifique seu email antes de fazer login.';
         } else if (errorString.contains('invalid') || errorString.contains('credentials')) {
           errorMessage = 'Email ou senha incorretos.';
+        } else if (errorString.contains('load failed') || 
+                   errorString.contains('network') ||
+                   errorString.contains('connection') ||
+                   errorString.contains('timeout') ||
+                   errorString.contains('clientexception')) {
+          errorMessage = 'Erro de conexão. Verifique sua internet e tente novamente.';
+        } else if (errorString.contains('authretryablefetchexception')) {
+          errorMessage = 'Erro de conexão com o servidor. Tente novamente em alguns instantes.';
         } else if (_isLoginMode) {
-          errorMessage = 'Erro ao fazer login: ${e.toString()}';
+          // Para erros de login, mostrar mensagem mais amigável
+          if (errorString.contains('user not found') || errorString.contains('user_not_found')) {
+            errorMessage = 'Usuário não encontrado. Verifique o email ou crie uma conta.';
+          } else {
+            errorMessage = 'Erro ao fazer login. Tente novamente.';
+          }
         } else {
-          errorMessage = 'Erro ao criar conta: ${e.toString()}';
+          errorMessage = 'Erro ao criar conta. Tente novamente.';
         }
         
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(errorMessage),
             backgroundColor: AppTheme.expenseRed,
-            duration: const Duration(seconds: 4),
+            duration: const Duration(seconds: 5),
           ),
         );
         setState(() => _isLoading = false);

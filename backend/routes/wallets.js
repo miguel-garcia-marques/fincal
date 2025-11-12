@@ -64,9 +64,29 @@ router.get('/', async (req, res) => {
     // Combinar e adicionar informações de permissão
     const wallets = [];
     
+    // Coletar todos os userIds únicos para buscar em batch (otimização)
+    const userIds = new Set();
+    if (personalWallet) {
+      userIds.add(personalWallet.ownerId);
+    }
+    memberWallets.forEach(wallet => {
+      if (wallet.ownerId !== req.userId) {
+        userIds.add(wallet.ownerId);
+      }
+    });
+    
+    // Buscar todos os usuários de uma vez (otimização: elimina N+1 queries)
+    const usersMap = new Map();
+    if (userIds.size > 0) {
+      const users = await User.find({ userId: { $in: Array.from(userIds) } });
+      users.forEach(user => {
+        usersMap.set(user.userId, user);
+      });
+    }
+    
     // Adicionar APENAS a wallet pessoal principal (não todas as duplicadas)
     if (personalWallet) {
-      const owner = await User.findOne({ userId: personalWallet.ownerId });
+      const owner = usersMap.get(personalWallet.ownerId);
       wallets.push({
         ...personalWallet.toObject(),
         permission: 'owner',
@@ -80,8 +100,8 @@ router.get('/', async (req, res) => {
       // Não adicionar se for wallet pessoal (já adicionada acima)
       if (wallet.ownerId !== req.userId) {
         const membership = memberShips.find(m => m.walletId.toString() === wallet._id.toString());
-        // Buscar nome do owner
-        const owner = await User.findOne({ userId: wallet.ownerId });
+        // Buscar nome do owner do mapa (já carregado em batch)
+        const owner = usersMap.get(wallet.ownerId);
         wallets.push({
           ...wallet.toObject(),
           permission: membership?.permission || 'read',

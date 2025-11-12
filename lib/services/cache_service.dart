@@ -5,6 +5,8 @@ import '../models/transaction.dart';
 import '../models/period_history.dart';
 import '../models/user.dart';
 import '../models/wallet_member.dart';
+import '../models/wallet.dart';
+import '../models/invite.dart';
 
 class CacheService {
   static const String _transactionsKey = 'cached_transactions';
@@ -14,6 +16,9 @@ class CacheService {
   static const String _userKey = 'cached_user';
   static const String _userLastUpdateKey = 'cache_user_last_update';
   static const String _walletMembersPrefix = 'cached_wallet_members_';
+  static const String _walletsKey = 'cached_wallets';
+  static const String _walletsLastUpdateKey = 'cache_wallets_last_update';
+  static const String _invitesPrefix = 'cached_invites_';
   
   // Cache válido por 5 minutos (aumentado para reduzir requisições)
   static const Duration cacheValidityDuration = Duration(minutes: 5);
@@ -21,6 +26,10 @@ class CacheService {
   static const Duration userCacheValidityDuration = Duration(minutes: 10);
   // Cache de membros da wallet válido por 5 minutos
   static const Duration walletMembersCacheValidityDuration = Duration(minutes: 5);
+  // Cache de wallets válido por 5 minutos
+  static const Duration walletsCacheValidityDuration = Duration(minutes: 5);
+  // Cache de invites válido por 3 minutos (mudam mais frequentemente)
+  static const Duration invitesCacheValidityDuration = Duration(minutes: 3);
 
   // Salvar transações no cache (usando compute para não bloquear UI)
   Future<void> cacheTransactions(List<Transaction> transactions) async {
@@ -313,6 +322,133 @@ class CacheService {
       final keys = prefs.getKeys();
       for (final key in keys) {
         if (key.startsWith(_walletMembersPrefix)) {
+          await prefs.remove(key);
+        }
+      }
+    } catch (e) {
+      // Ignorar erros
+    }
+  }
+
+  // ========== CACHE DE WALLETS ==========
+  
+  // Salvar wallets no cache
+  Future<void> cacheWallets(List<Wallet> wallets) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final walletsJson = json.encode(
+        wallets.map((w) => w.toJson()).toList(),
+      );
+      await prefs.setString(_walletsKey, walletsJson);
+      await prefs.setString(_walletsLastUpdateKey, DateTime.now().toIso8601String());
+    } catch (e) {
+      // Ignorar erros de cache
+    }
+  }
+
+  // Obter wallets do cache
+  Future<List<Wallet>?> getCachedWallets() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final walletsJson = prefs.getString(_walletsKey);
+      final lastUpdateStr = prefs.getString(_walletsLastUpdateKey);
+      
+      if (walletsJson == null || lastUpdateStr == null) {
+        return null;
+      }
+
+      // Verificar se o cache é válido
+      final lastUpdate = DateTime.parse(lastUpdateStr);
+      final now = DateTime.now();
+      if (now.difference(lastUpdate) > walletsCacheValidityDuration) {
+        return null; // Cache expirado
+      }
+
+      final List<dynamic> decoded = json.decode(walletsJson);
+      return decoded.map((json) => Wallet.fromJson(json)).toList();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Invalidar cache de wallets
+  Future<void> invalidateWalletsCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_walletsKey);
+      await prefs.remove(_walletsLastUpdateKey);
+    } catch (e) {
+      // Ignorar erros
+    }
+  }
+
+  // ========== CACHE DE INVITES ==========
+  
+  // Salvar invites da wallet no cache
+  Future<void> cacheInvites(String walletId, List<Invite> invites) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_invitesPrefix$walletId';
+      final lastUpdateKey = '${_invitesPrefix}${walletId}_last_update';
+      
+      final invitesJson = json.encode(
+        invites.map((i) => i.toJson()).toList(),
+      );
+      await prefs.setString(key, invitesJson);
+      await prefs.setString(lastUpdateKey, DateTime.now().toIso8601String());
+    } catch (e) {
+      // Ignorar erros de cache
+    }
+  }
+
+  // Obter invites da wallet do cache
+  Future<List<Invite>?> getCachedInvites(String walletId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_invitesPrefix$walletId';
+      final lastUpdateKey = '${_invitesPrefix}${walletId}_last_update';
+      
+      final invitesJson = prefs.getString(key);
+      final lastUpdateStr = prefs.getString(lastUpdateKey);
+      
+      if (invitesJson == null || lastUpdateStr == null) {
+        return null;
+      }
+
+      // Verificar se o cache é válido
+      final lastUpdate = DateTime.parse(lastUpdateStr);
+      final now = DateTime.now();
+      if (now.difference(lastUpdate) > invitesCacheValidityDuration) {
+        return null; // Cache expirado
+      }
+
+      final List<dynamic> decoded = json.decode(invitesJson);
+      return decoded.map((json) => Invite.fromJson(json)).toList();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Invalidar cache de invites da wallet
+  Future<void> invalidateInvitesCache(String walletId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_invitesPrefix$walletId';
+      final lastUpdateKey = '${_invitesPrefix}${walletId}_last_update';
+      await prefs.remove(key);
+      await prefs.remove(lastUpdateKey);
+    } catch (e) {
+      // Ignorar erros
+    }
+  }
+
+  // Limpar todos os caches de invites
+  Future<void> clearAllInvitesCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getKeys();
+      for (final key in keys) {
+        if (key.startsWith(_invitesPrefix)) {
           await prefs.remove(key);
         }
       }

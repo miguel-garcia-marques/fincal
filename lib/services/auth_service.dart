@@ -26,6 +26,17 @@ class AuthService {
   // Fazer login com email e senha
   Future<AuthResponse> signInWithEmail(String email, String password) async {
     try {
+      // Se já houver uma sessão ativa, fazer logout primeiro para evitar conflitos
+      if (_supabase.auth.currentSession != null) {
+        try {
+          await _supabase.auth.signOut();
+          // Aguardar um pouco para garantir que o logout foi processado
+          await Future.delayed(const Duration(milliseconds: 200));
+        } catch (e) {
+          // Ignorar erros no logout - continuar mesmo assim
+        }
+      }
+      
       return await _supabase.auth.signInWithPassword(
         email: email,
         password: password,
@@ -54,6 +65,8 @@ class AuthService {
     // Limpar todos os caches ao fazer logout
     await _cacheService.invalidateUserCache();
     await _cacheService.clearAllWalletMembersCache();
+    await _cacheService.invalidateWalletsCache();
+    await _cacheService.clearAllInvitesCache();
     await _cacheService.clearCache();
   }
 
