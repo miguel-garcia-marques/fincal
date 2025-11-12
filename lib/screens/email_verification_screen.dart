@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
+import '../main.dart';
 import 'login_screen.dart';
 
 class EmailVerificationScreen extends StatefulWidget {
@@ -48,9 +49,31 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     });
 
     try {
-      // Simplesmente redirecionar para login
+      // Tentar verificar se o email foi confirmado e fazer login automático
+      try {
+        // Verificar se há uma sessão ativa (usuário pode ter clicado no link de verificação)
+        final currentUser = _authService.currentUser;
+        if (currentUser != null && currentUser.emailConfirmedAt != null) {
+          // Email já foi verificado, fazer refresh da sessão
+          await _authService.supabase.auth.refreshSession();
+          
+          // Navegar para AuthWrapper que vai detectar a autenticação e redirecionar
+          if (!_isDisposed && mounted) {
+            Navigator.of(context).pushAndRemoveUntil(
+              MaterialPageRoute(
+                builder: (context) => const AuthWrapper(),
+              ),
+              (route) => false,
+            );
+          }
+          return;
+        }
+      } catch (e) {
+        print('Erro ao verificar sessão: $e');
+      }
+      
+      // Se não houver sessão ativa, redirecionar para login
       // O usuário pode tentar fazer login e será informado se o email não foi verificado
-      // Não tentar verificar aqui para evitar erros desnecessários
       if (!_isDisposed && mounted) {
         setState(() {
           _isChecking = false;

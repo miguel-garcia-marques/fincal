@@ -376,6 +376,39 @@ class _CustomCalendarPickerState extends State<CustomCalendarPicker> {
                   ElevatedButton(
                     onPressed: (_selectedStartDate != null && _selectedEndDate != null)
                         ? () {
+                            // Validar período: mínimo 14 dias, máximo 31 dias
+                            final startOnly = DateTime(
+                              _selectedStartDate!.year,
+                              _selectedStartDate!.month,
+                              _selectedStartDate!.day,
+                            );
+                            final endOnly = DateTime(
+                              _selectedEndDate!.year,
+                              _selectedEndDate!.month,
+                              _selectedEndDate!.day,
+                            );
+                            final daysDiff = endOnly.difference(startOnly).inDays + 1;
+                            
+                            if (daysDiff < 14) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('O período deve ter no mínimo 14 dias'),
+                                  backgroundColor: AppTheme.expenseRed,
+                                ),
+                              );
+                              return;
+                            }
+                            
+                            if (daysDiff > 31) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('O período não pode ter mais de 31 dias'),
+                                  backgroundColor: AppTheme.expenseRed,
+                                ),
+                              );
+                              return;
+                            }
+                            
                             Navigator.of(context).pop(<String, DateTime>{
                               'startDate': _selectedStartDate!,
                               'endDate': _selectedEndDate!,

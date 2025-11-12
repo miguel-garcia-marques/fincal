@@ -17,6 +17,7 @@ import '../utils/responsive_fonts.dart';
 import '../widgets/calendar.dart';
 import '../widgets/transaction_list.dart';
 import '../widgets/loading_screen.dart';
+import '../main.dart';
 import 'add_transaction_screen.dart';
 import 'settings_menu_screen.dart';
 import '../widgets/day_details_dialog.dart';
@@ -658,6 +659,18 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // Verificar permissão antes de abrir o diálogo
+    if (_activeWallet!.permission == 'read') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Você só tem permissão para visualizar este calendário'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
     final result = await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -771,6 +784,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                           walletId: _activeWallet!.id,
                           userId: _authService.currentUser!.id,
+                          walletPermission: _activeWallet!.permission,
                         )
                       : const Center(child: CircularProgressIndicator()),
                 ),
@@ -814,6 +828,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     },
                     walletId: _activeWallet!.id,
                     userId: _authService.currentUser!.id,
+                    walletPermission: _activeWallet!.permission,
                   )
                 : const Center(child: CircularProgressIndicator()),
           ),
@@ -1273,7 +1288,48 @@ class _HomeScreenState extends State<HomeScreen> {
                                 );
 
                                 if (shouldLogout == true && mounted) {
-                                  await _authService.signOut();
+                                  try {
+                                    // Fazer logout
+                                    await _authService.signOut();
+
+                                    // Aguardar um pouco para garantir que o logout foi processado
+                                    await Future.delayed(
+                                        const Duration(milliseconds: 100));
+
+                                    if (mounted) {
+                                      // Sempre navegar para AuthWrapper, independente do estado
+                                      // O AuthWrapper vai verificar a autenticação e mostrar login se necessário
+                                      Navigator.of(context).pushAndRemoveUntil(
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              const AuthWrapper(),
+                                        ),
+                                        (route) =>
+                                            false, // Remove todas as rotas anteriores
+                                      );
+                                    }
+                                  } catch (e) {
+                                    if (mounted) {
+                                      // Mesmo em caso de erro, navegar para AuthWrapper
+                                      // para garantir que o usuário não fique preso
+                                      Navigator.of(context).pushAndRemoveUntil(
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              const AuthWrapper(),
+                                        ),
+                                        (route) => false,
+                                      );
+
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content:
+                                              Text('Erro ao fazer logout: $e'),
+                                          backgroundColor: AppTheme.expenseRed,
+                                        ),
+                                      );
+                                    }
+                                  }
                                 }
                               }
                             },
@@ -1369,6 +1425,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                                           _activeWallet!.id,
                                                       userId: _authService
                                                           .currentUser!.id,
+                                                      walletPermission:
+                                                          _activeWallet!
+                                                              .permission,
                                                     )
                                                   : const Center(
                                                       child:
@@ -1434,6 +1493,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                                             _activeWallet!.id,
                                                         userId: _authService
                                                             .currentUser!.id,
+                                                        walletPermission:
+                                                            _activeWallet!
+                                                                .permission,
                                                       )
                                                     : const Center(
                                                         child:

@@ -10,12 +10,14 @@ class TransactionDetailsScreen extends StatelessWidget {
   final Transaction transaction;
   final String walletId;
   final String userId;
+  final String walletPermission; // 'owner', 'read', 'write'
 
   const TransactionDetailsScreen({
     super.key,
     required this.transaction,
     required this.walletId,
     required this.userId,
+    required this.walletPermission,
   });
 
   String _getPeriodicityText(Transaction transaction) {
@@ -103,6 +105,17 @@ class TransactionDetailsScreen extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.edit, color: AppTheme.black),
             onPressed: () async {
+              // Verificar permissão antes de editar
+              if (walletPermission == 'read') {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Você só tem permissão para visualizar este calendário'),
+                    duration: Duration(seconds: 3),
+                  ),
+                );
+                return;
+              }
+
               Transaction? transactionToEdit = transaction;
 
               if (transaction.id.contains('_') &&

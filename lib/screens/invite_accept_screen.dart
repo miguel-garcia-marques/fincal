@@ -5,6 +5,7 @@ import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../models/invite.dart';
 import '../theme/app_theme.dart';
+import '../main.dart';
 import 'login_screen.dart';
 import 'home_screen.dart';
 
@@ -313,15 +314,18 @@ class _InviteAcceptScreenState extends State<InviteAcceptScreen> {
           html.window.history.replaceState(null, '', '/');
         }
 
-        // Aguardar um pouco e redirecionar para home
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
-              (route) => false,
-            );
-          }
-        });
+        // Aguardar um pouco para mostrar a mensagem e depois navegar para AuthWrapper
+        // O AuthWrapper vai detectar a autenticação e redirecionar para a tela apropriada
+        await Future.delayed(const Duration(milliseconds: 1500));
+        
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(
+              builder: (context) => const AuthWrapper(),
+            ),
+            (route) => false,
+          );
+        }
       }
     } catch (e) {
       if (mounted) {

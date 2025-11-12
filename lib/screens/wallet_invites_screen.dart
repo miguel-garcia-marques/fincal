@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../models/wallet.dart';
 import '../models/invite.dart';
+import '../models/wallet_member.dart';
 import '../services/wallet_service.dart';
 import '../theme/app_theme.dart';
 
@@ -248,6 +249,133 @@ class _WalletInvitesScreenState extends State<WalletInvitesScreen> {
     );
   }
 
+  Future<void> _changePermission(Invite invite) async {
+    if (invite.acceptedBy == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Erro: Usuário não encontrado')),
+      );
+      return;
+    }
+
+    // Buscar o membro atual para saber a permissão atual
+    List<WalletMember> members;
+    try {
+      members = await _walletService.getWalletMembers(widget.currentWallet.id);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao carregar membros: $e')),
+      );
+      return;
+    }
+
+    final memberIndex = members.indexWhere(
+      (m) => m.userId == invite.acceptedBy && !m.isOwner,
+    );
+
+    if (memberIndex == -1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Membro não encontrado')),
+      );
+      return;
+    }
+
+    final member = members[memberIndex];
+    final currentPermission = member.permission;
+
+    // Mostrar diálogo para escolher nova permissão
+    String? selectedPermission = currentPermission;
+    final newPermission = await showDialog<String>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Mudar Permissão'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Usuário: ${invite.acceptedByName ?? invite.acceptedBy}',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 16),
+              const Text('Permissão atual:'),
+              Text(
+                currentPermission == 'read' ? 'Apenas Visualizar' : 'Criar Transações',
+                style: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: AppTheme.primaryColor,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('Nova permissão:'),
+              const SizedBox(height: 8),
+              RadioListTile<String>(
+                title: const Text('Apenas Visualizar'),
+                value: 'read',
+                groupValue: selectedPermission,
+                onChanged: (value) {
+                  setState(() {
+                    selectedPermission = value;
+                  });
+                },
+              ),
+              RadioListTile<String>(
+                title: const Text('Criar Transações'),
+                value: 'write',
+                groupValue: selectedPermission,
+                onChanged: (value) {
+                  setState(() {
+                    selectedPermission = value;
+                  });
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(selectedPermission),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Confirmar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (newPermission != null && newPermission != currentPermission) {
+      try {
+        await _walletService.updateMemberPermission(
+          widget.currentWallet.id,
+          invite.acceptedBy!,
+          newPermission,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Permissão alterada para: ${newPermission == 'read' ? 'Apenas Visualizar' : 'Criar Transações'}',
+              ),
+            ),
+          );
+          _loadInvites();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Erro ao alterar permissão: $e')),
+          );
+        }
+      }
+    }
+  }
+
   Future<void> _cancelInvite(String token) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -461,10 +589,25 @@ class _WalletInvitesScreenState extends State<WalletInvitesScreen> {
           ],
         ),
         trailing: widget.currentWallet.isOwner
-            ? IconButton(
-                icon: const Icon(Icons.delete_outline, size: 20),
-                color: AppTheme.expenseRed,
-                onPressed: () => _cancelInvite(invite.token),
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Botão para mudar permissão (apenas para invites aceitos)
+                  if (invite.status == 'accepted' && invite.acceptedBy != null)
+                    IconButton(
+                      icon: const Icon(Icons.edit, size: 20),
+                      color: AppTheme.black,
+                      tooltip: 'Mudar permissão',
+                      onPressed: () => _changePermission(invite),
+                    ),
+                  // Botão para cancelar convite
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    color: AppTheme.expenseRed,
+                    tooltip: 'Cancelar convite',
+                    onPressed: () => _cancelInvite(invite.token),
+                  ),
+                ],
               )
             : null,
         onTap: () {

@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
+import '../services/wallet_service.dart';
 import '../utils/responsive_fonts.dart';
 import '../theme/app_theme.dart';
+import '../main.dart';
 import 'email_verification_screen.dart';
 import 'invite_accept_screen.dart';
 
@@ -40,6 +44,25 @@ class _LoginScreenState extends State<LoginScreen> {
         _inviteTokenFromUrl = token;
       }
     }
+    
+    // Verificar se o usuário já está autenticado (após verificar email)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkIfAlreadyAuthenticated();
+    });
+  }
+
+  Future<void> _checkIfAlreadyAuthenticated() async {
+    try {
+      final currentUser = _authService.currentUser;
+      if (currentUser != null && currentUser.emailConfirmedAt != null) {
+        // Usuário já está autenticado e email confirmado
+        // Fazer refresh da sessão para garantir que o AuthWrapper detecte
+        await _authService.supabase.auth.refreshSession();
+        // O AuthWrapper vai detectar a mudança e redirecionar para home
+      }
+    } catch (e) {
+      // Ignorar erros - não crítico
+    }
   }
 
   // Getter para obter o inviteToken (prioriza o da URL, depois o do widget)
@@ -56,18 +79,48 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleSubmit() async {
+    // Prevenir múltiplos cliques
+    if (_isLoading) {
+      print('⚠️ Login já em progresso, ignorando clique');
+      return;
+    }
+    
     if (!_formKey.currentState!.validate()) {
       return;
     }
-
     setState(() => _isLoading = true);
 
     try {
       if (_isLoginMode) {
-        final response = await _authService.signInWithEmail(
-          _emailController.text.trim(),
-          _passwordController.text,
-        );
+        AuthResponse response;
+        try {
+          response = await _authService.signInWithEmail(
+            _emailController.text.trim(),
+            _passwordController.text,
+          );
+        } catch (e) {
+          // Verificar se o erro é relacionado a email não confirmado
+          final errorString = e.toString().toLowerCase();
+          
+          if (errorString.contains('email not confirmed') || 
+              errorString.contains('email_not_confirmed') ||
+              errorString.contains('email not verified') ||
+              errorString.contains('email_not_verified')) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Por favor, verifique seu email antes de fazer login.'),
+                  backgroundColor: AppTheme.expenseRed,
+                  duration: Duration(seconds: 4),
+                ),
+              );
+              setState(() => _isLoading = false);
+            }
+            return;
+          }
+          // Re-lançar outros erros
+          rethrow;
+        }
         
         // Verificar se o login foi bem-sucedido
         if (mounted) {
@@ -83,46 +136,159 @@ class _LoginScreenState extends State<LoginScreen> {
                     duration: Duration(seconds: 4),
                   ),
                 );
+                setState(() => _isLoading = false);
               }
+              return;
             } else {
               // Login bem-sucedido e email verificado
               // Verificar se o usuário existe no MongoDB, se não, criar
               try {
                 final existingUser = await _userService.getCurrentUser();
                 if (existingUser == null) {
-                  // Usuário não existe no MongoDB, criar com email como nome temporário
-                  final email = response.user!.email ?? '';
-                  final tempName = email.split('@')[0]; // Usar parte antes do @ como nome
-                  await _userService.createOrUpdateUser(tempName);
+                  // Usuário não existe no MongoDB, verificar se há nome guardado do registro
+                  final prefs = await SharedPreferences.getInstance();
+                  final pendingName = prefs.getString('pending_user_name');
+                  final pendingEmail = prefs.getString('pending_user_email');
+                  final currentEmail = response.user!.email ?? '';
+                  
+                  String userName;
+                  if (pendingName != null && 
+                      pendingEmail != null && 
+                      pendingEmail == currentEmail) {
+                    // Usar o nome guardado do registro
+                    userName = pendingName;
+                    // Limpar o nome guardado após usar
+                    await prefs.remove('pending_user_name');
+                    await prefs.remove('pending_user_email');
+                  } else {
+                    // Usar email como nome temporário
+                    userName = currentEmail.split('@')[0];
+                  }
+                  
+                  await _userService.createOrUpdateUser(userName);
                 }
               } catch (e) {
-                // Se falhar, continuar mesmo assim
-                print('Erro ao verificar/criar usuário no MongoDB: $e');
+                // Se falhar ao criar usuário, tentar novamente após um delay
+                // Isso pode acontecer se houver problemas de concorrência ou estados inconsistentes
+                try {
+                  await Future.delayed(const Duration(milliseconds: 500));
+                  final retryUser = await _userService.getCurrentUser();
+                  if (retryUser == null) {
+                    // Se ainda não existir, criar com nome baseado no email
+                    final currentEmail = response.user!.email ?? '';
+                    final userName = currentEmail.split('@')[0];
+                    await _userService.createOrUpdateUser(userName);
+                  }
+                } catch (retryError) {
+                  // Se ainda falhar, continuar mesmo assim - o usuário pode ser criado depois
+                  // Não bloquear o login por causa disso
+                }
               }
               
-              // Se houver inviteToken, redirecionar para a tela de invite após login
-              // IMPORTANTE: Fazer isso ANTES de qualquer refresh de sessão para evitar
-              // que o AuthWrapper interfira com o redirecionamento
+              // Se houver inviteToken, aceitar automaticamente ou redirecionar
               final inviteToken = _effectiveInviteToken;
               if (inviteToken != null && mounted) {
-                // Usar pushAndRemoveUntil para garantir que não há rotas anteriores
+                // Tentar aceitar automaticamente o invite
+                try {
+                  final walletService = WalletService();
+                  await walletService.acceptInvite(inviteToken);
+                  
+                  // Se aceitou com sucesso, mostrar mensagem e navegar para AuthWrapper
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Convite aceito com sucesso!'),
+                        backgroundColor: AppTheme.incomeGreen,
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                    
+                    // Forçar refresh da sessão para garantir que está atualizada
+                    try {
+                      await _authService.supabase.auth.refreshSession();
+                    } catch (_) {
+                      // Ignorar erros no refresh
+                    }
+                    
+                    // Aguardar um pouco para mostrar a mensagem e depois navegar
+                    await Future.delayed(const Duration(milliseconds: 500));
+                    
+                    if (mounted) {
+                      // Navegar para AuthWrapper que vai detectar a autenticação
+                      // e redirecionar para a tela apropriada (home ou wallet selection)
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(
+                          builder: (context) => const AuthWrapper(),
+                        ),
+                        (route) => false, // Remove todas as rotas anteriores
+                      );
+                    }
+                  }
+                  return;
+                } catch (e) {
+                  // Se falhar ao aceitar automaticamente, redirecionar para tela de invite
+                  // (pode ser que o invite já tenha sido aceito ou tenha algum problema)
+                  if (mounted) {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(
+                        builder: (context) => InviteAcceptScreen(token: inviteToken),
+                      ),
+                      (route) => false,
+                    );
+                  }
+                  return;
+                }
+              }
+              
+              // Forçar refresh da sessão para garantir que está atualizada
+              try {
+                await _authService.supabase.auth.refreshSession();
+              } catch (e) {
+                // Ignorar erros no refresh - não crítico
+              }
+              
+              // Verificar novamente se o usuário está autenticado antes de navegar
+              final currentUser = _authService.currentUser;
+              final isAuthenticated = _authService.isAuthenticated;
+              final emailConfirmed = currentUser?.emailConfirmedAt != null;
+              
+              if (mounted && isAuthenticated && currentUser != null && emailConfirmed) {
+                // Navegar de volta para o AuthWrapper que vai detectar a autenticação
+                // e redirecionar para a tela apropriada (home ou wallet selection)
                 Navigator.of(context).pushAndRemoveUntil(
                   MaterialPageRoute(
-                    builder: (context) => InviteAcceptScreen(token: inviteToken),
+                    builder: (context) => const AuthWrapper(),
                   ),
                   (route) => false, // Remove todas as rotas anteriores
                 );
-                return;
+              } else {
+                // Se por algum motivo o estado não estiver correto, aguardar um pouco e tentar novamente
+                await Future.delayed(const Duration(milliseconds: 500));
+                
+                final retryUser = _authService.currentUser;
+                final retryAuthenticated = _authService.isAuthenticated;
+                final retryEmailConfirmed = retryUser?.emailConfirmedAt != null;
+                
+                if (mounted && retryAuthenticated && retryUser != null && retryEmailConfirmed) {
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(
+                      builder: (context) => const AuthWrapper(),
+                    ),
+                    (route) => false,
+                  );
+                } else {
+                  // Se ainda não funcionar, mostrar erro
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Erro ao fazer login. Tente novamente.'),
+                        backgroundColor: AppTheme.expenseRed,
+                      ),
+                    );
+                    setState(() => _isLoading = false);
+                  }
+                }
               }
-              
-              // Forçar refresh da sessão para garantir que o AuthWrapper detecte
-              try {
-                await _authService.supabase.auth.refreshSession();
-              } catch (_) {
-                // Ignorar erros no refresh
-              }
-              
-              // O AuthWrapper vai detectar a mudança automaticamente via stream
             }
           } else {
             // Login falhou sem erro explícito
@@ -133,6 +299,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   backgroundColor: AppTheme.expenseRed,
                 ),
               );
+              setState(() => _isLoading = false);
             }
           }
         }
@@ -147,6 +314,15 @@ class _LoginScreenState extends State<LoginScreen> {
           final session = response.session;
           
           if (user != null) {
+            // Guardar o nome do usuário em SharedPreferences para usar após verificação de email
+            try {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('pending_user_name', _nameController.text.trim());
+              await prefs.setString('pending_user_email', _emailController.text.trim());
+            } catch (e) {
+              // Ignorar erro - não crítico
+            }
+            
             // Criar usuário no MongoDB com o nome (se houver sessão temporária)
             // Nota: Se não houver sessão, o usuário será criado quando fizer login pela primeira vez
             if (session != null) {
@@ -156,7 +332,6 @@ class _LoginScreenState extends State<LoginScreen> {
               } catch (e) {
                 // Se falhar ao criar no MongoDB, continuar mesmo assim
                 // O usuário pode ser criado depois quando fizer login
-                print('Erro ao criar usuário no MongoDB: $e');
               }
               // Fazer logout para garantir estado limpo (usuário precisa verificar email)
               await _authService.signOut();
@@ -208,9 +383,6 @@ class _LoginScreenState extends State<LoginScreen> {
             duration: const Duration(seconds: 4),
           ),
         );
-      }
-    } finally {
-      if (mounted) {
         setState(() => _isLoading = false);
       }
     }
@@ -348,12 +520,16 @@ class _LoginScreenState extends State<LoginScreen> {
                     ElevatedButton(
                       onPressed: _isLoading ? null : _handleSubmit,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.black,
+                        backgroundColor: _isLoading 
+                            ? AppTheme.black.withOpacity(0.5)
+                            : AppTheme.black,
                         foregroundColor: AppTheme.white,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
+                        disabledBackgroundColor: AppTheme.black.withOpacity(0.5),
+                        disabledForegroundColor: AppTheme.white.withOpacity(0.7),
                       ),
                       child: _isLoading
                           ? const SizedBox(

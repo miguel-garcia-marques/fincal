@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/wallet.dart';
 import '../theme/app_theme.dart';
 import '../services/wallet_service.dart';
+import '../services/user_service.dart';
 import 'wallet_invites_screen.dart';
 import '../widgets/wallet_selection_dialog.dart';
 
@@ -19,15 +20,43 @@ class SettingsMenuScreen extends StatefulWidget {
 
 class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
   final WalletService _walletService = WalletService();
+  final UserService _userService = UserService();
   
   String? _ownerName;
   bool _isLoadingOwner = false;
+  String? _currentUserName;
+  bool _isLoadingUserName = false;
 
   @override
   void initState() {
     super.initState();
+    _loadCurrentUserName();
     if (!widget.currentWallet.isOwner) {
       _loadOwnerName();
+    }
+  }
+
+  Future<void> _loadCurrentUserName() async {
+    setState(() {
+      _isLoadingUserName = true;
+    });
+    
+    try {
+      final user = await _userService.getCurrentUser();
+      if (mounted) {
+        setState(() {
+          _currentUserName = user?.name ?? 'Usuário';
+          _isLoadingUserName = false;
+        });
+      }
+    } catch (e) {
+      print('Erro ao carregar nome do usuário: $e');
+      if (mounted) {
+        setState(() {
+          _currentUserName = 'Usuário';
+          _isLoadingUserName = false;
+        });
+      }
     }
   }
 
@@ -81,6 +110,19 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Saudação
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Text(
+              _isLoadingUserName 
+                  ? 'Olá...' 
+                  : 'Olá, ${_currentUserName ?? 'Usuário'}',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.black,
+                  ),
+            ),
+          ),
           // Carteira atual
           Card(
             elevation: 2,
