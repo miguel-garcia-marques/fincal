@@ -1283,12 +1283,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
                                 if (shouldLogout == true && mounted) {
                                   try {
-                                    // Fazer logout
+                                    // Fazer logout (já inclui limpeza completa e delay)
                                     await _authService.signOut();
 
-                                    // Aguardar um pouco para garantir que o logout foi processado
+                                    // Aguardar um pouco adicional para garantir que tudo foi processado
                                     await Future.delayed(
-                                        const Duration(milliseconds: 100));
+                                        const Duration(milliseconds: 200));
 
                                     if (mounted) {
                                       // Sempre navegar para AuthWrapper, independente do estado

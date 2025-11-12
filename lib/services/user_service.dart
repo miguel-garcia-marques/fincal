@@ -26,16 +26,24 @@ class UserService {
     try {
       // Verificar se há token antes de fazer a requisição
       final token = _authService.currentAccessToken;
-      if (token == null) {
-        // Sem token, não há usuário autenticado
+      final currentUserId = _authService.currentUserId;
+      
+      if (token == null || currentUserId == null) {
+        // Sem token ou sem ID de usuário, não há usuário autenticado
+        // Limpar cache se houver
+        await _cacheService.invalidateUserCache();
         return null;
       }
 
       // Tentar obter do cache primeiro (se não for refresh forçado)
       if (!forceRefresh) {
         final cachedUser = await _cacheService.getCachedUser();
-        if (cachedUser != null) {
+        // Validar que o cache corresponde ao usuário atual
+        if (cachedUser != null && cachedUser.userId == currentUserId) {
           return cachedUser;
+        } else if (cachedUser != null) {
+          // Cache de outro usuário - invalidar
+          await _cacheService.invalidateUserCache();
         }
       }
 

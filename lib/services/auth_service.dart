@@ -1,9 +1,12 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'cache_service.dart';
+import 'wallet_storage_service.dart';
 
 class AuthService {
   final SupabaseClient _supabase = Supabase.instance.client;
   final CacheService _cacheService = CacheService();
+  final WalletStorageService _walletStorageService = WalletStorageService();
   
   // Getter público para acessar o cliente Supabase
   SupabaseClient get supabase => _supabase;
@@ -26,14 +29,19 @@ class AuthService {
   // Fazer login com email e senha
   Future<AuthResponse> signInWithEmail(String email, String password) async {
     try {
-      // Se já houver uma sessão ativa, fazer logout primeiro para evitar conflitos
+      // Se já houver uma sessão ativa, fazer logout completo primeiro para evitar conflitos
       if (_supabase.auth.currentSession != null) {
         try {
-          await _supabase.auth.signOut();
-          // Aguardar um pouco para garantir que o logout foi processado
-          await Future.delayed(const Duration(milliseconds: 200));
+          // Fazer logout completo (limpa tudo)
+          await signOut();
         } catch (e) {
-          // Ignorar erros no logout - continuar mesmo assim
+          // Se falhar, tentar apenas logout do Supabase
+          try {
+            await _supabase.auth.signOut();
+            await Future.delayed(const Duration(milliseconds: 200));
+          } catch (e2) {
+            // Ignorar erros no logout - continuar mesmo assim
+          }
         }
       }
       
@@ -61,13 +69,30 @@ class AuthService {
 
   // Fazer logout
   Future<void> signOut() async {
-    await _supabase.auth.signOut();
-    // Limpar todos os caches ao fazer logout
+    // Limpar todos os caches primeiro
     await _cacheService.invalidateUserCache();
     await _cacheService.clearAllWalletMembersCache();
     await _cacheService.invalidateWalletsCache();
     await _cacheService.clearAllInvitesCache();
     await _cacheService.clearCache();
+    
+    // Limpar wallet ativa
+    await _walletStorageService.clearActiveWalletId();
+    
+    // Limpar dados pendentes do login
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('pending_user_name');
+      await prefs.remove('pending_user_email');
+    } catch (e) {
+      // Ignorar erros ao limpar dados pendentes
+    }
+    
+    // Fazer logout do Supabase por último
+    await _supabase.auth.signOut();
+    
+    // Aguardar um pouco para garantir que o logout foi processado completamente
+    await Future.delayed(const Duration(milliseconds: 300));
   }
 
   // Recuperar senha
