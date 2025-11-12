@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:app_links/app_links.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/invite_accept_screen.dart';
@@ -169,10 +170,17 @@ class _AuthWrapperState extends State<AuthWrapper> {
   bool _needsWalletSelection = false;
 
   StreamSubscription<AuthState>? _authSubscription;
+  StreamSubscription<Uri>? _linkSubscription;
+  AppLinks? _appLinks;
 
   @override
   void initState() {
     super.initState();
+    // Inicializar app_links para deep linking (não-web apenas)
+    if (!kIsWeb) {
+      _appLinks = AppLinks();
+      _initDeepLinks();
+    }
     // Verificar autenticação imediatamente ao criar o widget
     _checkAuth();
     _checkAuthAndInvite();
@@ -235,9 +243,72 @@ class _AuthWrapperState extends State<AuthWrapper> {
     });
   }
 
+  // Inicializar deep links para apps nativos
+  void _initDeepLinks() {
+    if (_appLinks == null) return;
+    
+    // Obter link inicial se o app foi aberto por um link
+    _appLinks!.getInitialLink().then((Uri? uri) {
+      if (uri != null) {
+        _handleDeepLink(uri);
+      }
+    });
+    
+    // Escutar links enquanto o app está em execução
+    _linkSubscription = _appLinks!.uriLinkStream.listen(
+      (Uri uri) {
+        _handleDeepLink(uri);
+      },
+      onError: (Object err) {
+        // Ignorar erros de deep linking
+      },
+    );
+  }
+
+  // Processar deep link
+  void _handleDeepLink(Uri uri) {
+    if (!mounted) return;
+    
+    // Extrair token do invite da URL
+    String? inviteToken;
+    
+    // Verificar query parameter ?token=xxx
+    inviteToken = uri.queryParameters['token'];
+    
+    // Verificar path /invite/token
+    if (inviteToken == null && uri.path.startsWith('/invite/')) {
+      final pathParts = uri.path.split('/');
+      if (pathParts.length >= 3 && pathParts[2].isNotEmpty) {
+        inviteToken = pathParts[2];
+      }
+    }
+    
+    // Se houver token, navegar para a tela de invite
+    if (inviteToken != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          if (!_isAuthenticated) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (context) => LoginScreen(inviteToken: inviteToken),
+              ),
+            );
+          } else {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (context) => InviteAcceptScreen(token: inviteToken!),
+              ),
+            );
+          }
+        }
+      });
+    }
+  }
+
   @override
   void dispose() {
     _authSubscription?.cancel();
+    _linkSubscription?.cancel();
     super.dispose();
   }
 

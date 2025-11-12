@@ -2,6 +2,7 @@
     "name": "FinCal",
     "short_name": "FinCal",
     "start_url": ".",
+    "scope": "/",
     "display": "standalone",
     "background_color": "#FAFAFA",
     "theme_color": "#4CAF50",

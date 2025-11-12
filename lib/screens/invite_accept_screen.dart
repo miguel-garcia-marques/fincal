@@ -10,7 +10,7 @@ import 'login_screen.dart';
 import 'home_screen.dart';
 
 // Importação para web (apenas compilado quando kIsWeb é true)
-import 'dart:html' as html show window;
+import 'dart:html' as html;
 
 class InviteAcceptScreen extends StatefulWidget {
   final String token;
@@ -35,12 +35,74 @@ class _InviteAcceptScreenState extends State<InviteAcceptScreen> {
   String? _error;
   String? _successMessage;
   String? _currentUserName;
+  bool _isStandalone = false;
 
   @override
   void initState() {
     super.initState();
     _loadInvite();
     _loadCurrentUser();
+    _checkIfStandalone();
+  }
+
+  // Verificar se está rodando como PWA (standalone) ou no Safari
+  void _checkIfStandalone() {
+    if (kIsWeb) {
+      // Verificar imediatamente
+      try {
+        final isStandalone = html.window.matchMedia('(display-mode: standalone)').matches ||
+            (html.window.navigator as dynamic).standalone == true;
+        if (mounted) {
+          setState(() {
+            _isStandalone = isStandalone;
+          });
+        } else {
+          _isStandalone = isStandalone;
+        }
+      } catch (e) {
+        // Ignorar erros
+      }
+      
+      // Também verificar após DOM carregar
+      html.window.document.addEventListener('DOMContentLoaded', (html.Event e) {
+        try {
+          final isStandalone = html.window.matchMedia('(display-mode: standalone)').matches ||
+              (html.window.navigator as dynamic).standalone == true;
+          if (mounted) {
+            setState(() {
+              _isStandalone = isStandalone;
+            });
+          }
+        } catch (e) {
+          // Ignorar erros
+        }
+      });
+    }
+  }
+
+  // Tentar abrir no PWA instalado
+  void _openInApp() {
+    if (!kIsWeb) return;
+    
+    // Obter a URL atual com o token
+    final currentUrl = html.window.location.href;
+    
+    // Tentar abrir usando o protocolo do app (se disponível)
+    // No iOS, isso pode funcionar se o PWA estiver instalado
+    try {
+      // Criar um link temporário e clicar nele
+      // Isso pode ajudar a abrir no contexto do PWA
+      final link = html.AnchorElement()
+        ..href = currentUrl
+        ..target = '_self';
+      html.document.body?.append(link);
+      link.click();
+      link.remove();
+    } catch (e) {
+      // Se falhar, apenas recarregar a página
+      // O usuário pode precisar abrir manualmente do menu de compartilhar
+      html.window.location.href = currentUrl;
+    }
   }
 
   Future<void> _loadCurrentUser() async {
@@ -666,6 +728,98 @@ class _InviteAcceptScreenState extends State<InviteAcceptScreen> {
         ),
         const SizedBox(height: 24),
         
+        // Banner "Abrir no App" - aparece apenas quando NÃO está em modo standalone (Safari)
+        if (!_isStandalone && kIsWeb && _successMessage == null)
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.black.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppTheme.black.withOpacity(0.1),
+                width: 1,
+              ),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.phone_iphone,
+                      color: AppTheme.black,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Melhor experiência no App',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.black,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Abra este link no app instalado para uma experiência melhor',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.darkGray,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _openInApp,
+                    icon: Icon(
+                      Icons.launch,
+                      color: AppTheme.black,
+                    ),
+                    label: Text(
+                      'Abrir no App',
+                      style: TextStyle(
+                        color: AppTheme.black,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      side: BorderSide(color: AppTheme.black, width: 1.5),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () {
+                    // Mostrar instruções de instalação
+                    _showInstallInstructions();
+                  },
+                  child: Text(
+                    'Como instalar o app?',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.darkGray,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        
         // Mensagem de sucesso
         if (_successMessage != null)
           Container(
@@ -784,5 +938,151 @@ class _InviteAcceptScreenState extends State<InviteAcceptScreen> {
 
   String _formatDate(DateTime date) {
     return '${date.day}/${date.month}/${date.year}';
+  }
+
+  void _showInstallInstructions() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.phone_iphone, color: AppTheme.black),
+            const SizedBox(width: 12),
+            const Text(
+              'Instalar App',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Para instalar o app no seu iPhone:',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.black,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _buildInstructionStep(
+                '1',
+                'Toque no botão de compartilhar',
+                Icons.share,
+              ),
+              const SizedBox(height: 12),
+              _buildInstructionStep(
+                '2',
+                'Role para baixo e toque em "Adicionar à Tela de Início"',
+                Icons.add_to_home_screen,
+              ),
+              const SizedBox(height: 12),
+              _buildInstructionStep(
+                '3',
+                'Confirme e o app será instalado na sua tela inicial',
+                Icons.check_circle,
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.incomeGreen.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: AppTheme.incomeGreen,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Depois de instalar, você pode abrir links diretamente no app!',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.incomeGreen,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(
+              'Entendi',
+              style: TextStyle(
+                color: AppTheme.black,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInstructionStep(String number, String text, IconData icon) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: AppTheme.black,
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              number,
+              style: const TextStyle(
+                color: AppTheme.white,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, size: 18, color: AppTheme.darkGray),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      text,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: AppTheme.darkGray,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 }
