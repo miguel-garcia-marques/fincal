@@ -34,11 +34,12 @@ class AuthService {
   }
 
   // Criar conta com email e senha
-  Future<AuthResponse> signUpWithEmail(String email, String password) async {
+  Future<AuthResponse> signUpWithEmail(String email, String password, {String? displayName}) async {
     try {
       return await _supabase.auth.signUp(
         email: email,
         password: password,
+        data: displayName != null ? {'display_name': displayName} : null,
       );
     } catch (e) {
       rethrow;
@@ -53,6 +54,21 @@ class AuthService {
   // Recuperar senha
   Future<void> resetPassword(String email) async {
     await _supabase.auth.resetPasswordForEmail(email);
+  }
+
+  // Atualizar Display Name do usuário no Supabase
+  Future<void> updateDisplayName(String displayName) async {
+    try {
+      await _supabase.auth.updateUser(
+        UserAttributes(
+          data: {
+            'display_name': displayName,
+          },
+        ),
+      );
+    } catch (e) {
+      rethrow;
+    }
   }
 }
 

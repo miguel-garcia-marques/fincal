@@ -165,7 +165,16 @@ class _LoginScreenState extends State<LoginScreen> {
                     userName = currentEmail.split('@')[0];
                   }
                   
+                  // Criar usuário no MongoDB
                   await _userService.createOrUpdateUser(userName);
+                  
+                  // Atualizar Display Name no Supabase também
+                  try {
+                    await _authService.updateDisplayName(userName);
+                  } catch (e) {
+                    // Log mas não bloquear - Display Name é menos crítico
+                    print('Aviso: Não foi possível atualizar Display Name no Supabase: $e');
+                  }
                 }
               } catch (e) {
                 // Se falhar ao criar usuário, tentar novamente após um delay
@@ -178,6 +187,14 @@ class _LoginScreenState extends State<LoginScreen> {
                     final currentEmail = response.user!.email ?? '';
                     final userName = currentEmail.split('@')[0];
                     await _userService.createOrUpdateUser(userName);
+                    
+                    // Atualizar Display Name no Supabase também
+                    try {
+                      await _authService.updateDisplayName(userName);
+                    } catch (e) {
+                      // Log mas não bloquear - Display Name é menos crítico
+                      print('Aviso: Não foi possível atualizar Display Name no Supabase: $e');
+                    }
                   }
                 } catch (retryError) {
                   // Se ainda falhar, continuar mesmo assim - o usuário pode ser criado depois
@@ -304,9 +321,11 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         }
       } else {
+        final userName = _nameController.text.trim();
         final response = await _authService.signUpWithEmail(
           _emailController.text.trim(),
           _passwordController.text,
+          displayName: userName,
         );
         
         if (mounted) {
@@ -317,7 +336,7 @@ class _LoginScreenState extends State<LoginScreen> {
             // Guardar o nome do usuário em SharedPreferences para usar após verificação de email
             try {
               final prefs = await SharedPreferences.getInstance();
-              await prefs.setString('pending_user_name', _nameController.text.trim());
+              await prefs.setString('pending_user_name', userName);
               await prefs.setString('pending_user_email', _emailController.text.trim());
             } catch (e) {
               // Ignorar erro - não crítico
@@ -327,14 +346,49 @@ class _LoginScreenState extends State<LoginScreen> {
             // Nota: Se não houver sessão, o usuário será criado quando fizer login pela primeira vez
             if (session != null) {
               try {
+                // Atualizar Display Name no Supabase primeiro
+                try {
+                  await _authService.updateDisplayName(userName);
+                } catch (e) {
+                  // Log mas não bloquear - Display Name é menos crítico
+                  print('Aviso: Não foi possível atualizar Display Name no Supabase: $e');
+                }
+                
                 // Criar usuário no MongoDB enquanto temos sessão ativa
-                await _userService.createOrUpdateUser(_nameController.text.trim());
+                // Se falhar, mostrar erro e não permitir continuar
+                await _userService.createOrUpdateUser(userName);
               } catch (e) {
-                // Se falhar ao criar no MongoDB, continuar mesmo assim
-                // O usuário pode ser criado depois quando fizer login
+                // Se falhar ao criar no MongoDB, mostrar erro e não permitir continuar
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Erro ao criar conta no servidor: ${e.toString()}'),
+                      backgroundColor: AppTheme.expenseRed,
+                      duration: const Duration(seconds: 5),
+                    ),
+                  );
+                  setState(() => _isLoading = false);
+                  
+                  // Fazer logout para garantir estado limpo
+                  try {
+                    await _authService.signOut();
+                  } catch (_) {
+                    // Ignorar erro no logout
+                  }
+                }
+                return;
               }
               // Fazer logout para garantir estado limpo (usuário precisa verificar email)
               await _authService.signOut();
+            } else {
+              // Se não houver sessão, ainda tentar atualizar Display Name se possível
+              // (pode não funcionar sem sessão, mas tentamos)
+              try {
+                await _authService.updateDisplayName(userName);
+              } catch (e) {
+                // Ignorar - sem sessão não podemos atualizar
+                print('Aviso: Não foi possível atualizar Display Name sem sessão: $e');
+              }
             }
             
             // Sempre navegar para tela de verificação quando criar conta
