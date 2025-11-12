@@ -164,7 +164,6 @@ class _HomeScreenState extends State<HomeScreen> {
           personalWallet = wallets.firstWhere(
             (w) => w.id.toString().trim() == personalWalletIdStr,
           );
-
         } catch (e) {
           // Se não encontrar pelo ID na lista, tentar buscar diretamente pela API
 
@@ -176,10 +175,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 w.id.toString().trim() ==
                 personalWallet!.id.toString().trim())) {
               wallets.add(personalWallet);
-
             }
           } catch (e2) {
-
             // Continuar para tentar encontrar por isOwner
           }
         }
@@ -195,7 +192,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
           // Se houver múltiplas, logar para debug e remover duplicatas da lista
           if (ownedWallets.length > 1) {
-
             // Remover wallets pessoais duplicadas da lista, mantendo apenas a primeira
             wallets.removeWhere((w) => w.isOwner && w.id != personalWallet!.id);
           }
@@ -208,9 +204,7 @@ class _HomeScreenState extends State<HomeScreen> {
             if (!wallets.any((w) => w.id == personalWallet!.id)) {
               wallets.add(personalWallet);
             }
-
           } catch (e2) {
-
             if (mounted) {
               setState(() {
                 _isInitialLoading = false;
@@ -261,7 +255,6 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     } catch (e) {
-
       // Em caso de erro, não criar wallet aqui - deve ser criada no backend
       if (mounted) {
         setState(() {
@@ -289,13 +282,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (!mounted) return;
 
-      // Carregar períodos do cache
-      final cachedPeriods = await _cacheService.getCachedPeriodHistories();
-      if (cachedPeriods != null && cachedPeriods.isNotEmpty && mounted) {
-        setState(() {
-          _periodHistories = cachedPeriods;
-        });
+      // Carregar períodos do cache apenas se a wallet ativa já estiver definida
+      // e se for a wallet do usuário (para evitar mostrar períodos errados)
+      // Se a wallet não for do usuário, não usar cache de períodos
+      if (_activeWallet != null && _activeWallet!.isOwner) {
+        final cachedPeriods = await _cacheService.getCachedPeriodHistories();
+        if (cachedPeriods != null && cachedPeriods.isNotEmpty && mounted) {
+          setState(() {
+            _periodHistories = cachedPeriods;
+          });
+        }
       }
+      // Se não for wallet do usuário, não usar cache de períodos
+      // Os períodos serão carregados do servidor em _loadPeriodHistories()
 
       if (!mounted) return;
 
@@ -313,9 +312,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _initialBalanceFuture = _calculateInitialBalance();
         }
       }
-    } catch (e) {
-
-    }
+    } catch (e) {}
   }
 
   // Atualizar dados em background (apenas se cache expirou)
@@ -332,7 +329,11 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!isCacheValid && _activeWallet != null) {
         // Atualizar períodos apenas se necessário
         if (_periodHistories.isEmpty) {
-          final periods = await _apiService.getAllPeriodHistories();
+          // Se a wallet ativa não é do usuário logado, carregar períodos do dono da wallet
+          final ownerId =
+              !_activeWallet!.isOwner ? _activeWallet!.ownerId : null;
+          final periods =
+              await _apiService.getAllPeriodHistories(ownerId: ownerId);
           if (mounted) {
             setState(() {
               _periodHistories = periods;
@@ -358,22 +359,23 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
       }
-    } catch (e) {
-
-    }
+    } catch (e) {}
   }
 
   Future<void> _loadUserData() async {
     try {
       await _userService.getCurrentUser();
-    } catch (e) {
-
-    }
+    } catch (e) {}
   }
 
   Future<void> _loadPeriodHistories() async {
     try {
-      final periods = await _apiService.getAllPeriodHistories();
+      // Se a wallet ativa não é do usuário logado, carregar períodos do dono da wallet
+      final ownerId = _activeWallet != null && !_activeWallet!.isOwner
+          ? _activeWallet!.ownerId
+          : null;
+
+      final periods = await _apiService.getAllPeriodHistories(ownerId: ownerId);
       if (mounted) {
         setState(() {
           _periodHistories = periods;
@@ -381,9 +383,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // Salvar no cache
         await _cacheService.cachePeriodHistories(periods);
       }
-    } catch (e) {
-
-    }
+    } catch (e) {}
   }
 
   Future<void> _selectDateRangeOnStartup() async {
@@ -502,11 +502,13 @@ class _HomeScreenState extends State<HomeScreen> {
           transactionIds: transactionIds,
           name: periodName,
         );
-        await _apiService.savePeriodHistory(periodHistory);
+        // Se a wallet ativa não é do usuário logado, criar período para o dono da wallet
+        final ownerId = _activeWallet != null && !_activeWallet!.isOwner
+            ? _activeWallet!.ownerId
+            : null;
+        await _apiService.savePeriodHistory(periodHistory, ownerId: ownerId);
         await _loadPeriodHistories();
-      } catch (e) {
-
-      }
+      } catch (e) {}
     }
 
     // Salvar no cache
@@ -554,9 +556,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _calendarKey.currentState?.refreshCalendar();
         }
       }
-    } catch (e) {
-
-    }
+    } catch (e) {}
   }
 
   Future<void> _selectPeriod() async {
@@ -1108,7 +1108,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _cachedInitialBalance = balance;
       return balance;
     } catch (e) {
-
       return 0.0;
     }
   }
@@ -1251,6 +1250,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   // Se a wallet foi alterada, recarregar
                                   if (result == true && mounted) {
                                     await _loadActiveWallet();
+                                    // Recarregar períodos do dono da nova wallet
+                                    await _loadPeriodHistories();
                                     await _loadTransactions(useCache: false);
                                   }
                                 }
@@ -2521,9 +2522,7 @@ class _ImportTransactionsDialogState extends State<_ImportTransactionsDialog> {
 
                 await apiService.updateTransaction(updatedTx,
                     walletId: widget.walletId);
-              } catch (e) {
-
-              }
+              } catch (e) {}
             }
 
             // Remover todas as duplicatas (selecionadas e não selecionadas) da lista de importação

@@ -130,10 +130,14 @@ class ApiService {
   }
 
   // Period History methods
-  Future<List<PeriodHistory>> getAllPeriodHistories() async {
+  Future<List<PeriodHistory>> getAllPeriodHistories({String? ownerId}) async {
     try {
+      final uri = ownerId != null
+          ? Uri.parse('$baseUrl/period-history?ownerId=$ownerId')
+          : Uri.parse('$baseUrl/period-history');
+      
       final response = await http.get(
-        Uri.parse('$baseUrl/period-history'),
+        uri,
         headers: _getHeaders(),
       );
 
@@ -168,12 +172,18 @@ class ApiService {
     }
   }
 
-  Future<PeriodHistory> savePeriodHistory(PeriodHistory periodHistory) async {
+  Future<PeriodHistory> savePeriodHistory(PeriodHistory periodHistory, {String? ownerId}) async {
     try {
+      final periodJson = periodHistory.toJson();
+      // Adicionar ownerId se fornecido
+      if (ownerId != null) {
+        periodJson['ownerId'] = ownerId;
+      }
+      
       final response = await http.post(
         Uri.parse('$baseUrl/period-history'),
         headers: _getHeaders(),
-        body: json.encode(periodHistory.toJson()),
+        body: json.encode(periodJson),
       );
 
       if (response.statusCode != 201 && response.statusCode != 200) {

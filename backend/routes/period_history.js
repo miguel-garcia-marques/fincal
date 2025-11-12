@@ -8,10 +8,46 @@ const { validatePeriodHistory, validatePeriodId } = require('../middleware/valid
 router.use(authenticateUser);
 
 // GET todas as histórias de períodos do usuário
+// Aceita parâmetro opcional ownerId para buscar períodos do dono de uma wallet compartilhada
 router.get('/', async (req, res) => {
   try {
-    const PeriodHistory = getPeriodHistoryModel(req.userId);
-    const periods = await PeriodHistory.find({ userId: req.userId })
+    const { ownerId } = req.query;
+    let targetUserId = req.userId;
+    
+    // Se ownerId foi fornecido, verificar se o usuário tem acesso a uma wallet desse owner
+    if (ownerId && ownerId !== req.userId) {
+      const { getWalletModel } = require('../models/Wallet');
+      const { getWalletMemberModel } = require('../models/WalletMember');
+      const Wallet = getWalletModel();
+      const WalletMember = getWalletMemberModel();
+      
+      // Verificar se o usuário tem acesso a uma wallet desse owner
+      const wallet = await Wallet.findOne({ ownerId: ownerId });
+      if (wallet) {
+        // Verificar se o usuário é membro dessa wallet ou é o owner
+        const membership = await WalletMember.findOne({
+          walletId: wallet._id,
+          userId: req.userId
+        });
+        
+        // Se não for membro e não for o owner, retornar erro
+        if (!membership && wallet.ownerId !== req.userId) {
+          return res.status(403).json({ 
+            message: 'Você não tem permissão para acessar os períodos deste usuário' 
+          });
+        }
+        
+        // Usar ownerId como targetUserId
+        targetUserId = ownerId;
+      } else {
+        return res.status(404).json({ 
+          message: 'Wallet não encontrada para este owner' 
+        });
+      }
+    }
+    
+    const PeriodHistory = getPeriodHistoryModel(targetUserId);
+    const periods = await PeriodHistory.find({ userId: targetUserId })
       .sort({ startDate: -1 }); // Mais recentes primeiro
     res.json(periods);
   } catch (error) {
@@ -39,15 +75,49 @@ router.get('/:id', validatePeriodId, async (req, res) => {
 });
 
 // POST criar nova história de período
+// Aceita parâmetro opcional ownerId para criar período para o dono de uma wallet compartilhada
 router.post('/', validatePeriodHistory, async (req, res) => {
   try {
-    const PeriodHistory = getPeriodHistoryModel(req.userId);
-    const { startDate, endDate, transactionIds, name } = req.body;
+    const { startDate, endDate, transactionIds, name, ownerId } = req.body;
     
     if (!startDate || !endDate) {
       return res.status(400).json({ 
         message: 'startDate e endDate são obrigatórios' 
       });
+    }
+
+    let targetUserId = req.userId;
+    
+    // Se ownerId foi fornecido e é diferente do usuário logado, verificar permissão
+    if (ownerId && ownerId !== req.userId) {
+      const { getWalletModel } = require('../models/Wallet');
+      const { getWalletMemberModel } = require('../models/WalletMember');
+      const Wallet = getWalletModel();
+      const WalletMember = getWalletMemberModel();
+      
+      // Verificar se o usuário tem acesso a uma wallet desse owner
+      const wallet = await Wallet.findOne({ ownerId: ownerId });
+      if (wallet) {
+        // Verificar se o usuário é membro dessa wallet com permissão de escrita
+        const membership = await WalletMember.findOne({
+          walletId: wallet._id,
+          userId: req.userId
+        });
+        
+        // Se não for membro com permissão de escrita e não for o owner, retornar erro
+        if (!membership || (membership.permission !== 'write' && membership.permission !== 'owner')) {
+          return res.status(403).json({ 
+            message: 'Você não tem permissão para criar períodos nesta wallet' 
+          });
+        }
+        
+        // Usar ownerId como targetUserId
+        targetUserId = ownerId;
+      } else {
+        return res.status(404).json({ 
+          message: 'Wallet não encontrada para este owner' 
+        });
+      }
     }
 
     // Parse das datas
@@ -70,9 +140,10 @@ router.post('/', validatePeriodHistory, async (req, res) => {
     // Gerar ID único
     const id = `period_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+    const PeriodHistory = getPeriodHistoryModel(targetUserId);
     const periodData = {
       id,
-      userId: req.userId,
+      userId: targetUserId,
       startDate: start,
       endDate: end,
       transactionIds: transactionIds || [],
