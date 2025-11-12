@@ -93,8 +93,20 @@ router.get('/me', async (req, res) => {
     const User = getUserModel();
     let user = await User.findOne({ userId: req.userId });
     
+    // Se o usuário não existir, criar automaticamente
     if (!user) {
-      return res.status(404).json({ message: 'Usuário não encontrado' });
+      // Criar wallet pessoal primeiro
+      const personalWallet = await ensurePersonalWallet(req.userId);
+      
+      // Criar novo usuário com dados básicos do Supabase
+      user = new User({
+        userId: req.userId,
+        email: req.user.email || null,
+        name: req.user.user_metadata?.name || req.user.email?.split('@')[0] || 'Usuário',
+        personalWalletId: personalWallet._id,
+        walletsInvited: []
+      });
+      await user.save();
     }
     
     // Garantir que o usuário tem uma wallet pessoal (para usuários antigos)

@@ -351,7 +351,16 @@ class WalletService {
       );
 
       if (response.statusCode == 200) {
-        return json.decode(response.body);
+        final result = json.decode(response.body);
+        
+        // Invalidar cache de wallets para forçar refresh na próxima busca
+        // Isso garante que a wallet aceita apareça imediatamente
+        await _cacheService.invalidateWalletsCache();
+        
+        // Também invalidar cache de usuário para garantir que walletsInvited está atualizado
+        await _cacheService.invalidateUserCache();
+        
+        return result;
       } else {
         final errorBody = json.decode(response.body);
         throw Exception(errorBody['message'] ?? 'Failed to accept invite');
