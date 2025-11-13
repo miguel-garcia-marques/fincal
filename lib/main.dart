@@ -13,6 +13,7 @@ import 'services/auth_service.dart';
 import 'services/user_service.dart';
 import 'services/wallet_service.dart';
 import 'services/wallet_storage_service.dart';
+import 'models/wallet.dart';
 import 'theme/app_theme.dart';
 import 'config/supabase_config.dart';
 
@@ -181,9 +182,20 @@ class _AuthWrapperState extends State<AuthWrapper> {
       _appLinks = AppLinks();
       _initDeepLinks();
     }
+    
+    // Timeout de segurança para garantir que o loading sempre termine
+    Timer(const Duration(seconds: 10), () {
+      if (mounted && _isLoading) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    });
+    
     // Verificar autenticação imediatamente ao criar o widget
     _checkAuth();
     _checkAuthAndInvite();
+    
     // Escutar mudanças de autenticação
     _authSubscription = _authService.authStateChanges.listen((AuthState state) {
       if (mounted) {
@@ -211,33 +223,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
             _isAuthenticated = false;
             _isLoading = false;
           });
-        }
-      }
-    });
-    
-    // Verificação periódica para garantir que detectamos mudanças de autenticação
-    // mesmo se o stream não emitir eventos imediatamente
-    Timer.periodic(const Duration(milliseconds: 500), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      
-      // Verificar se o estado de autenticação mudou
-      final currentUser = _authService.currentUser;
-      final isAuthenticated = _authService.isAuthenticated;
-      final emailConfirmed = currentUser?.emailConfirmedAt != null;
-      final shouldBeAuthenticated = isAuthenticated && emailConfirmed;
-      
-      // Se o estado mudou, atualizar
-      if (shouldBeAuthenticated != _isAuthenticated) {
-        setState(() {
-          _isAuthenticated = shouldBeAuthenticated;
-          _isLoading = false;
-        });
-        
-        if (_isAuthenticated) {
-          _checkWalletSelection();
         }
       }
     });
@@ -360,75 +345,126 @@ class _AuthWrapperState extends State<AuthWrapper> {
   }
 
   Future<void> _checkAuth() async {
-    final user = _authService.currentUser;
-    final isAuthenticated = _authService.isAuthenticated;
+    try {
+      final user = _authService.currentUser;
+      final isAuthenticated = _authService.isAuthenticated;
 
-    final shouldBeAuthenticated = isAuthenticated && user != null && user.emailConfirmedAt != null;
-    
-    setState(() {
-      // Só considerar autenticado se houver sessão E email confirmado
-      _isAuthenticated = shouldBeAuthenticated;
-    });
+      final shouldBeAuthenticated = isAuthenticated && user != null && user.emailConfirmedAt != null;
+      
+      if (mounted) {
+        setState(() {
+          // Só considerar autenticado se houver sessão E email confirmado
+          _isAuthenticated = shouldBeAuthenticated;
+        });
 
-    // Se autenticado, verificar se precisa mostrar seleção de wallet
-    if (_isAuthenticated) {
-      await _checkWalletSelection();
-    } else {
-      setState(() {
-        _isLoading = false;
-      });
+        // Se autenticado, verificar se precisa mostrar seleção de wallet
+        if (_isAuthenticated) {
+          // Usar timeout para garantir que não trave
+          await _checkWalletSelection().timeout(
+            const Duration(seconds: 5),
+            onTimeout: () {
+              if (mounted) {
+                setState(() {
+                  _isLoading = false;
+                  _needsWalletSelection = false;
+                });
+              }
+            },
+          );
+        } else {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      // Em caso de erro, garantir que o loading termine
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isAuthenticated = false;
+          _needsWalletSelection = false;
+        });
+      }
     }
   }
 
   Future<void> _checkWalletSelection() async {
     try {
       // Verificar se há wallet ativa salva
-      final activeWalletId = await _walletStorageService.getActiveWalletId();
+      final activeWalletId = await _walletStorageService.getActiveWalletId().timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => null,
+      );
       
       // Se já houver wallet ativa, não precisa mostrar seleção
       if (activeWalletId != null) {
-        setState(() {
-          _isLoading = false;
-          _needsWalletSelection = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _needsWalletSelection = false;
+          });
+        }
         return;
       }
 
-      // Carregar dados do usuário
-      final user = await _userService.getCurrentUser();
+      // Carregar dados do usuário com timeout
+      final user = await _userService.getCurrentUser().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => null,
+      );
+      
       if (user == null) {
         // Se não houver usuário, ir direto para home (será criado lá)
-        setState(() {
-          _isLoading = false;
-          _needsWalletSelection = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _needsWalletSelection = false;
+          });
+        }
         return;
       }
 
-      // Carregar todas as wallets
-      final wallets = await _walletService.getAllWallets();
+      // Carregar todas as wallets com timeout
+      final wallets = await _walletService.getAllWallets().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => <Wallet>[],
+      );
       
       // Se houver apenas uma wallet (a pessoal), usar ela automaticamente
       if (wallets.length == 1) {
-        await _walletStorageService.setActiveWalletId(wallets.first.id);
-        setState(() {
-          _isLoading = false;
-          _needsWalletSelection = false;
-        });
+        try {
+          await _walletStorageService.setActiveWalletId(wallets.first.id).timeout(
+            const Duration(seconds: 2),
+          );
+        } catch (e) {
+          // Ignorar erro ao salvar wallet ativa
+        }
+        
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _needsWalletSelection = false;
+          });
+        }
         return;
       }
 
       // Se houver múltiplas wallets, mostrar tela de seleção
-      setState(() {
-        _isLoading = false;
-        _needsWalletSelection = wallets.length > 1;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _needsWalletSelection = wallets.length > 1;
+        });
+      }
     } catch (e) {
       // Em caso de erro, ir direto para home
-      setState(() {
-        _isLoading = false;
-        _needsWalletSelection = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _needsWalletSelection = false;
+        });
+      }
     }
   }
 

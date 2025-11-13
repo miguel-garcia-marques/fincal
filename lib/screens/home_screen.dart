@@ -17,7 +17,6 @@ import '../utils/responsive_fonts.dart';
 import '../widgets/calendar.dart';
 import '../widgets/transaction_list.dart';
 import '../widgets/loading_screen.dart';
-import '../main.dart';
 import 'add_transaction_screen.dart';
 import 'settings_menu_screen.dart';
 import '../widgets/day_details_dialog.dart';
@@ -73,9 +72,37 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     // Assume current year but don't set dates yet
     _selectedYear = DateTime.now().year;
+
+    // Timeout de segurança para garantir que o loading sempre termine
+    Timer(const Duration(seconds: 15), () {
+      if (mounted && _isInitialLoading) {
+        setState(() {
+          _isInitialLoading = false;
+        });
+      }
+    });
+
     // Prompt for period selection after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _initializeApp();
+      try {
+        await _initializeApp().timeout(
+          const Duration(seconds: 12),
+          onTimeout: () {
+            if (mounted) {
+              setState(() {
+                _isInitialLoading = false;
+              });
+            }
+          },
+        );
+      } catch (e) {
+        // Em caso de erro, garantir que o loading termine
+        if (mounted) {
+          setState(() {
+            _isInitialLoading = false;
+          });
+        }
+      }
       // Iniciar timer de refresh automático a cada 30 segundos
       _startCacheRefreshTimer();
     });
@@ -104,45 +131,75 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Método de inicialização otimizado com cache
   Future<void> _initializeApp() async {
-    // 1. Carregar wallet ativa primeiro
-    await _loadActiveWallet();
+    try {
+      // 1. Carregar wallet ativa primeiro
+      await _loadActiveWallet();
 
-    // Se não houver wallet ativa após carregar, algo deu errado
-    if (_activeWallet == null) {
+      // Se não houver wallet ativa após carregar, algo deu errado
+      if (_activeWallet == null) {
+        if (mounted) {
+          setState(() {
+            _isInitialLoading = false;
+          });
+        }
+        return;
+      }
+
+      // 2. Carregar dados do cache primeiro (rápido)
+      await _loadFromCache();
+
+      // 3. Carregar dados do servidor em paralelo com timeout
+      try {
+        await Future.wait([
+          _loadUserData(),
+          _loadPeriodHistories(),
+        ]).timeout(
+          const Duration(seconds: 8),
+        );
+      } catch (e) {
+        // Continuar mesmo se timeout ou erro ocorrer
+      }
+
+      // 4. Se não tiver período selecionado do cache, selecionar
+      if (!_periodSelected) {
+        await _selectDateRangeOnStartup().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            // Se timeout, apenas marcar como carregado
+            if (mounted) {
+              setState(() {
+                _isInitialLoading = false;
+              });
+            }
+          },
+        );
+      } else {
+        // Se já tiver período do cache, carregar transações
+        await _loadTransactions(savePeriod: false, useCache: true).timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            // Continuar mesmo se timeout ocorrer
+          },
+        );
+      }
+
+      // 5. Marcar loading inicial como completo
       if (mounted) {
         setState(() {
           _isInitialLoading = false;
         });
       }
-      return;
+
+      // 6. Atualizar dados em background se necessário
+      _refreshDataInBackground();
+    } catch (e) {
+      // Em caso de erro, garantir que o loading termine
+      if (mounted) {
+        setState(() {
+          _isInitialLoading = false;
+        });
+      }
     }
-
-    // 2. Carregar dados do cache primeiro (rápido)
-    await _loadFromCache();
-
-    // 3. Carregar dados do servidor em paralelo
-    await Future.wait([
-      _loadUserData(),
-      _loadPeriodHistories(),
-    ]);
-
-    // 4. Se não tiver período selecionado do cache, selecionar
-    if (!_periodSelected) {
-      await _selectDateRangeOnStartup();
-    } else {
-      // Se já tiver período do cache, carregar transações
-      await _loadTransactions(savePeriod: false, useCache: true);
-    }
-
-    // 5. Marcar loading inicial como completo
-    if (mounted) {
-      setState(() {
-        _isInitialLoading = false;
-      });
-    }
-
-    // 6. Atualizar dados em background se necessário
-    _refreshDataInBackground();
   }
 
   Future<void> _loadActiveWallet() async {
@@ -1012,6 +1069,7 @@ class _HomeScreenState extends State<HomeScreen> {
         : null;
 
     if (mounted) {
+      final userId = _authService.currentUser?.id;
       showDialog(
         context: context,
         builder: (context) => DayDetailsDialog(
@@ -1022,6 +1080,11 @@ class _HomeScreenState extends State<HomeScreen> {
           allPeriodTransactions: _transactions,
           periodStartDate: _startDate,
           periodEndDate: _endDate,
+          walletId: _activeWallet?.id,
+          userId: userId,
+          onTransactionAdded: () async {
+            await _loadTransactions(savePeriod: false, useCache: false);
+          },
         ),
       );
     }
@@ -1233,125 +1296,32 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          // Botão do menu (Definições e Sair)
-                          PopupMenuButton<String>(
-                            icon: const Icon(Icons.menu, color: AppTheme.black),
-                            onSelected: (value) async {
-                              if (value == 'settings') {
-                                if (_activeWallet != null) {
-                                  final result =
-                                      await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (context) => SettingsMenuScreen(
-                                        currentWallet: _activeWallet!,
-                                      ),
+                          // Botão de definições
+                          IconButton(
+                            onPressed: () async {
+                              if (_activeWallet != null) {
+                                final result = await Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => SettingsMenuScreen(
+                                      currentWallet: _activeWallet!,
                                     ),
-                                  );
-                                  // Se a wallet foi alterada, recarregar
-                                  if (result == true && mounted) {
-                                    await _loadActiveWallet();
-                                    // Recarregar períodos do dono da nova wallet
-                                    await _loadPeriodHistories();
-                                    await _loadTransactions(useCache: false);
-                                  }
-                                }
-                              } else if (value == 'logout') {
-                                // Mostrar diálogo de confirmação
-                                final shouldLogout = await showDialog<bool>(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: const Text('Confirmar Logout'),
-                                    content: const Text(
-                                        'Tem certeza que deseja sair?'),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.of(context).pop(false),
-                                        child: const Text('Cancelar'),
-                                      ),
-                                      ElevatedButton(
-                                        onPressed: () =>
-                                            Navigator.of(context).pop(true),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: AppTheme.expenseRed,
-                                        ),
-                                        child: const Text('Sair'),
-                                      ),
-                                    ],
                                   ),
                                 );
-
-                                if (shouldLogout == true && mounted) {
-                                  try {
-                                    // Fazer logout (já inclui limpeza completa e delay)
-                                    await _authService.signOut();
-
-                                    // Aguardar um pouco adicional para garantir que tudo foi processado
-                                    await Future.delayed(
-                                        const Duration(milliseconds: 200));
-
-                                    if (mounted) {
-                                      // Sempre navegar para AuthWrapper, independente do estado
-                                      // O AuthWrapper vai verificar a autenticação e mostrar login se necessário
-                                      Navigator.of(context).pushAndRemoveUntil(
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              const AuthWrapper(),
-                                        ),
-                                        (route) =>
-                                            false, // Remove todas as rotas anteriores
-                                      );
-                                    }
-                                  } catch (e) {
-                                    if (mounted) {
-                                      // Mesmo em caso de erro, navegar para AuthWrapper
-                                      // para garantir que o usuário não fique preso
-                                      Navigator.of(context).pushAndRemoveUntil(
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              const AuthWrapper(),
-                                        ),
-                                        (route) => false,
-                                      );
-
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content:
-                                              Text('Erro ao fazer logout: $e'),
-                                          backgroundColor: AppTheme.expenseRed,
-                                        ),
-                                      );
-                                    }
-                                  }
+                                // Se a wallet foi alterada, recarregar
+                                if (result == true && mounted) {
+                                  await _loadActiveWallet();
+                                  // Recarregar períodos do dono da nova wallet
+                                  await _loadPeriodHistories();
+                                  await _loadTransactions(useCache: false);
                                 }
                               }
                             },
-                            itemBuilder: (context) => [
-                              const PopupMenuItem(
-                                value: 'settings',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.settings, color: AppTheme.black),
-                                    SizedBox(width: 12),
-                                    Text('Definições'),
-                                  ],
-                                ),
-                              ),
-                              const PopupMenuItem(
-                                value: 'logout',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.logout,
-                                        color: AppTheme.expenseRed),
-                                    SizedBox(width: 12),
-                                    Text('Sair',
-                                        style: TextStyle(
-                                            color: AppTheme.expenseRed)),
-                                  ],
-                                ),
-                              ),
-                            ],
+                            icon: const Icon(Icons.settings,
+                                color: AppTheme.black),
+                            tooltip: 'Definições',
+                            style: IconButton.styleFrom(
+                              backgroundColor: Colors.transparent,
+                            ),
                           ),
                         ],
                       ),

@@ -342,6 +342,16 @@ class _CalendarWidgetState extends CalendarWidgetState {
               }
               final hasTransactions = dayTransactions.isNotEmpty;
 
+              // Verificar se é o dia de hoje e se está no período
+              final today = DateTime.now();
+              final isToday = isSameDay(day, today);
+              final todayNormalized = DateTime(today.year, today.month, today.day);
+              final startNormalized = DateTime(widget.startDate.year, widget.startDate.month, widget.startDate.day);
+              final endNormalized = DateTime(widget.endDate.year, widget.endDate.month, widget.endDate.day);
+              final isTodayInPeriod = isToday && 
+                  (todayNormalized.isAfter(startNormalized) || isSameDay(todayNormalized, startNormalized)) &&
+                  (todayNormalized.isBefore(endNormalized) || isSameDay(todayNormalized, endNormalized));
+
               // Determinar tipo de transações do dia
               final hasGains =
                   dayTransactions.any((t) => t.type == TransactionType.ganho);
@@ -371,7 +381,7 @@ class _CalendarWidgetState extends CalendarWidgetState {
                     child: Tooltip(
                       message: _buildTooltipMessage(
                           balance, budgetBalances, dayTransactions),
-                      child: GestureDetector(
+                        child: GestureDetector(
                         onTap: () => widget.onDayTap(day),
                         child: Container(
                           decoration: BoxDecoration(
@@ -382,83 +392,105 @@ class _CalendarWidgetState extends CalendarWidgetState {
                               width: hasTransactions ? 2 : 0,
                             ),
                           ),
-                          child: Column(
+                          child: Stack(
                             children: [
-                              // Parte de cima: dia em quadrado interno com outro tom de cinza
-                              Expanded(
-                                flex: 1,
-                                child: Container(
-                                  width: double.infinity,
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.darkGray.withOpacity(0.1),
-                                    borderRadius: const BorderRadius.only(
-                                      topLeft: Radius.circular(8),
-                                      topRight: Radius.circular(8),
-                                    ),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 4, vertical: 4),
+                              Column(
+                                children: [
+                                  // Parte de cima: dia em quadrado interno com outro tom de cinza
+                                  Expanded(
+                                    flex: 1,
                                     child: Container(
                                       width: double.infinity,
-                                      height: 38,
                                       decoration: BoxDecoration(
-                                        color:
-                                            AppTheme.darkGray.withOpacity(0.2),
-                                        borderRadius: BorderRadius.circular(6),
+                                        color: AppTheme.darkGray.withOpacity(0.1),
+                                        borderRadius: const BorderRadius.only(
+                                          topLeft: Radius.circular(8),
+                                          topRight: Radius.circular(8),
+                                        ),
                                       ),
-                                      child: Center(
-                                        child: Text(
-                                          '${day.day}',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleMedium
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w600,
-                                                color: AppTheme.black,
-                                                fontSize:
-                                                    ResponsiveFonts.getFontSize(
-                                                        context, 12),
-                                              ),
-                                          textAlign: TextAlign.center,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 4, vertical: 4),
+                                        child: Container(
+                                          width: double.infinity,
+                                          height: 38,
+                                          decoration: BoxDecoration(
+                                            color:
+                                                AppTheme.darkGray.withOpacity(0.2),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: Center(
+                                            child: Text(
+                                              '${day.day}',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleMedium
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.w600,
+                                                    color: AppTheme.black,
+                                                    fontSize:
+                                                        ResponsiveFonts.getFontSize(
+                                                            context, 12),
+                                                  ),
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ),
-                              // Parte de baixo: saldo em cinza
-                              Expanded(
-                                flex: 1,
-                                child: Container(
-                                  width: double.infinity,
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.darkGray.withOpacity(0.1),
-                                    borderRadius: const BorderRadius.only(
-                                      bottomLeft: Radius.circular(8),
-                                      bottomRight: Radius.circular(8),
+                                  // Parte de baixo: saldo em cinza
+                                  Expanded(
+                                    flex: 1,
+                                    child: Container(
+                                      width: double.infinity,
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.darkGray.withOpacity(0.1),
+                                        borderRadius: const BorderRadius.only(
+                                          bottomLeft: Radius.circular(8),
+                                          bottomRight: Radius.circular(8),
+                                        ),
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          _formatBalanceForDay(balance),
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                                color: AppTheme.darkGray,
+                                                fontSize: ResponsiveFonts
+                                                    .getFontSizeWithMin(
+                                                        context, 9, 8.5),
+                                              ),
+                                          textAlign: TextAlign.center,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                  child: Center(
-                                    child: Text(
-                                      _formatBalanceForDay(balance),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w600,
-                                            color: AppTheme.darkGray,
-                                            fontSize: ResponsiveFonts
-                                                .getFontSizeWithMin(
-                                                    context, 9, 8.5),
-                                          ),
-                                      textAlign: TextAlign.center,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                                ],
+                              ),
+                              // Indicador para o dia de hoje (se estiver no período)
+                              if (isTodayInPeriod)
+                                Positioned(
+                                  top: 2,
+                                  right: 2,
+                                  child: Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.incomeGreen,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: AppTheme.white,
+                                        width: 1.5,
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
                             ],
                           ),
                         ),

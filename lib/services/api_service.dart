@@ -52,12 +52,51 @@ class ApiService {
       );
 
       if (response.statusCode != 201 && response.statusCode != 200) {
-        final errorBody = json.decode(response.body);
-        throw Exception(errorBody['message'] ?? 'Failed to save transaction');
+        String errorMessage = 'Failed to save transaction';
+        
+        // Tentar fazer parse do JSON de erro
+        if (response.body.isNotEmpty) {
+          try {
+            final errorBody = json.decode(response.body);
+            errorMessage = errorBody['message'] ?? errorMessage;
+            
+            // Incluir detalhes dos erros de validação se disponíveis
+            if (errorBody['errors'] != null && errorBody['errors'] is List) {
+              final errors = errorBody['errors'] as List;
+              if (errors.isNotEmpty) {
+                final errorDetails = errors.map((e) {
+                  if (e is Map) {
+                    // express-validator retorna erros no formato { msg, param, location }
+                    if (e['msg'] != null) {
+                      final param = e['param'] != null ? '${e['param']}: ' : '';
+                      return '$param${e['msg']}';
+                    }
+                    return e.toString();
+                  }
+                  return e.toString();
+                }).join(', ');
+                errorMessage = '$errorMessage. $errorDetails';
+              }
+            }
+          } catch (e) {
+            // Se não conseguir fazer parse do JSON, usar o corpo da resposta como está
+            errorMessage = response.body.isNotEmpty 
+                ? response.body 
+                : 'Failed to save transaction: ${response.statusCode}';
+          }
+        } else {
+          errorMessage = 'Failed to save transaction: ${response.statusCode}';
+        }
+        
+        throw Exception(errorMessage);
       }
     } catch (e) {
-
-      rethrow;
+      // Se for uma Exception que já criamos, rethrow
+      if (e is Exception) {
+        rethrow;
+      }
+      // Caso contrário, criar uma Exception com a mensagem de erro
+      throw Exception('Erro ao salvar transação: $e');
     }
   }
 
@@ -73,8 +112,28 @@ class ApiService {
       );
 
       if (response.statusCode != 200) {
-        final errorBody = json.decode(response.body);
-        throw Exception(errorBody['message'] ?? 'Failed to update transaction');
+        try {
+          final errorBody = json.decode(response.body);
+          String errorMessage = errorBody['message'] ?? 'Failed to update transaction';
+          
+          // Incluir detalhes dos erros de validação se disponíveis
+          if (errorBody['errors'] != null && errorBody['errors'] is List) {
+            final errors = errorBody['errors'] as List;
+            if (errors.isNotEmpty) {
+              final errorDetails = errors.map((e) {
+                if (e is Map && e['msg'] != null) {
+                  return e['msg'];
+                }
+                return e.toString();
+              }).join(', ');
+              errorMessage = '$errorMessage: $errorDetails';
+            }
+          }
+          
+          throw Exception(errorMessage);
+        } catch (e) {
+          throw Exception('Failed to update transaction: ${response.statusCode}');
+        }
       }
     } catch (e) {
 

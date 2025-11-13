@@ -3,7 +3,10 @@ import '../models/wallet.dart';
 import '../theme/app_theme.dart';
 import '../services/wallet_service.dart';
 import '../services/user_service.dart';
+import '../services/auth_service.dart';
+import '../main.dart';
 import 'wallet_invites_screen.dart';
+import 'profile_screen.dart';
 import '../widgets/wallet_selection_dialog.dart';
 
 class SettingsMenuScreen extends StatefulWidget {
@@ -21,6 +24,7 @@ class SettingsMenuScreen extends StatefulWidget {
 class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
   final WalletService _walletService = WalletService();
   final UserService _userService = UserService();
+  final AuthService _authService = AuthService();
   
   String? _ownerName;
   bool _isLoadingOwner = false;
@@ -171,6 +175,21 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
           // Menu de opções
           _buildMenuOption(
             context,
+            icon: Icons.person,
+            title: 'Perfil',
+            subtitle: 'Editar informações do perfil',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const ProfileScreen(),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          
+          _buildMenuOption(
+            context,
             icon: Icons.people,
             title: 'Convites',
             subtitle: 'Gerir convites e membros',
@@ -213,6 +232,78 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
             },
             enabled: false,
           ),
+          const SizedBox(height: 12),
+          
+          // Opção de Sair
+          _buildMenuOption(
+            context,
+            icon: Icons.logout,
+            title: 'Sair',
+            subtitle: 'Fazer logout da aplicação',
+            onTap: () async {
+              // Mostrar diálogo de confirmação
+              final shouldLogout = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Confirmar Logout'),
+                  content: const Text('Tem certeza que deseja sair?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Cancelar'),
+                    ),
+                    ElevatedButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.expenseRed,
+                      ),
+                      child: const Text('Sair'),
+                    ),
+                  ],
+                ),
+              );
+
+              if (shouldLogout == true && mounted) {
+                try {
+                  // Fazer logout (já inclui limpeza completa e delay)
+                  await _authService.signOut();
+
+                  // Aguardar um pouco adicional para garantir que tudo foi processado
+                  await Future.delayed(const Duration(milliseconds: 200));
+
+                  if (mounted) {
+                    // Sempre navegar para AuthWrapper, independente do estado
+                    // O AuthWrapper vai verificar a autenticação e mostrar login se necessário
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(
+                        builder: (context) => const AuthWrapper(),
+                      ),
+                      (route) => false, // Remove todas as rotas anteriores
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    // Mesmo em caso de erro, navegar para AuthWrapper
+                    // para garantir que o usuário não fique preso
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(
+                        builder: (context) => const AuthWrapper(),
+                      ),
+                      (route) => false,
+                    );
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Erro ao fazer logout: $e'),
+                        backgroundColor: AppTheme.expenseRed,
+                      ),
+                    );
+                  }
+                }
+              }
+            },
+            isDestructive: true,
+          ),
         ],
       ),
     );
@@ -225,7 +316,15 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
     required String subtitle,
     required VoidCallback onTap,
     bool enabled = true,
+    bool isDestructive = false,
   }) {
+    final iconColor = isDestructive
+        ? AppTheme.expenseRed
+        : (enabled ? AppTheme.primaryColor : Colors.grey);
+    final textColor = isDestructive
+        ? AppTheme.expenseRed
+        : (enabled ? null : Colors.grey);
+
     return Card(
       elevation: 1,
       child: InkWell(
@@ -239,13 +338,15 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: enabled
-                      ? AppTheme.primaryColor.withOpacity(0.1)
+                      ? (isDestructive
+                          ? AppTheme.expenseRed.withOpacity(0.1)
+                          : AppTheme.primaryColor.withOpacity(0.1))
                       : Colors.grey.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
                   icon,
-                  color: enabled ? AppTheme.primaryColor : Colors.grey,
+                  color: iconColor,
                   size: 24,
                 ),
               ),
@@ -258,14 +359,16 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
                       title,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w600,
-                            color: enabled ? null : Colors.grey,
+                            color: textColor,
                           ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: enabled ? Colors.grey[600] : Colors.grey,
+                            color: isDestructive
+                                ? AppTheme.expenseRed.withOpacity(0.7)
+                                : (enabled ? Colors.grey[600] : Colors.grey),
                           ),
                     ),
                   ],

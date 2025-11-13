@@ -10,12 +10,14 @@ import '../services/database.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/date_utils.dart';
+import '../utils/zeller_formula.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   final Transaction? transactionToEdit;
   final String walletId;
   final String userId;
   final bool skipImportOption;
+  final DateTime? initialDate;
 
   const AddTransactionScreen({
     super.key,
@@ -23,6 +25,7 @@ class AddTransactionScreen extends StatefulWidget {
     required this.walletId,
     required this.userId,
     this.skipImportOption = false,
+    this.initialDate,
   });
 
   @override
@@ -40,6 +43,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   final TextEditingController _personController = TextEditingController();
   late TransactionCategory _selectedCategory;
   final _formKey = GlobalKey<FormState>();
+  final _scrollController = ScrollController();
+  bool _isSaving = false;
+
+  // Focus nodes para scroll automático
+  final Map<String, GlobalKey> _fieldKeys = {};
 
   // Novos campos
   bool _isSalary = false;
@@ -56,6 +64,14 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   @override
   void initState() {
     super.initState();
+    // Inicializar keys para os campos
+    _fieldKeys['amount'] = GlobalKey();
+    _fieldKeys['name'] = GlobalKey();
+    _fieldKeys['person'] = GlobalKey();
+    _fieldKeys['gastos'] = GlobalKey();
+    _fieldKeys['lazer'] = GlobalKey();
+    _fieldKeys['poupanca'] = GlobalKey();
+    
     // Se estiver editando ou se skipImportOption for true, não mostrar opção de importar
     if (widget.transactionToEdit != null || widget.skipImportOption) {
       _showImportOption = false;
@@ -72,7 +88,14 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       _isSalary = t.isSalary;
       _expenseBudgetCategory = t.expenseBudgetCategory;
       _frequency = t.frequency;
-      _selectedDayOfWeek = t.dayOfWeek;
+      // Converter do formato Zeller (0=sábado, 1=domingo, 2=segunda...) para formato do botão (1=domingo, 2=segunda...)
+      if (t.dayOfWeek != null) {
+        if (t.dayOfWeek == 0) {
+          _selectedDayOfWeek = 7; // sábado
+        } else {
+          _selectedDayOfWeek = t.dayOfWeek; // domingo=1, segunda=2, etc.
+        }
+      }
       _selectedDayOfMonth = t.dayOfMonth;
 
       if (t.salaryAllocation != null) {
@@ -85,8 +108,13 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       }
     } else {
       _selectedType = TransactionType.despesa;
-      _selectedDate = DateTime.now();
+      _selectedDate = widget.initialDate ?? DateTime.now();
       _selectedCategory = TransactionCategory.miscelaneos;
+
+      // Se houver data inicial, configurar recorrência automaticamente baseada na frequência
+      if (widget.initialDate != null) {
+        _configureRecurrenceFromDate(widget.initialDate!);
+      }
     }
 
     // Se for ganho e não tiver categoria válida, definir padrão
@@ -105,7 +133,33 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     _gastosPercentController.dispose();
     _lazerPercentController.dispose();
     _poupancaPercentController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _configureRecurrenceFromDate(DateTime date) {
+    // Configurar recorrência baseada na frequência selecionada
+    // Esta função será chamada quando a frequência mudar também
+    if (_frequency == TransactionFrequency.weekly) {
+      // Usar o dia da semana do dia selecionado
+      // getDayOfWeek retorna: 0=sábado, 1=domingo, 2=segunda, 3=terça, 4=quarta, 5=quinta, 6=sexta
+      // O sistema de salvamento usa o mesmo formato Zeller (0=sábado, 1=domingo, 2=segunda...)
+      // Mas o _buildDayButton usa: 1=domingo, 2=segunda, 3=terça, 4=quarta, 5=quinta, 6=sexta, 7=sábado
+      // Precisamos converter para o formato usado pelo _buildDayButton
+      final zellerDay = getDayOfWeek(date);
+      // Converter de Zeller (0=sábado, 1=domingo, 2=segunda...) para formato do botão (1=domingo, 2=segunda...)
+      // Zeller: 0=sáb, 1=dom, 2=seg, 3=ter, 4=qua, 5=qui, 6=sex
+      // Botão: 1=dom, 2=seg, 3=ter, 4=qua, 5=qui, 6=sex, 7=sáb
+      if (zellerDay == 0) {
+        _selectedDayOfWeek = 7; // sábado
+      } else {
+        _selectedDayOfWeek = zellerDay; // domingo=1, segunda=2, etc.
+      }
+    } else if (_frequency == TransactionFrequency.monthly) {
+      // Usar o dia do mês como recorrente
+      _selectedDayOfMonth = date.day;
+    }
+    // Para unique, não precisa configurar nada, a data já está definida
   }
 
   List<TransactionCategory> _getGainCategories() {
@@ -136,7 +190,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: Theme.of(context).colorScheme.copyWith(
-                  primary: AppTheme.incomeGreen,
+                  primary: AppTheme.black,
                   onPrimary: AppTheme.white,
                   surface: AppTheme.white,
                   onSurface: AppTheme.black,
@@ -207,20 +261,44 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   }
 
   Future<void> _saveTransaction() async {
+    if (_isSaving) return; // Prevenir múltiplos cliques
+
     if (!_validateStep(3)) {
       setState(() {
         _currentStep = 3;
       });
+      // Mostrar mensagem de erro visível
+      String errorMessage = '';
+      if (_selectedType == TransactionType.ganho && _isSalary) {
+        final gastos = double.tryParse(_gastosPercentController.text) ?? 0;
+        final lazer = double.tryParse(_lazerPercentController.text) ?? 0;
+        final poupanca = double.tryParse(_poupancaPercentController.text) ?? 0;
+        final total = gastos + lazer + poupanca;
+        if ((total - 100).abs() >= 0.1) {
+          errorMessage = 'As percentagens devem somar 100%';
+        }
+      } else if (_selectedType == TransactionType.despesa) {
+        if (_expenseBudgetCategory == null) {
+          errorMessage = 'Por favor, selecione uma categoria de orçamento';
+        }
+      }
+      if (errorMessage.isNotEmpty && mounted) {
+        _showErrorDialog(errorMessage);
+      }
       return;
     }
 
     final amount = double.tryParse(_amountController.text.replaceAll(',', '.'));
     if (amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor, insira um valor válido')),
-      );
+      if (mounted) {
+        _showErrorDialog('Por favor, insira um valor válido');
+      }
       return;
     }
+
+    setState(() {
+      _isSaving = true;
+    });
 
     SalaryAllocation? salaryAllocation;
     if (_selectedType == TransactionType.ganho && _isSalary) {
@@ -238,7 +316,14 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     int? dayOfWeek;
     int? dayOfMonth;
     if (_frequency == TransactionFrequency.weekly) {
-      dayOfWeek = _selectedDayOfWeek;
+      // Converter do formato do botão (1=domingo, 2=segunda..., 7=sábado) para formato Zeller (0=sábado, 1=domingo, 2=segunda...)
+      if (_selectedDayOfWeek != null) {
+        if (_selectedDayOfWeek == 7) {
+          dayOfWeek = 0; // sábado
+        } else {
+          dayOfWeek = _selectedDayOfWeek; // domingo=1, segunda=2, etc.
+        }
+      }
     } else if (_frequency == TransactionFrequency.monthly) {
       dayOfMonth = _selectedDayOfMonth;
     }
@@ -277,20 +362,56 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao salvar: $e')),
-        );
+        setState(() {
+          _isSaving = false;
+        });
+        _showErrorDialog('Erro ao salvar: $e');
       }
+    }
+  }
+
+  void _showErrorDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Erro'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _scrollToField(String fieldName) {
+    final key = _fieldKeys[fieldName];
+    if (key?.currentContext != null && _scrollController.hasClients) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (_scrollController.hasClients && key?.currentContext != null) {
+          Scrollable.ensureVisible(
+            key!.currentContext!,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            alignment: 0.1, // Alinhar um pouco acima do centro
+          );
+        }
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    final screenHeight = MediaQuery.of(context).size.height;
+    
     return Container(
       constraints: BoxConstraints(
         maxHeight: _showImportOption
-            ? MediaQuery.of(context).size.height * 0.45
-            : MediaQuery.of(context).size.height * 0.7,
+            ? screenHeight * 0.45
+            : (screenHeight * 0.9 - keyboardHeight).clamp(400.0, screenHeight * 0.9),
       ),
       decoration: const BoxDecoration(
         color: AppTheme.white,
@@ -356,20 +477,25 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                         ],
                       ),
                     ),
-                    // Progress indicator
+                    // Progress indicator - mais minimalista
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 24, vertical: 16),
+                          horizontal: 24, vertical: 12),
                       child: Row(
                         children: List.generate(4, (index) {
                           return Expanded(
                             child: Container(
-                              margin: EdgeInsets.only(right: index < 3 ? 8 : 0),
-                              height: 4,
+                              margin: EdgeInsets.only(right: index < 3 ? 6 : 0),
+                              height: 3,
                               decoration: BoxDecoration(
                                 color: index <= _currentStep
-                                    ? AppTheme.black
-                                    : AppTheme.lighterGray.withOpacity(0.3),
+                                    ? (_currentStep < 3
+                                        ? AppTheme.black
+                                        : (_selectedType ==
+                                                TransactionType.ganho
+                                            ? AppTheme.incomeGreen
+                                            : AppTheme.expenseRed))
+                                    : AppTheme.lighterGray.withOpacity(0.2),
                                 borderRadius: BorderRadius.circular(2),
                               ),
                             ),
@@ -377,19 +503,34 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                         }),
                       ),
                     ),
-                    // Step content - com altura flexível
+                    // Step content - com altura flexível e padding otimizado
                     Flexible(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.all(24),
-                        child: Form(
-                          key: _formKey,
-                          child: _buildStepContent(),
-                        ),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          return SingleChildScrollView(
+                            controller: _scrollController,
+                            padding: EdgeInsets.fromLTRB(
+                              24, 
+                              20, 
+                              24, 
+                              8 + MediaQuery.of(context).viewInsets.bottom + 100,
+                            ),
+                            child: Form(
+                              key: _formKey,
+                              child: _buildStepContent(),
+                            ),
+                          );
+                        },
                       ),
                     ),
-                    // Navigation buttons
+                    // Navigation buttons - melhorado e mais acessível
                     Container(
-                      padding: const EdgeInsets.all(24),
+                      padding: EdgeInsets.only(
+                        left: 24,
+                        right: 24,
+                        top: 16,
+                        bottom: 16 + MediaQuery.of(context).padding.bottom,
+                      ),
                       decoration: BoxDecoration(
                         color: AppTheme.white,
                         border: Border(
@@ -398,37 +539,75 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                             width: 1,
                           ),
                         ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          if (_currentStep > 0)
-                            TextButton(
-                              onPressed: () {
-                                setState(() {
-                                  _currentStep--;
-                                });
-                              },
-                              child: const Text('Anterior'),
-                            )
-                          else
-                            const SizedBox(),
-                          ElevatedButton(
-                            onPressed: () {
-                              if (_currentStep < 3) {
-                                if (_validateStep(_currentStep)) {
-                                  setState(() {
-                                    _currentStep++;
-                                  });
-                                }
-                              } else {
-                                _saveTransaction();
-                              }
-                            },
-                            child:
-                                Text(_currentStep < 3 ? 'Próximo' : 'Salvar'),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, -2),
                           ),
                         ],
+                      ),
+                      child: SafeArea(
+                        top: false,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            if (_currentStep > 0)
+                              TextButton(
+                                onPressed: _isSaving
+                                    ? null
+                                    : () {
+                                        setState(() {
+                                          _currentStep--;
+                                        });
+                                      },
+                                child: const Text('Anterior'),
+                              )
+                            else
+                              const SizedBox(width: 80),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: _isSaving
+                                    ? null
+                                    : () {
+                                        if (_currentStep < 3) {
+                                          if (_validateStep(_currentStep)) {
+                                            setState(() {
+                                              _currentStep++;
+                                            });
+                                          }
+                                        } else {
+                                          _saveTransaction();
+                                        }
+                                      },
+                                style: ElevatedButton.styleFrom(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 16),
+                                  backgroundColor: AppTheme.black,
+                                  foregroundColor: AppTheme.white,
+                                ),
+                                child: _isSaving
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                  AppTheme.white),
+                                        ),
+                                      )
+                                    : Text(
+                                        _currentStep < 3 ? 'Próximo' : 'Salvar',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -635,9 +814,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           'Tipo de Transação',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w600,
+                fontSize: 20,
               ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         Row(
           children: [
             Expanded(
@@ -671,19 +851,40 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 32),
+        const SizedBox(height: 28),
         Text(
           'Categoria',
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
+                fontSize: 16,
               ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         DropdownButtonFormField<TransactionCategory>(
           value: _getAvailableCategories().contains(_selectedCategory)
               ? _selectedCategory
               : _getAvailableCategories().first,
-          decoration: const InputDecoration(),
+          decoration: InputDecoration(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.lighterGray),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.lighterGray),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: _selectedType == TransactionType.ganho
+                    ? AppTheme.incomeGreen
+                    : AppTheme.expenseRed,
+                width: 2,
+              ),
+            ),
+          ),
           items: _getAvailableCategories().map((category) {
             return DropdownMenuItem(
               value: category,
@@ -725,6 +926,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               _frequency = value ?? TransactionFrequency.unique;
               _selectedDayOfWeek = null;
               _selectedDayOfMonth = null;
+              // Se houver data selecionada, configurar recorrência automaticamente
+              _configureRecurrenceFromDate(_selectedDate);
             });
           },
         ),
@@ -814,18 +1017,75 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           'Valor',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w600,
+                fontSize: 20,
               ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         TextFormField(
+          key: _fieldKeys['amount'],
           controller: _amountController,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: const TextStyle(fontSize: 18),
+          onTap: () => _scrollToField('amount'),
           inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+            TextInputFormatter.withFunction((oldValue, newValue) {
+              // Converter vírgula para ponto enquanto digita
+              String text = newValue.text.replaceAll(',', '.');
+
+              // Garantir que só há um ponto decimal
+              final parts = text.split('.');
+              if (parts.length > 2) {
+                return oldValue;
+              }
+
+              // Validar formato: apenas números e um ponto decimal
+              if (!RegExp(r'^\d*\.?\d{0,2}$').hasMatch(text) &&
+                  text.isNotEmpty) {
+                return oldValue;
+              }
+
+              // Preservar a posição do cursor
+              int cursorPosition = newValue.selection.baseOffset;
+              // Ajustar posição se necessário após substituição
+              if (newValue.text.contains(',') && !text.contains(',')) {
+                // Vírgula foi substituída, manter posição
+                cursorPosition = text.length;
+              }
+
+              return TextEditingValue(
+                text: text,
+                selection: TextSelection.collapsed(
+                  offset: cursorPosition > text.length
+                      ? text.length
+                      : cursorPosition,
+                ),
+              );
+            }),
           ],
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: '0.00',
             prefixText: '€ ',
+            prefixStyle:
+                const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.lighterGray),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.lighterGray),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: _selectedType == TransactionType.ganho
+                    ? AppTheme.incomeGreen
+                    : AppTheme.expenseRed,
+                width: 2,
+              ),
+            ),
           ),
           validator: (value) {
             if (value == null || value.isEmpty) {
@@ -838,18 +1098,40 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             return null;
           },
         ),
-        const SizedBox(height: 32),
+        const SizedBox(height: 28),
         Text(
           'Nome',
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
+                fontSize: 16,
               ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         TextFormField(
+          key: _fieldKeys['name'],
           controller: _nameController,
-          decoration: const InputDecoration(
+          onTap: () => _scrollToField('name'),
+          decoration: InputDecoration(
             hintText: 'Nome da transação',
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.lighterGray),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.lighterGray),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: _selectedType == TransactionType.ganho
+                    ? AppTheme.incomeGreen
+                    : AppTheme.expenseRed,
+                width: 2,
+              ),
+            ),
           ),
           validator: (value) {
             if (value == null || value.trim().isEmpty) {
@@ -858,18 +1140,40 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             return null;
           },
         ),
-        const SizedBox(height: 32),
+        const SizedBox(height: 28),
         Text(
           'Pessoa (opcional)',
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
+                fontSize: 16,
               ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         TextFormField(
+          key: _fieldKeys['person'],
           controller: _personController,
-          decoration: const InputDecoration(
+          onTap: () => _scrollToField('person'),
+          decoration: InputDecoration(
             hintText: 'Deixe vazio para "geral"',
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.lighterGray),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.lighterGray),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: _selectedType == TransactionType.ganho
+                    ? AppTheme.incomeGreen
+                    : AppTheme.expenseRed,
+                width: 2,
+              ),
+            ),
           ),
         ),
       ],

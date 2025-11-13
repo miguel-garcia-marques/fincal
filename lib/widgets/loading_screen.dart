@@ -73,20 +73,23 @@ class _LoadingScreenState extends State<LoadingScreen>
                       width: 80,
                       height: 80,
                       decoration: BoxDecoration(
-                        color: AppTheme.black,
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.black.withOpacity(0.3),
+                            color: AppTheme.black.withOpacity(0.2),
                             blurRadius: 20,
                             spreadRadius: 5,
                           ),
                         ],
                       ),
-                      child: const Icon(
-                        Icons.account_balance_wallet,
-                        color: Colors.white,
-                        size: 40,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: Image.asset(
+                          'assets/app_icon.png',
+                          width: 80,
+                          height: 80,
+                          fit: BoxFit.cover,
+                        ),
                       ),
                     ),
                   ),

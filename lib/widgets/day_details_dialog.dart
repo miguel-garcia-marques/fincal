@@ -4,6 +4,7 @@ import '../models/budget_balances.dart';
 import '../utils/date_utils.dart';
 import '../utils/zeller_formula.dart';
 import '../theme/app_theme.dart';
+import '../screens/add_transaction_screen.dart';
 
 class DayDetailsDialog extends StatelessWidget {
   final DateTime date;
@@ -13,6 +14,9 @@ class DayDetailsDialog extends StatelessWidget {
   final List<Transaction>? allPeriodTransactions;
   final DateTime? periodStartDate;
   final DateTime? periodEndDate;
+  final String? walletId;
+  final String? userId;
+  final VoidCallback? onTransactionAdded;
 
   const DayDetailsDialog({
     super.key,
@@ -23,6 +27,9 @@ class DayDetailsDialog extends StatelessWidget {
     this.allPeriodTransactions,
     this.periodStartDate,
     this.periodEndDate,
+    this.walletId,
+    this.userId,
+    this.onTransactionAdded,
   });
 
   @override
@@ -350,6 +357,39 @@ class DayDetailsDialog extends StatelessWidget {
               ],
 
               const SizedBox(height: 12),
+              if (walletId != null && userId != null) ...[
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    // Abrir tela de adicionar transação com a data pré-selecionada
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      isDismissible: true,
+                      enableDrag: true,
+                      builder: (context) => AddTransactionScreen(
+                        walletId: walletId!,
+                        userId: userId!,
+                        initialDate: date,
+                        skipImportOption: true,
+                      ),
+                    ).then((result) {
+                      if (result == true && onTransactionAdded != null) {
+                        onTransactionAdded!();
+                      }
+                    });
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text('Adicionar Transação'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.black,
+                    foregroundColor: AppTheme.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               ElevatedButton(
                 onPressed: () => Navigator.of(context).pop(),
                 child: const Text('Fechar'),
