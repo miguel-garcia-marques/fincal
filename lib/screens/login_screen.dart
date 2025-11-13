@@ -989,41 +989,41 @@ class _LoginScreenState extends State<LoginScreen> {
                     
                     // Password field (apenas se email foi inserido no modo login, ou sempre no signup)
                     if (_isLoginMode && _emailEntered || !_isLoginMode) ...[
-                      TextFormField(
-                        controller: _passwordController,
-                        obscureText: _obscurePassword,
-                        decoration: InputDecoration(
-                          labelText: 'Senha',
-                          prefixIcon: const Icon(Icons.lock),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility
-                                  : Icons.visibility_off,
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _obscurePassword = !_obscurePassword;
-                              });
-                            },
+                    TextFormField(
+                      controller: _passwordController,
+                      obscureText: _obscurePassword,
+                      decoration: InputDecoration(
+                        labelText: 'Senha',
+                        prefixIcon: const Icon(Icons.lock),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility
+                                : Icons.visibility_off,
                           ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          filled: true,
-                          fillColor: AppTheme.white,
+                          onPressed: () {
+                            setState(() {
+                              _obscurePassword = !_obscurePassword;
+                            });
+                          },
                         ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Por favor, insira sua senha';
-                          }
-                          if (!_isLoginMode && value.length < 6) {
-                            return 'A senha deve ter pelo menos 6 caracteres';
-                          }
-                          return null;
-                        },
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        filled: true,
+                        fillColor: AppTheme.white,
                       ),
-                      const SizedBox(height: 24),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Por favor, insira sua senha';
+                        }
+                        if (!_isLoginMode && value.length < 6) {
+                          return 'A senha deve ter pelo menos 6 caracteres';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 24),
                     ] else if (_isLoginMode && !_emailEntered) ...[
                       // Botões de ação quando apenas email está preenchido
                       const SizedBox(height: 8),
@@ -1085,39 +1085,39 @@ class _LoginScreenState extends State<LoginScreen> {
                     
                     // Submit button (apenas se senha está visível)
                     if (_isLoginMode && _emailEntered || !_isLoginMode) ...[
-                      ElevatedButton(
-                        onPressed: _isLoading ? null : _handleSubmit,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _isLoading 
-                              ? AppTheme.black.withOpacity(0.5)
-                              : AppTheme.black,
-                          foregroundColor: AppTheme.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          disabledBackgroundColor: AppTheme.black.withOpacity(0.5),
-                          disabledForegroundColor: AppTheme.white.withOpacity(0.7),
+                    ElevatedButton(
+                      onPressed: _isLoading ? null : _handleSubmit,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isLoading 
+                            ? AppTheme.black.withOpacity(0.5)
+                            : AppTheme.black,
+                        foregroundColor: AppTheme.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        child: _isLoading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    AppTheme.white,
-                                  ),
-                                ),
-                              )
-                            : Text(
-                                _isLoginMode ? 'Entrar' : 'Criar Conta',
-                                style: TextStyle(
-                                  fontSize: ResponsiveFonts.getFontSize(context, 16),
-                                  fontWeight: FontWeight.w600,
+                        disabledBackgroundColor: AppTheme.black.withOpacity(0.5),
+                        disabledForegroundColor: AppTheme.white.withOpacity(0.7),
+                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  AppTheme.white,
                                 ),
                               ),
-                      ),
+                            )
+                          : Text(
+                              _isLoginMode ? 'Entrar' : 'Criar Conta',
+                              style: TextStyle(
+                                fontSize: ResponsiveFonts.getFontSize(context, 16),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                    ),
                       
                       // Botão de passkey (se suportado e no modo login)
                       if (kIsWeb && _passkeySupported && _isLoginMode && _emailEntered) ...[
@@ -1146,7 +1146,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 16),
+                    const SizedBox(height: 16),
                     ],
                     
                     // Botão para voltar (se email foi inserido)
