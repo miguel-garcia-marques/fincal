@@ -111,6 +111,93 @@
       console.error('Promise rejeitada não tratada:', event.reason);
       }
     });
+    
+    // WebAuthn Helper Functions
+    window.webauthnHelpers = {
+      // Verificar se WebAuthn é suportado
+      isSupported: function() {
+        return !!(navigator.credentials && navigator.credentials.create && navigator.credentials.get);
+      },
+      
+      // Criar credencial (registro)
+      createCredential: function(options) {
+        return navigator.credentials.create({
+          publicKey: options
+        });
+      },
+      
+      // Obter credencial (autenticação)
+      getCredential: function(options) {
+        return navigator.credentials.get({
+          publicKey: options
+        });
+      },
+      
+      // Converter ArrayBuffer para base64url
+      arrayBufferToBase64Url: function(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary)
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_')
+          .replace(/=/g, '');
+      },
+      
+      // Converter base64url para ArrayBuffer
+      base64UrlToArrayBuffer: function(base64url) {
+        const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes.buffer;
+      },
+      
+      // Converter PublicKeyCredential para objeto serializável
+      credentialToObject: function(credential) {
+        if (!credential) return null;
+        
+        const response = credential.response;
+        const clientDataJSON = response.clientDataJSON;
+        const attestationObject = response.attestationObject || response.authenticatorData;
+        
+        return {
+          id: credential.id,
+          rawId: window.webauthnHelpers.arrayBufferToBase64Url(credential.rawId),
+          type: credential.type,
+          response: {
+            clientDataJSON: window.webauthnHelpers.arrayBufferToBase64Url(clientDataJSON),
+            attestationObject: attestationObject ? window.webauthnHelpers.arrayBufferToBase64Url(attestationObject) : null,
+            authenticatorData: response.authenticatorData ? window.webauthnHelpers.arrayBufferToBase64Url(response.authenticatorData) : null,
+            signature: response.signature ? window.webauthnHelpers.arrayBufferToBase64Url(response.signature) : null,
+            userHandle: response.userHandle ? window.webauthnHelpers.arrayBufferToBase64Url(response.userHandle) : null,
+          }
+        };
+      },
+      
+      // Converter AuthenticationResponse para objeto serializável
+      authenticationResponseToObject: function(credential) {
+        if (!credential) return null;
+        
+        const response = credential.response;
+        
+        return {
+          id: credential.id,
+          rawId: window.webauthnHelpers.arrayBufferToBase64Url(credential.rawId),
+          type: credential.type,
+          response: {
+            clientDataJSON: window.webauthnHelpers.arrayBufferToBase64Url(response.clientDataJSON),
+            authenticatorData: response.authenticatorData ? window.webauthnHelpers.arrayBufferToBase64Url(response.authenticatorData) : null,
+            signature: response.signature ? window.webauthnHelpers.arrayBufferToBase64Url(response.signature) : null,
+            userHandle: response.userHandle ? window.webauthnHelpers.arrayBufferToBase64Url(response.userHandle) : null,
+          }
+        };
+      }
+    };
   </script>
 </body>
 </html>

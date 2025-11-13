@@ -7,6 +7,7 @@ import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../services/wallet_service.dart';
 import '../services/storage_service.dart';
+import '../services/passkey_service.dart';
 import '../utils/responsive_fonts.dart';
 import '../theme/app_theme.dart';
 import '../main.dart';
@@ -30,6 +31,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _nameController = TextEditingController();
   final _authService = AuthService();
   final _userService = UserService();
+  final _passkeyService = PasskeyService();
   
   bool _isLoading = false;
   bool _isLoginMode = true; // true = login, false = signup
@@ -671,6 +673,153 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // Handler para login com passkey
+  Future<void> _handlePasskeyLogin() async {
+    if (_isLoading) return;
+    
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Por favor, insira seu email para usar passkey'),
+            backgroundColor: AppTheme.expenseRed,
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      // Autenticar com passkey
+      final result = await _passkeyService.authenticateWithPasskey(email);
+      
+      if (mounted && result['success'] == true) {
+        final magicLink = result['magicLink'] as String?;
+        final requiresPasswordLogin = result['requiresPasswordLogin'] as bool? ?? false;
+        
+        if (requiresPasswordLogin) {
+          // Se precisar de login com senha, mostrar mensagem
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Autenticação com passkey bem-sucedida! Por favor, faça login uma vez com senha para ativar sessão completa.'),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 5),
+              ),
+            );
+          }
+          return;
+        }
+        
+        if (magicLink != null) {
+          // Tentar fazer login usando o magic link
+          try {
+            // Extrair token do magic link se possível
+            final uri = Uri.parse(magicLink);
+            final token = uri.queryParameters['token'] ?? 
+                (uri.fragment.contains('token=') ? uri.fragment.split('token=')[1].split('&')[0] : null);
+            
+            if (token != null && token.isNotEmpty) {
+              // Tentar fazer login com o token
+              // Nota: O Supabase pode não ter uma função direta para isso
+              // Vamos tentar usar signInWithOtp ou similar
+              
+              // Por enquanto, vamos mostrar sucesso e pedir login normal
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Autenticação com passkey bem-sucedida! Redirecionando...'),
+                    backgroundColor: AppTheme.incomeGreen,
+                  ),
+                );
+                
+                // Tentar fazer refresh da sessão
+                try {
+                  await _authService.supabase.auth.refreshSession();
+                  // Verificar se há sessão ativa
+                  if (_authService.isAuthenticated) {
+                    // Navegar para AuthWrapper
+                    if (mounted) {
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(
+                          builder: (context) => const AuthWrapper(),
+                        ),
+                        (route) => false,
+                      );
+                      return;
+                    }
+                  }
+                } catch (e) {
+                  // Ignorar erro
+                }
+                
+                // Se não houver sessão, mostrar mensagem
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Por favor, faça login uma vez com senha para ativar sessão completa.'),
+                      backgroundColor: Colors.orange,
+                      duration: Duration(seconds: 5),
+                    ),
+                  );
+                }
+              }
+            }
+          } catch (e) {
+            // Se falhar, mostrar mensagem
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Autenticação com passkey bem-sucedida! Por favor, faça login uma vez com senha.'),
+                  backgroundColor: Colors.orange,
+                  duration: Duration(seconds: 5),
+                ),
+              );
+            }
+          }
+        } else {
+          // Se não houver magic link, mostrar mensagem
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Autenticação com passkey bem-sucedida! Por favor, faça login uma vez com senha.'),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 5),
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        String errorMessage = 'Erro ao autenticar com passkey';
+        final errorStr = e.toString().toLowerCase();
+        if (errorStr.contains('cancelado')) {
+          errorMessage = 'Autenticação cancelada';
+        } else if (errorStr.contains('não encontrada')) {
+          errorMessage = 'Nenhuma passkey encontrada. Por favor, registre uma passkey primeiro.';
+        } else if (errorStr.contains('não suportadas')) {
+          errorMessage = 'Passkeys não são suportadas neste dispositivo';
+        }
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: AppTheme.expenseRed,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -834,6 +983,28 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                     ),
                     const SizedBox(height: 16),
+                    
+                    // Passkey buttons (apenas em web e se suportado)
+                    if (kIsWeb && _passkeyService.isSupported) ...[
+                      if (_isLoginMode) ...[
+                        // Botão de login com passkey
+                        OutlinedButton.icon(
+                          onPressed: _isLoading ? null : _handlePasskeyLogin,
+                          icon: const Icon(Icons.fingerprint, size: 20),
+                          label: const Text('Entrar com Passkey'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            side: const BorderSide(color: AppTheme.black),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      const Divider(),
+                      const SizedBox(height: 12),
+                    ],
                     
                     // Toggle between login and signup
                     TextButton(

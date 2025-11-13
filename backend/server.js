@@ -171,6 +171,7 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/period-history', require('./routes/period_history'));
 app.use('/api/wallets', require('./routes/wallets'));
 app.use('/api/invites', require('./routes/invites'));
+app.use('/api/passkeys', require('./routes/passkeys'));
 
 // Rota de teste
 app.get('/', (req, res) => {
