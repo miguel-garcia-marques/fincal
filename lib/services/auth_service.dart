@@ -67,37 +67,41 @@ class AuthService {
     // Primeiro, verificar se há uma URL configurada explicitamente via --dart-define
     const envUrl = String.fromEnvironment('APP_BASE_URL');
     if (envUrl.isNotEmpty) {
-      return envUrl;
+      // Remover barra final se houver
+      return envUrl.endsWith('/') ? envUrl.substring(0, envUrl.length - 1) : envUrl;
     }
+    
+    // Verificar se está em produção
+    const isProd = bool.fromEnvironment('dart.vm.product');
     
     // Verificar se há uma URL configurada no AppConfig
+    // Em produção, sempre priorizar a URL do AppConfig se configurada
     final configuredUrl = AppConfig.getAppBaseUrl();
     if (configuredUrl != null && configuredUrl.isNotEmpty) {
-      return configuredUrl;
+      // Remover barra final se houver (já removido no AppConfig, mas garantir)
+      return configuredUrl.endsWith('/') 
+          ? configuredUrl.substring(0, configuredUrl.length - 1) 
+          : configuredUrl;
     }
     
+    // Se estiver em produção e não houver URL configurada, retornar null
+    // O Supabase usará a URL padrão configurada no dashboard
+    if (isProd) {
+      return null;
+    }
+    
+    // Em desenvolvimento, tentar detectar a URL atual
     try {
       // Obter a URL base atual
       final uri = Uri.base;
       final host = uri.host.toLowerCase();
       
-      // Se estiver em localhost ou 127.0.0.1, retornar null
-      // O Supabase usará a URL padrão configurada no dashboard
-      // Isso evita que localhost seja usado em produção
+      // Se estiver em localhost ou 127.0.0.1, usar localhost
       if (host == 'localhost' || host == '127.0.0.1' || host.isEmpty) {
-        // Em desenvolvimento, ainda retornar localhost para facilitar testes
-        // Mas em produção build, retornar null para usar a URL do dashboard
-        const isProd = bool.fromEnvironment('dart.vm.product');
-        if (isProd) {
-          // Em produção, não usar localhost - deixar Supabase usar URL do dashboard
-          return null;
-        }
-        // Em desenvolvimento, usar localhost
         return '${uri.scheme}://$host${uri.hasPort ? ':${uri.port}' : ''}';
       }
       
-      // Se não for localhost, estamos em produção
-      // Construir URL sem porta (Firebase Hosting não usa porta)
+      // Se não for localhost, construir URL sem porta
       final redirectUrl = '${uri.scheme}://$host';
       return redirectUrl;
     } catch (e) {
@@ -107,13 +111,8 @@ class AuthService {
           final location = html.window.location;
           final host = location.host.toLowerCase();
           
-          // Se for localhost, retornar null em produção
+          // Se for localhost, usar localhost
           if (host.contains('localhost') || host.contains('127.0.0.1') || host.isEmpty) {
-            const isProd = bool.fromEnvironment('dart.vm.product');
-            if (isProd) {
-              return null; // Deixar Supabase usar URL do dashboard
-            }
-            // Em desenvolvimento, usar localhost
             return location.port.isNotEmpty 
                 ? '${location.protocol}//$host:${location.port}'
                 : '${location.protocol}//$host';

@@ -4,6 +4,7 @@ import '../models/user.dart';
 import 'auth_service.dart';
 import '../config/api_config.dart';
 import 'cache_service.dart';
+import '../utils/api_error_handler.dart';
 
 class UserService {
   final AuthService _authService = AuthService();
@@ -53,6 +54,9 @@ class UserService {
         headers: _getHeaders(),
       );
 
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
+
       if (response.statusCode == 200) {
         final decoded = json.decode(response.body);
         final user = User.fromJson(decoded);
@@ -64,16 +68,17 @@ class UserService {
       } else if (response.statusCode == 404) {
         // Usuário não encontrado no MongoDB - isso é normal para novos usuários
         return null;
-      } else if (response.statusCode == 401) {
-        // Não autenticado - invalidar cache e retornar null
-        await _cacheService.invalidateUserCache();
-        return null;
       } else {
         // Outros erros - retornar cache se disponível
         final cachedUser = await _cacheService.getCachedUser();
         return cachedUser;
       }
     } catch (e) {
+      // Se for erro 401, já foi tratado e redirecionado - não retornar cache
+      if (e.toString().contains('Unauthorized')) {
+        await _cacheService.invalidateUserCache();
+        rethrow;
+      }
       // Em caso de erro de rede, tentar retornar do cache
       final cachedUser = await _cacheService.getCachedUser();
       if (cachedUser != null) {
@@ -91,6 +96,9 @@ class UserService {
         headers: _getHeaders(),
         body: json.encode({'name': name}),
       );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
 
       if (response.statusCode == 201 || response.statusCode == 200) {
         final decoded = json.decode(response.body);
@@ -129,6 +137,9 @@ class UserService {
         body: json.encode({'name': name}),
       );
 
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
+
       if (response.statusCode == 200) {
         final decoded = json.decode(response.body);
         final user = User.fromJson(decoded);
@@ -156,6 +167,9 @@ class UserService {
         body: json.encode({'profilePictureUrl': profilePictureUrl}),
       );
 
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
+
       if (response.statusCode == 200) {
         final decoded = json.decode(response.body);
         final user = User.fromJson(decoded);
@@ -180,6 +194,9 @@ class UserService {
         Uri.parse('$baseUrl/users/me'),
         headers: _getHeaders(),
       );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
 
       if (response.statusCode == 200) {
         // Limpar cache após deletar conta

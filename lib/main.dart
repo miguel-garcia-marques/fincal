@@ -13,6 +13,7 @@ import 'services/auth_service.dart';
 import 'services/user_service.dart';
 import 'services/wallet_service.dart';
 import 'services/wallet_storage_service.dart';
+import 'services/navigation_service.dart';
 import 'models/wallet.dart';
 import 'theme/app_theme.dart';
 import 'config/supabase_config.dart';
@@ -103,6 +104,7 @@ class FinCalApp extends StatelessWidget {
     return MaterialApp(
       title: 'FinCal',
       debugShowCheckedModeBanner: false,
+      navigatorKey: NavigationService.navigatorKey,
       builder: (context, child) {
         // Garantir que MediaQuery está disponível e recalcular tema
         final mediaQuery = MediaQuery.of(context);
@@ -357,20 +359,85 @@ class _AuthWrapperState extends State<AuthWrapper> {
           _isAuthenticated = shouldBeAuthenticated;
         });
 
-        // Se autenticado, verificar se precisa mostrar seleção de wallet
+        // Se autenticado, GARANTIR que o usuário existe no MongoDB antes de permitir acesso
         if (_isAuthenticated) {
-          // Usar timeout para garantir que não trave
-          await _checkWalletSelection().timeout(
-            const Duration(seconds: 5),
-            onTimeout: () {
-              if (mounted) {
-                setState(() {
-                  _isLoading = false;
-                  _needsWalletSelection = false;
-                });
+          try {
+            // Verificar se o usuário existe no MongoDB
+            final mongoUser = await _userService.getCurrentUser(forceRefresh: true).timeout(
+              const Duration(seconds: 5),
+              onTimeout: () => null,
+            );
+            
+            if (mongoUser == null) {
+              // Usuário não existe no MongoDB - criar agora com sincronização
+              final currentEmail = user?.email ?? '';
+              String userName = currentEmail.isNotEmpty 
+                  ? currentEmail.split('@')[0] 
+                  : 'Usuário';
+              
+              try {
+                // 1. Atualizar Display Name no Supabase
+                await _authService.updateDisplayName(userName);
+                
+                // 2. Criar usuário no MongoDB
+                await _userService.createOrUpdateUser(userName);
+                
+                // 3. Verificar que foi criado com sucesso
+                final createdUser = await _userService.getCurrentUser(forceRefresh: true).timeout(
+                  const Duration(seconds: 3),
+                  onTimeout: () => null,
+                );
+                
+                if (createdUser == null) {
+                  // Falha ao criar - não permitir acesso
+                  throw Exception('Falha ao criar usuário no servidor');
+                }
+                
+                // 4. Verificar sincronização do nome
+                if (createdUser.name != userName) {
+                  await _userService.createOrUpdateUser(userName);
+                  await _authService.updateDisplayName(userName);
+                }
+              } catch (e) {
+                // Se falhar ao criar usuário, fazer logout e redirecionar para login
+                if (mounted) {
+                  try {
+                    await _authService.signOut();
+                  } catch (_) {
+                    // Ignorar erro no logout
+                  }
+                  setState(() {
+                    _isAuthenticated = false;
+                    _isLoading = false;
+                    _needsWalletSelection = false;
+                  });
+                }
+                return;
               }
-            },
-          );
+            }
+            
+            // Usuário existe no MongoDB - verificar seleção de wallet
+            await _checkWalletSelection().timeout(
+              const Duration(seconds: 5),
+              onTimeout: () {
+                if (mounted) {
+                  setState(() {
+                    _isLoading = false;
+                    _needsWalletSelection = false;
+                  });
+                }
+              },
+            );
+          } catch (e) {
+            // Em caso de erro ao verificar/criar usuário, não permitir acesso
+            if (mounted) {
+              setState(() {
+                _isLoading = false;
+                _isAuthenticated = false;
+                _needsWalletSelection = false;
+              });
+            }
+          }
         } else {
           setState(() {
             _isLoading = false;
@@ -415,10 +482,18 @@ class _AuthWrapperState extends State<AuthWrapper> {
       );
       
       if (user == null) {
-        // Se não houver usuário, ir direto para home (será criado lá)
+        // Se não houver usuário no MongoDB, não permitir acesso
+        // O usuário deve ser criado antes de entrar na app
+        // Isso já foi verificado em _checkAuth, mas se chegou aqui, fazer logout
         if (mounted) {
+          try {
+            await _authService.signOut();
+          } catch (_) {
+            // Ignorar erro no logout
+          }
           setState(() {
             _isLoading = false;
+            _isAuthenticated = false;
             _needsWalletSelection = false;
           });
         }

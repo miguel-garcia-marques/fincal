@@ -19,8 +19,12 @@ class AppConfig {
     }
 
     // Se houver URL de produção configurada e estiver em produção, usar ela
+    // IMPORTANTE: Em produção, sempre usar a URL configurada se disponível
     if (isProduction && productionAppUrl.isNotEmpty) {
-      return productionAppUrl;
+      // Remover barra final se houver
+      return productionAppUrl.endsWith('/')
+          ? productionAppUrl.substring(0, productionAppUrl.length - 1)
+          : productionAppUrl;
     }
 
     // Caso contrário, retornar null para usar a URL atual dinamicamente

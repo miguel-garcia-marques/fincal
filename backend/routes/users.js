@@ -280,6 +280,9 @@ router.put('/me', validateUserUpdate, async (req, res) => {
     const User = getUserModel();
     const { name, profilePictureUrl } = req.body;
     
+    console.log(`[PUT /users/me] Atualizando perfil para userId: ${req.userId}`);
+    console.log(`[PUT /users/me] Dados recebidos:`, { name, profilePictureUrl });
+    
     // Construir objeto de atualização dinamicamente
     const updateData = {
       updatedAt: new Date()
@@ -290,13 +293,16 @@ router.put('/me', validateUserUpdate, async (req, res) => {
         return res.status(400).json({ message: 'Nome é obrigatório' });
       }
       updateData.name = name.trim();
+      console.log(`[PUT /users/me] Atualizando nome: ${updateData.name}`);
     }
     
     if (profilePictureUrl !== undefined) {
       // Converter string vazia para null
-      updateData.profilePictureUrl = (profilePictureUrl && profilePictureUrl.trim() !== '') 
+      const finalProfilePictureUrl = (profilePictureUrl && profilePictureUrl.trim() !== '') 
         ? profilePictureUrl.trim() 
         : null;
+      updateData.profilePictureUrl = finalProfilePictureUrl;
+      console.log(`[PUT /users/me] Atualizando profilePictureUrl: ${finalProfilePictureUrl}`);
     }
     
     // Sempre atualizar email se disponível
@@ -304,14 +310,23 @@ router.put('/me', validateUserUpdate, async (req, res) => {
       updateData.email = req.user.email;
     }
     
+    console.log(`[PUT /users/me] Dados de atualização:`, updateData);
+    
     const user = await User.findOneAndUpdate(
       { userId: req.userId },
       updateData,
       { new: true, upsert: true }
     );
     
+    console.log(`[PUT /users/me] Usuário atualizado:`, {
+      userId: user.userId,
+      name: user.name,
+      profilePictureUrl: user.profilePictureUrl
+    });
+    
     res.json(user);
   } catch (error) {
+    console.error(`[PUT /users/me] Erro ao atualizar perfil:`, error);
     res.status(500).json({ message: error.message });
   }
 });

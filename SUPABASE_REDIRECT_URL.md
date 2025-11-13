@@ -19,26 +19,21 @@ O problema está na configuração do **Supabase Dashboard**. Você precisa conf
 Na seção **Site URL**, configure a URL de produção da sua app:
 
 ```
-https://seu-projeto.web.app
+https://fincal-f7.web.app
 ```
 
-ou
-
-```
-https://seu-dominio.com
-```
-
-**Importante**: Esta é a URL base da sua aplicação no Firebase Hosting.
+**Importante**: Esta é a URL base da sua aplicação no Firebase Hosting. Esta URL deve corresponder à URL configurada em `lib/config/app_config.dart` (`productionAppUrl`).
 
 ### Passo 3: Configurar Redirect URLs
 
 Na seção **Redirect URLs**, adicione todas as URLs que podem receber redirecionamentos:
 
 ```
-https://seu-projeto.web.app
-https://seu-projeto.firebaseapp.com
-https://seu-dominio.com
+https://fincal-f7.web.app
+https://fincal-f7.firebaseapp.com
 ```
+
+**IMPORTANTE**: Remova `http://localhost:3000` da lista de Redirect URLs se estiver lá, a menos que você precise testar localmente.
 
 **Para desenvolvimento local** (opcional, apenas se quiser testar localmente):
 
@@ -57,16 +52,19 @@ Clique em **Save** (Salvar) para aplicar as mudanças.
 O código foi melhorado para:
 
 1. **Em produção (build release)**:
-   - Se detectar `localhost`, retorna `null` e deixa o Supabase usar a URL configurada no dashboard
-   - Se detectar uma URL de produção (ex: `seu-projeto.web.app`), usa essa URL
+   - **Primeiro**: Usa `--dart-define=APP_BASE_URL=...` se fornecido no build
+   - **Segundo**: Usa `AppConfig.productionAppUrl` se configurado (atualmente: `https://fincal-f7.web.app`)
+   - **Terceiro**: Retorna `null` para deixar o Supabase usar a URL configurada no dashboard
+   - **Nunca** usa `localhost` em produção
 
 2. **Em desenvolvimento**:
    - Usa `localhost` para facilitar testes locais
+   - Detecta automaticamente a URL atual (localhost:8080, etc.)
 
 3. **Prioridade de configuração**:
    - Primeiro: `--dart-define=APP_BASE_URL=...` (se fornecido no build)
-   - Segundo: `AppConfig.productionAppUrl` (se configurado)
-   - Terceiro: URL atual detectada automaticamente
+   - Segundo: `AppConfig.productionAppUrl` (se configurado) - **SEMPRE usado em produção**
+   - Terceiro: URL atual detectada automaticamente (apenas em desenvolvimento)
    - Último: `null` (Supabase usa URL do dashboard)
 
 ## 📝 Configurar URL no Build

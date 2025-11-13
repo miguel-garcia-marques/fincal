@@ -193,11 +193,12 @@ class _LoginScreenState extends State<LoginScreen> {
               return;
             } else {
               // Login bem-sucedido e email verificado
-              // Verificar se o usuário existe no MongoDB, se não, criar
+              // GARANTIR que o usuário existe no MongoDB e Supabase com as mesmas informações
+              // NÃO permitir acesso até que ambos estejam sincronizados
               try {
                 final existingUser = await _userService.getCurrentUser();
                 if (existingUser == null) {
-                  // Usuário não existe no MongoDB, verificar se há nome guardado do registro
+                  // Usuário não existe no MongoDB, criar agora com sincronização completa
                   final prefs = await SharedPreferences.getInstance();
                   final pendingName = prefs.getString('pending_user_name');
                   final pendingEmail = prefs.getString('pending_user_email');
@@ -219,24 +220,28 @@ class _LoginScreenState extends State<LoginScreen> {
                     userName = currentEmail.split('@')[0];
                   }
                   
-                  // Criar ou atualizar usuário no MongoDB com o nome correto
-                  // Se o usuário já foi criado automaticamente pelo backend, isso vai atualizar o nome
+                  // 1. Atualizar Display Name no Supabase PRIMEIRO
+                  await _authService.updateDisplayName(userName);
+                  
+                  // 2. Criar usuário no MongoDB com o mesmo nome
                   await _userService.createOrUpdateUser(userName);
                   
-                  // Atualizar Display Name no Supabase também
-                  try {
-                    await _authService.updateDisplayName(userName);
-                  } catch (e) {
-                    // Display Name é menos crítico
+                  // 3. Verificar que o usuário foi criado com sucesso
+                  final createdUser = await _userService.getCurrentUser(forceRefresh: true);
+                  if (createdUser == null) {
+                    throw Exception('Falha ao criar usuário no servidor');
                   }
                   
-                  // Forçar refresh do cache e verificar se o nome está correto
-                  final createdUser = await _userService.getCurrentUser(forceRefresh: true);
-                  if (createdUser != null && createdUser.name != userName) {
-                    // Se o nome ainda estiver errado, tentar atualizar novamente
+                  // 4. Verificar que o nome está sincronizado em ambos os sistemas
+                  if (createdUser.name != userName) {
+                    // Tentar corrigir sincronização
                     await _userService.createOrUpdateUser(userName);
                     await _authService.updateDisplayName(userName);
-                    await _userService.getCurrentUser(forceRefresh: true);
+                    // Verificar novamente
+                    final recheckUser = await _userService.getCurrentUser(forceRefresh: true);
+                    if (recheckUser == null || recheckUser.name != userName) {
+                      throw Exception('Falha ao sincronizar informações do usuário');
+                    }
                   }
                   
                   // Se houver foto pendente, fazer upload agora
@@ -276,12 +281,12 @@ class _LoginScreenState extends State<LoginScreen> {
                 }
               } catch (e) {
                 // Se falhar ao criar usuário, tentar novamente após um delay
-                // Isso pode acontecer se houver problemas de concorrência ou estados inconsistentes
+                // NÃO permitir acesso até que o usuário seja criado com sucesso
                 try {
                   await Future.delayed(const Duration(milliseconds: 500));
-                  final retryUser = await _userService.getCurrentUser();
+                  final retryUser = await _userService.getCurrentUser(forceRefresh: true);
                   if (retryUser == null) {
-                    // Se ainda não existir, criar com nome correto
+                    // Se ainda não existir, criar com nome correto e sincronização completa
                     final prefs = await SharedPreferences.getInstance();
                     final pendingName = prefs.getString('pending_user_name');
                     final pendingEmail = prefs.getString('pending_user_email');
@@ -296,19 +301,29 @@ class _LoginScreenState extends State<LoginScreen> {
                       userName = currentEmail.split('@')[0];
                     }
                     
+                    // 1. Atualizar Display Name no Supabase
+                    await _authService.updateDisplayName(userName);
+                    
+                    // 2. Criar usuário no MongoDB
                     await _userService.createOrUpdateUser(userName);
                     
-                    // Atualizar Display Name no Supabase também
-                    try {
-                      await _authService.updateDisplayName(userName);
-                    } catch (e) {
-                      // Display Name é menos crítico
+                    // 3. Verificar que foi criado com sucesso
+                    final createdUser = await _userService.getCurrentUser(forceRefresh: true);
+                    if (createdUser == null) {
+                      throw Exception('Falha ao criar usuário no servidor após retry');
                     }
                     
-                    // Forçar refresh do cache
-                    await _userService.getCurrentUser(forceRefresh: true);
+                    // 4. Verificar sincronização
+                    if (createdUser.name != userName) {
+                      await _userService.createOrUpdateUser(userName);
+                      await _authService.updateDisplayName(userName);
+                      final recheckUser = await _userService.getCurrentUser(forceRefresh: true);
+                      if (recheckUser == null || recheckUser.name != userName) {
+                        throw Exception('Falha ao sincronizar informações do usuário após retry');
+                      }
+                    }
                   } else {
-                    // Se o usuário já existe mas o nome está errado, atualizar
+                    // Se o usuário já existe mas o nome está errado, atualizar com sincronização
                     final prefs = await SharedPreferences.getInstance();
                     final pendingName = prefs.getString('pending_user_name');
                     final pendingEmail = prefs.getString('pending_user_email');
@@ -318,15 +333,36 @@ class _LoginScreenState extends State<LoginScreen> {
                         pendingEmail != null && 
                         pendingEmail == currentEmail &&
                         retryUser.name != pendingName) {
-                      // Nome está diferente, atualizar
+                      // Nome está diferente, atualizar em ambos os sistemas
                       await _userService.createOrUpdateUser(pendingName);
                       await _authService.updateDisplayName(pendingName);
-                      await _userService.getCurrentUser(forceRefresh: true);
+                      final recheckUser = await _userService.getCurrentUser(forceRefresh: true);
+                      if (recheckUser == null || recheckUser.name != pendingName) {
+                        throw Exception('Falha ao sincronizar nome do usuário após retry');
+                      }
                     }
                   }
                 } catch (retryError) {
-                  // Se ainda falhar, continuar mesmo assim - o usuário pode ser criado depois
-                  // Não bloquear o login por causa disso
+                  // Se ainda falhar após retry, NÃO permitir acesso
+                  // Fazer logout e mostrar erro
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Erro ao criar usuário: ${retryError.toString()}. Por favor, tente novamente.'),
+                        backgroundColor: AppTheme.expenseRed,
+                        duration: const Duration(seconds: 5),
+                      ),
+                    );
+                    setState(() => _isLoading = false);
+                    
+                    // Fazer logout para garantir estado limpo
+                    try {
+                      await _authService.signOut();
+                    } catch (_) {
+                      // Ignorar erro no logout
+                    }
+                  }
+                  return;
                 }
               }
               
@@ -477,27 +513,133 @@ class _LoginScreenState extends State<LoginScreen> {
               // Ignorar erro - não crítico
             }
             
-            // Criar usuário no MongoDB com o nome (se houver sessão temporária)
-            // Nota: Se não houver sessão, o usuário será criado quando fizer login pela primeira vez
+            // GARANTIR criação simultânea no MongoDB e Supabase com as mesmas informações
+            // O usuário NÃO pode entrar na app sem que ambos estejam sincronizados
             if (session != null) {
               try {
-                // Atualizar Display Name no Supabase primeiro
-                try {
-                  await _authService.updateDisplayName(userName);
-                } catch (e) {
-                  // Log mas não bloquear - Display Name é menos crítico
-
-                }
+                // 1. Atualizar Display Name no Supabase PRIMEIRO
+                await _authService.updateDisplayName(userName);
                 
-                // Criar usuário no MongoDB enquanto temos sessão ativa
+                // 2. Criar usuário no MongoDB com o mesmo nome
                 // Se falhar, mostrar erro e não permitir continuar
                 await _userService.createOrUpdateUser(userName);
+                
+                // 3. Verificar que o usuário foi criado com sucesso no MongoDB
+                final createdUser = await _userService.getCurrentUser(forceRefresh: true);
+                if (createdUser == null) {
+                  throw Exception('Falha ao verificar criação do usuário no servidor');
+                }
+                
+                // 4. Verificar que o nome está correto em ambos os sistemas
+                if (createdUser.name != userName) {
+                  // Tentar corrigir
+                  await _userService.createOrUpdateUser(userName);
+                  await _authService.updateDisplayName(userName);
+                  // Verificar novamente
+                  final recheckUser = await _userService.getCurrentUser(forceRefresh: true);
+                  if (recheckUser == null || recheckUser.name != userName) {
+                    throw Exception('Falha ao sincronizar informações do usuário');
+                  }
+                }
+                
+                // 5. Se houver foto selecionada, fazer upload para o bucket e guardar o link
+                if (_selectedProfilePicture != null) {
+                  String? uploadedProfilePictureUrl;
+                  bool uploadSuccess = false;
+                  
+                  try {
+                    // Verificar que o token está disponível antes de fazer upload
+                    final accessToken = _authService.currentAccessToken;
+                    if (accessToken == null) {
+                      print('AVISO: Token de acesso não disponível para fazer upload da foto durante registro');
+                      // Guardar como pendente em vez de lançar exceção
+                      final prefs = await SharedPreferences.getInstance();
+                      final base64Image = base64Encode(_selectedProfilePicture!);
+                      await prefs.setString('pending_profile_picture', base64Image);
+                      print('Foto guardada como pendente (token não disponível)');
+                    } else {
+                      print('Iniciando upload da foto de perfil...');
+                      
+                      // Fazer upload da foto para o Supabase Storage
+                      uploadedProfilePictureUrl = await _storageService.uploadProfilePicture(_selectedProfilePicture!);
+                      print('Upload concluído. URL: $uploadedProfilePictureUrl');
+                      
+                      // Salvar o link da foto no MongoDB
+                      print('Salvando URL da foto no MongoDB...');
+                      await _userService.updateProfilePicture(uploadedProfilePictureUrl);
+                      print('URL salva no MongoDB');
+                      
+                      // Aguardar um pouco para garantir que o MongoDB processou
+                      await Future.delayed(const Duration(milliseconds: 300));
+                      
+                      // Verificar que o link foi salvo corretamente
+                      final userWithPhoto = await _userService.getCurrentUser(forceRefresh: true);
+                      if (userWithPhoto == null) {
+                        print('ERRO: Não foi possível obter usuário após salvar foto');
+                        // Tentar novamente
+                        await _userService.updateProfilePicture(uploadedProfilePictureUrl);
+                        await Future.delayed(const Duration(milliseconds: 300));
+                        final retryUser = await _userService.getCurrentUser(forceRefresh: true);
+                        if (retryUser != null && retryUser.profilePictureUrl == uploadedProfilePictureUrl) {
+                          uploadSuccess = true;
+                          print('Foto salva com sucesso após retry');
+                        } else {
+                          print('ERRO: Foto não foi salva mesmo após retry');
+                        }
+                      } else if (userWithPhoto.profilePictureUrl == uploadedProfilePictureUrl) {
+                        uploadSuccess = true;
+                        print('Foto de perfil salva com sucesso: $uploadedProfilePictureUrl');
+                      } else {
+                        print('AVISO: URL salva diferente da esperada. Tentando corrigir...');
+                        // Tentar novamente se não foi salvo
+                        await _userService.updateProfilePicture(uploadedProfilePictureUrl);
+                        await Future.delayed(const Duration(milliseconds: 300));
+                        final recheckUser = await _userService.getCurrentUser(forceRefresh: true);
+                        if (recheckUser != null && recheckUser.profilePictureUrl == uploadedProfilePictureUrl) {
+                          uploadSuccess = true;
+                          print('Foto salva com sucesso após correção');
+                        } else {
+                          print('ERRO: Foto não foi salva corretamente após correção');
+                        }
+                      }
+                      
+                      if (uploadSuccess) {
+                        // Limpar foto pendente do SharedPreferences já que foi enviada
+                        try {
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.remove('pending_profile_picture');
+                          await prefs.remove('pending_profile_picture_url');
+                        } catch (prefsError) {
+                          print('Aviso: Erro ao limpar foto pendente (não crítico): $prefsError');
+                        }
+                      }
+                    }
+                  } catch (e, stackTrace) {
+                    // Log detalhado do erro para debug
+                    print('ERRO ao fazer upload da foto de perfil durante registro: $e');
+                    print('Stack trace: $stackTrace');
+                    
+                    // Se falhar ao fazer upload da foto, não bloquear o registro
+                    // A foto pode ser adicionada depois no perfil
+                    // Mas guardar como pendente para tentar novamente no login
+                    try {
+                      final prefs = await SharedPreferences.getInstance();
+                      if (_selectedProfilePicture != null) {
+                        final base64Image = base64Encode(_selectedProfilePicture!);
+                        await prefs.setString('pending_profile_picture', base64Image);
+                        print('Foto guardada como pendente para upload posterior');
+                      }
+                    } catch (prefsError) {
+                      print('ERRO ao guardar foto pendente: $prefsError');
+                    }
+                  }
+                }
               } catch (e) {
-                // Se falhar ao criar no MongoDB, mostrar erro e não permitir continuar
+                // Se falhar ao criar/sincronizar, mostrar erro e não permitir continuar
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Erro ao criar conta no servidor: ${e.toString()}'),
+                      content: Text('Erro ao criar conta: ${e.toString()}. Por favor, tente novamente.'),
                       backgroundColor: AppTheme.expenseRed,
                       duration: const Duration(seconds: 5),
                     ),
@@ -516,13 +658,9 @@ class _LoginScreenState extends State<LoginScreen> {
               // Fazer logout para garantir estado limpo (usuário precisa verificar email)
               await _authService.signOut();
             } else {
-              // Se não houver sessão, ainda tentar atualizar Display Name se possível
-              // (pode não funcionar sem sessão, mas tentamos)
-              try {
-                await _authService.updateDisplayName(userName);
-              } catch (e) {
-                // Ignorar - sem sessão não podemos atualizar
-              }
+              // Se não houver sessão, não podemos criar no MongoDB agora
+              // O usuário será criado quando fizer login pela primeira vez após verificar email
+              // Mas guardamos as informações para garantir sincronização depois
             }
             
             // Sempre navegar para tela de verificação quando criar conta

@@ -233,16 +233,20 @@ const validateUserUpdate = [
       }
       // Se for uma string, validar formato e tamanho
       if (typeof value !== 'string') {
+        console.error('[VALIDATION] profilePictureUrl não é uma string:', typeof value, value);
         throw new Error('profilePictureUrl deve ser uma string');
       }
       if (value.length > 500) {
+        console.error('[VALIDATION] profilePictureUrl muito longo:', value.length);
         throw new Error('URL da foto de perfil deve ter no máximo 500 caracteres');
       }
       // Validar formato de URL básico
       try {
         new URL(value);
+        console.log('[VALIDATION] profilePictureUrl válido:', value);
         return true;
-      } catch {
+      } catch (urlError) {
+        console.error('[VALIDATION] profilePictureUrl inválido:', value, urlError);
         throw new Error('profilePictureUrl deve ser uma URL válida');
       }
     }),

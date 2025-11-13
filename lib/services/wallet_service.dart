@@ -6,6 +6,7 @@ import '../models/wallet_member.dart';
 import '../config/api_config.dart';
 import 'auth_service.dart';
 import 'cache_service.dart';
+import '../utils/api_error_handler.dart';
 
 class WalletService {
   final AuthService _authService = AuthService();
@@ -37,6 +38,9 @@ class WalletService {
         Uri.parse('$baseUrl/wallets'),
         headers: _getHeaders(),
       );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
 
       if (response.statusCode == 200) {
         final List<dynamic> decoded = json.decode(response.body);
@@ -71,6 +75,9 @@ class WalletService {
         headers: _getHeaders(),
       );
 
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
+
       if (response.statusCode == 200) {
         final decoded = json.decode(response.body);
         return Wallet.fromJson(decoded);
@@ -91,6 +98,9 @@ class WalletService {
         headers: _getHeaders(),
         body: json.encode({'name': name ?? 'Minha Carteira Calendário'}),
       );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
 
       if (response.statusCode == 201) {
         final decoded = json.decode(response.body);
@@ -113,6 +123,9 @@ class WalletService {
         body: json.encode({'name': name}),
       );
 
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
+
       if (response.statusCode == 200) {
         final decoded = json.decode(response.body);
         return Wallet.fromJson(decoded);
@@ -132,6 +145,9 @@ class WalletService {
         Uri.parse('$baseUrl/wallets/$walletId'),
         headers: _getHeaders(),
       );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
 
       if (response.statusCode != 200) {
         final errorBody = json.decode(response.body);
@@ -158,6 +174,9 @@ class WalletService {
         Uri.parse('$baseUrl/wallets/$walletId/members'),
         headers: _getHeaders(),
       );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
 
       if (response.statusCode == 200) {
         final List<dynamic> decoded = json.decode(response.body);
@@ -192,6 +211,9 @@ class WalletService {
         headers: _getHeaders(),
       );
 
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
+
       if (response.statusCode != 200) {
         final errorBody = json.decode(response.body);
         throw Exception(errorBody['message'] ?? 'Failed to remove member');
@@ -212,6 +234,9 @@ class WalletService {
         headers: _getHeaders(),
         body: json.encode({'permission': permission}),
       );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
 
       if (response.statusCode != 200) {
         final errorBody = json.decode(response.body);
@@ -243,6 +268,9 @@ class WalletService {
           'permission': permission,
         }),
       );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
 
       if (response.statusCode == 201) {
         final decoded = json.decode(response.body);
@@ -278,6 +306,9 @@ class WalletService {
         headers: _getHeaders(),
       );
 
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
+
       if (response.statusCode == 200) {
         final List<dynamic> decoded = json.decode(response.body);
         final invites = decoded.map((json) => Invite.fromJson(json)).toList();
@@ -311,6 +342,9 @@ class WalletService {
         headers: _getHeaders(),
       );
 
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
+
       if (response.statusCode == 200) {
         final List<dynamic> decoded = json.decode(response.body);
         return decoded.map((json) => Invite.fromJson(json)).toList();
@@ -329,6 +363,9 @@ class WalletService {
         Uri.parse('$baseUrl/invites/token/$token'),
         headers: _getHeaders(),
       );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
 
       if (response.statusCode == 200) {
         final decoded = json.decode(response.body);
@@ -349,6 +386,9 @@ class WalletService {
         Uri.parse('$baseUrl/invites/$token/accept'),
         headers: _getHeaders(),
       );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
 
       if (response.statusCode == 200) {
         final result = json.decode(response.body);
@@ -377,6 +417,9 @@ class WalletService {
         Uri.parse('$baseUrl/invites/$token'),
         headers: _getHeaders(),
       );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
 
       if (response.statusCode != 200) {
         final errorBody = json.decode(response.body);
