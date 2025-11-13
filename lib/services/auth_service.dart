@@ -147,4 +147,21 @@ class AuthService {
       rethrow;
     }
   }
+
+  // Deletar conta do usuário no Supabase Auth
+  // Nota: O Supabase não permite deletar o próprio usuário diretamente via SDK
+  // Isso deve ser feito através do Admin API ou pelo usuário através do dashboard
+  // Por enquanto, apenas fazemos logout e deixamos o backend lidar com a limpeza
+  Future<void> deleteAccount() async {
+    try {
+      // Fazer logout completo
+      await signOut();
+      
+      // Nota: Para deletar completamente do Supabase Auth, seria necessário usar Admin API
+      // ou o usuário pode deletar manualmente através do dashboard do Supabase
+      // O backend já deleta todos os dados do MongoDB
+    } catch (e) {
+      rethrow;
+    }
+  }
 }

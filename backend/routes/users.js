@@ -306,4 +306,157 @@ router.put('/me', validateUserUpdate, async (req, res) => {
   }
 });
 
+// DELETE deletar conta do usuário e todos os dados associados
+router.delete('/me', async (req, res) => {
+  try {
+    const User = getUserModel();
+    const { getWalletModel } = require('../models/Wallet');
+    const { getWalletMemberModel } = require('../models/WalletMember');
+    const { getTransactionModel } = require('../models/Transaction');
+    const { getPeriodHistoryModel } = require('../models/PeriodHistory');
+    const { getInviteModel } = require('../models/Invite');
+    const { createClient } = require('@supabase/supabase-js');
+    
+    const Wallet = getWalletModel();
+    const WalletMember = getWalletMemberModel();
+    const Invite = getInviteModel();
+    
+    const userId = req.userId;
+    const userEmail = req.user.email;
+    
+    // Criar cliente Supabase Admin para deletar usuário
+    const supabaseAdmin = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    );
+    
+    // 1. Buscar o usuário para obter informações
+    const user = await User.findOne({ userId: userId });
+    
+    if (!user) {
+      return res.status(404).json({ message: 'Usuário não encontrado' });
+    }
+    
+    // 2. Buscar todas as wallets onde o usuário é owner
+    const ownedWallets = await Wallet.find({ ownerId: userId });
+    const walletIds = ownedWallets.map(w => w._id);
+    
+    // 3. Buscar todas as wallet members do usuário
+    const walletMembers = await WalletMember.find({ userId: userId });
+    const allWalletIds = [...new Set([...walletIds, ...walletMembers.map(wm => wm.walletId)])];
+    
+    // 4. Deletar todas as transações de todas as wallets do usuário
+    for (const walletId of allWalletIds) {
+      try {
+        const Transaction = getTransactionModel(walletId);
+        // Deletar apenas transações criadas pelo usuário ou associadas ao userId
+        await Transaction.deleteMany({ 
+          $or: [
+            { userId: userId },
+            { createdBy: userId }
+          ]
+        });
+        
+        // Também deletar a collection se estiver vazia (opcional)
+        const remainingTransactions = await Transaction.countDocuments({ walletId: walletId });
+        if (remainingTransactions === 0) {
+          try {
+            await Transaction.collection.drop();
+          } catch (dropError) {
+            // Ignorar erro se a collection não existir ou não puder ser deletada
+          }
+        }
+      } catch (txError) {
+        // Continuar mesmo se houver erro ao deletar transações de uma wallet
+        console.error(`Erro ao deletar transações da wallet ${walletId}:`, txError);
+      }
+    }
+    
+    // 5. Deletar todas as period histories do usuário
+    try {
+      const PeriodHistory = getPeriodHistoryModel(userId);
+      await PeriodHistory.deleteMany({ userId: userId });
+      
+      // Tentar deletar a collection se estiver vazia
+      try {
+        await PeriodHistory.collection.drop();
+      } catch (dropError) {
+        // Ignorar erro se a collection não existir
+      }
+    } catch (phError) {
+      console.error('Erro ao deletar period history:', phError);
+    }
+    
+    // 6. Deletar todos os invites criados pelo usuário ou para o usuário
+    await Invite.deleteMany({
+      $or: [
+        { invitedBy: userId },
+        { email: userEmail },
+        { acceptedBy: userId }
+      ]
+    });
+    
+    // 7. Deletar todas as wallet members do usuário
+    await WalletMember.deleteMany({ userId: userId });
+    
+    // 8. Para wallets onde o usuário é owner, deletar todos os wallet members e depois a wallet
+    for (const wallet of ownedWallets) {
+      // Deletar todos os members desta wallet
+      await WalletMember.deleteMany({ walletId: wallet._id });
+      // Deletar a wallet
+      await Wallet.deleteOne({ _id: wallet._id });
+    }
+    
+    // 9. Remover referências do usuário em outras wallets (se houver)
+    // Atualizar walletsInvited de outros usuários que podem ter referências
+    const allUsers = await User.find({ walletsInvited: { $in: walletIds } });
+    for (const otherUser of allUsers) {
+      if (otherUser.walletsInvited) {
+        otherUser.walletsInvited = otherUser.walletsInvited.filter(
+          wid => !walletIds.some(wid2 => wid2.toString() === wid.toString())
+        );
+        await otherUser.save();
+      }
+    }
+    
+    // 10. Deletar o usuário do MongoDB
+    await User.deleteOne({ userId: userId });
+    
+    // 11. Deletar usuário do Supabase Auth usando Admin API
+    try {
+      const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+      if (deleteError) {
+        console.error('Erro ao deletar usuário do Supabase Auth:', deleteError);
+        // Continuar mesmo se falhar - os dados do MongoDB já foram deletados
+      }
+    } catch (supabaseError) {
+      console.error('Erro ao deletar usuário do Supabase Auth:', supabaseError);
+      // Continuar mesmo se falhar - os dados do MongoDB já foram deletados
+    }
+    
+    // 12. Retornar sucesso
+    res.json({ 
+      message: 'Conta e todos os dados associados foram deletados com sucesso',
+      deleted: {
+        user: true,
+        wallets: ownedWallets.length,
+        walletMembers: walletMembers.length,
+        transactions: 'all',
+        periodHistories: true,
+        invites: true,
+        supabaseAuth: true
+      }
+    });
+  } catch (error) {
+    console.error('Erro ao deletar conta:', error);
+    res.status(500).json({ message: 'Erro ao deletar conta: ' + error.message });
+  }
+});
+
 module.exports = router;

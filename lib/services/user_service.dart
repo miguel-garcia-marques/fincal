@@ -162,4 +162,28 @@ class UserService {
       rethrow;
     }
   }
+
+  // Deletar conta do usuário e todos os dados associados
+  Future<void> deleteAccount() async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/users/me'),
+        headers: _getHeaders(),
+      );
+
+      if (response.statusCode == 200) {
+        // Limpar cache após deletar conta
+        await _cacheService.invalidateUserCache();
+        await _cacheService.clearAllWalletMembersCache();
+        await _cacheService.invalidateWalletsCache();
+        await _cacheService.clearAllInvitesCache();
+        await _cacheService.clearCache();
+      } else {
+        final errorBody = json.decode(response.body);
+        throw Exception(errorBody['message'] ?? 'Failed to delete account');
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
 }

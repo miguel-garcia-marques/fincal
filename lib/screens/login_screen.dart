@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../services/wallet_service.dart';
+import '../services/storage_service.dart';
 import '../utils/responsive_fonts.dart';
 import '../theme/app_theme.dart';
 import '../main.dart';
@@ -27,11 +30,14 @@ class _LoginScreenState extends State<LoginScreen> {
   final _nameController = TextEditingController();
   final _authService = AuthService();
   final _userService = UserService();
+  final _storageService = StorageService();
   
   bool _isLoading = false;
   bool _isLoginMode = true; // true = login, false = signup
   bool _obscurePassword = true;
   String? _inviteTokenFromUrl;
+  Uint8List? _selectedProfilePicture;
+  bool _isUploadingPicture = false;
 
   @override
   void initState() {
@@ -68,6 +74,41 @@ class _LoginScreenState extends State<LoginScreen> {
   // Getter para obter o inviteToken (prioriza o da URL, depois o do widget)
   String? get _effectiveInviteToken {
     return _inviteTokenFromUrl ?? widget.inviteToken;
+  }
+
+  // Selecionar foto de perfil
+  Future<void> _selectProfilePicture() async {
+    try {
+      setState(() {
+        _isUploadingPicture = true;
+      });
+
+      final imageBytes = await _storageService.pickImage();
+      
+      if (imageBytes != null) {
+        setState(() {
+          _selectedProfilePicture = imageBytes;
+          _isUploadingPicture = false;
+        });
+      } else {
+        setState(() {
+          _isUploadingPicture = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isUploadingPicture = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao selecionar foto: $e'),
+            backgroundColor: AppTheme.expenseRed,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -160,6 +201,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   final prefs = await SharedPreferences.getInstance();
                   final pendingName = prefs.getString('pending_user_name');
                   final pendingEmail = prefs.getString('pending_user_email');
+                  final pendingProfilePictureBase64 = prefs.getString('pending_profile_picture');
+                  final pendingProfilePictureUrl = prefs.getString('pending_profile_picture_url');
                   final currentEmail = response.user!.email ?? '';
                   
                   String userName;
@@ -176,7 +219,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     userName = currentEmail.split('@')[0];
                   }
                   
-                  // Criar usuário no MongoDB
+                  // Criar ou atualizar usuário no MongoDB com o nome correto
+                  // Se o usuário já foi criado automaticamente pelo backend, isso vai atualizar o nome
                   await _userService.createOrUpdateUser(userName);
                   
                   // Atualizar Display Name no Supabase também
@@ -184,6 +228,50 @@ class _LoginScreenState extends State<LoginScreen> {
                     await _authService.updateDisplayName(userName);
                   } catch (e) {
                     // Display Name é menos crítico
+                  }
+                  
+                  // Forçar refresh do cache e verificar se o nome está correto
+                  final createdUser = await _userService.getCurrentUser(forceRefresh: true);
+                  if (createdUser != null && createdUser.name != userName) {
+                    // Se o nome ainda estiver errado, tentar atualizar novamente
+                    await _userService.createOrUpdateUser(userName);
+                    await _authService.updateDisplayName(userName);
+                    await _userService.getCurrentUser(forceRefresh: true);
+                  }
+                  
+                  // Se houver foto pendente, fazer upload agora
+                  if (pendingProfilePictureBase64 != null) {
+                    try {
+                      // Decodificar foto base64 e fazer upload
+                      final imageBytes = base64Decode(pendingProfilePictureBase64);
+                      final profilePictureUrl = await _storageService.uploadProfilePicture(imageBytes);
+                      // Atualizar perfil com a URL da foto
+                      await _userService.updateProfilePicture(profilePictureUrl);
+                      // Limpar foto pendente após sucesso
+                      await prefs.remove('pending_profile_picture');
+                      await prefs.remove('pending_profile_picture_url');
+                    } catch (e) {
+                      // Se falhar, guardar erro mas continuar - foto pode ser adicionada depois
+                      // Manter a foto pendente para tentar novamente depois
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Aviso: Não foi possível fazer upload da foto. Você pode adicioná-la depois no perfil.'),
+                            backgroundColor: Colors.orange,
+                            duration: const Duration(seconds: 4),
+                          ),
+                        );
+                      }
+                    }
+                  } else if (pendingProfilePictureUrl != null) {
+                    // Se já houver URL da foto, apenas atualizar o perfil
+                    try {
+                      await _userService.updateProfilePicture(pendingProfilePictureUrl);
+                      await prefs.remove('pending_profile_picture');
+                      await prefs.remove('pending_profile_picture_url');
+                    } catch (e) {
+                      // Se falhar, continuar mesmo assim
+                    }
                   }
                 }
               } catch (e) {
@@ -193,9 +281,21 @@ class _LoginScreenState extends State<LoginScreen> {
                   await Future.delayed(const Duration(milliseconds: 500));
                   final retryUser = await _userService.getCurrentUser();
                   if (retryUser == null) {
-                    // Se ainda não existir, criar com nome baseado no email
+                    // Se ainda não existir, criar com nome correto
+                    final prefs = await SharedPreferences.getInstance();
+                    final pendingName = prefs.getString('pending_user_name');
+                    final pendingEmail = prefs.getString('pending_user_email');
                     final currentEmail = response.user!.email ?? '';
-                    final userName = currentEmail.split('@')[0];
+                    
+                    String userName;
+                    if (pendingName != null && 
+                        pendingEmail != null && 
+                        pendingEmail == currentEmail) {
+                      userName = pendingName;
+                    } else {
+                      userName = currentEmail.split('@')[0];
+                    }
+                    
                     await _userService.createOrUpdateUser(userName);
                     
                     // Atualizar Display Name no Supabase também
@@ -203,6 +303,25 @@ class _LoginScreenState extends State<LoginScreen> {
                       await _authService.updateDisplayName(userName);
                     } catch (e) {
                       // Display Name é menos crítico
+                    }
+                    
+                    // Forçar refresh do cache
+                    await _userService.getCurrentUser(forceRefresh: true);
+                  } else {
+                    // Se o usuário já existe mas o nome está errado, atualizar
+                    final prefs = await SharedPreferences.getInstance();
+                    final pendingName = prefs.getString('pending_user_name');
+                    final pendingEmail = prefs.getString('pending_user_email');
+                    final currentEmail = response.user!.email ?? '';
+                    
+                    if (pendingName != null && 
+                        pendingEmail != null && 
+                        pendingEmail == currentEmail &&
+                        retryUser.name != pendingName) {
+                      // Nome está diferente, atualizar
+                      await _userService.createOrUpdateUser(pendingName);
+                      await _authService.updateDisplayName(pendingName);
+                      await _userService.getCurrentUser(forceRefresh: true);
                     }
                   }
                 } catch (retryError) {
@@ -342,11 +461,18 @@ class _LoginScreenState extends State<LoginScreen> {
           final session = response.session;
           
           if (user != null) {
-            // Guardar o nome do usuário em SharedPreferences para usar após verificação de email
+            // Guardar o nome do usuário e foto em SharedPreferences para usar após verificação de email
+            // NÃO fazer upload agora porque vamos fazer logout logo depois
+            // A foto será enviada quando o usuário fizer login pela primeira vez após verificar o email
             try {
               final prefs = await SharedPreferences.getInstance();
               await prefs.setString('pending_user_name', userName);
               await prefs.setString('pending_user_email', _emailController.text.trim());
+              if (_selectedProfilePicture != null) {
+                // Guardar foto como base64 para fazer upload depois da verificação de email
+                final base64Image = base64Encode(_selectedProfilePicture!);
+                await prefs.setString('pending_profile_picture', base64Image);
+              }
             } catch (e) {
               // Ignorar erro - não crítico
             }
@@ -501,6 +627,91 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                     ),
                     SizedBox(height: isDesktop ? 32 : 48),
+                    
+                    // Foto de perfil (apenas no signup)
+                    if (!_isLoginMode) ...[
+                      Center(
+                        child: GestureDetector(
+                          onTap: _isUploadingPicture ? null : _selectProfilePicture,
+                          child: Stack(
+                            children: [
+                              Container(
+                                width: 100,
+                                height: 100,
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryColor.withOpacity(0.1),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: AppTheme.primaryColor.withOpacity(0.3),
+                                    width: 2,
+                                  ),
+                                ),
+                                child: _isUploadingPicture
+                                    ? const Center(
+                                        child: CircularProgressIndicator(),
+                                      )
+                                    : _selectedProfilePicture != null
+                                        ? ClipOval(
+                                            child: Image.memory(
+                                              _selectedProfilePicture!,
+                                              width: 100,
+                                              height: 100,
+                                              fit: BoxFit.cover,
+                                            ),
+                                          )
+                                        : Icon(
+                                            Icons.person,
+                                            size: 60,
+                                            color: AppTheme.primaryColor,
+                                          ),
+                              ),
+                              if (_selectedProfilePicture != null && !_isUploadingPicture)
+                                Positioned(
+                                  right: 0,
+                                  top: 0,
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedProfilePicture = null;
+                                      });
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.expenseRed,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: AppTheme.white,
+                                          width: 2,
+                                        ),
+                                      ),
+                                      child: const Icon(
+                                        Icons.close,
+                                        size: 16,
+                                        color: AppTheme.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Center(
+                        child: TextButton.icon(
+                          onPressed: _isUploadingPicture ? null : _selectProfilePicture,
+                          icon: const Icon(Icons.camera_alt, size: 18),
+                          label: Text(
+                            _selectedProfilePicture != null
+                                ? 'Alterar foto'
+                                : 'Adicionar foto (opcional)',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     
                     // Nome field (apenas no signup)
                     if (!_isLoginMode) ...[

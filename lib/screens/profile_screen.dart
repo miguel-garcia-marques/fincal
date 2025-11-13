@@ -1,9 +1,11 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
 import '../services/storage_service.dart';
+import '../main.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -22,6 +24,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isLoading = false;
   bool _isSaving = false;
   bool _isUploadingPicture = false;
+  bool _isDeletingAccount = false;
   String? _email;
   String? _profilePictureUrl;
   Uint8List? _selectedImageBytes;
@@ -198,6 +201,130 @@ class _ProfileScreenState extends State<ProfileScreen> {
         setState(() {
           _isSaving = false;
           _errorMessage = 'Erro ao salvar: $e';
+        });
+      }
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    // Mostrar diálogo de confirmação
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Deletar Conta'),
+        content: const Text(
+          'Tem certeza que deseja deletar sua conta?\n\n'
+          'Esta ação é IRREVERSÍVEL e irá deletar:\n'
+          '• Seu perfil e dados pessoais\n'
+          '• Todas as suas carteiras\n'
+          '• Todas as suas transações\n'
+          '• Todo o histórico de períodos\n'
+          '• Sua foto de perfil\n\n'
+          'Esta ação não pode ser desfeita!',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.expenseRed,
+            ),
+            child: const Text('Deletar Conta'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) {
+      return;
+    }
+
+    // Segunda confirmação
+    final finalConfirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmação Final'),
+        content: const Text(
+          'Esta é sua última chance de cancelar.\n\n'
+          'Tem CERTEZA ABSOLUTA que deseja deletar sua conta permanentemente?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.expenseRed,
+            ),
+            child: const Text('SIM, DELETAR'),
+          ),
+        ],
+      ),
+    );
+
+    if (finalConfirm != true) {
+      return;
+    }
+
+    setState(() {
+      _isDeletingAccount = true;
+      _errorMessage = null;
+    });
+
+    try {
+      // 1. Deletar foto de perfil do Supabase Storage
+      if (_profilePictureUrl != null && _profilePictureUrl!.isNotEmpty) {
+        try {
+          await _storageService.deleteProfilePicture();
+        } catch (e) {
+          // Continuar mesmo se falhar ao deletar foto
+          print('Erro ao deletar foto de perfil: $e');
+        }
+      }
+
+      // 2. Deletar conta no backend (deleta MongoDB e todos os dados)
+      await _userService.deleteAccount();
+
+      // 3. Fazer logout do Supabase (limpa sessão)
+      // Nota: Para deletar completamente do Supabase Auth, o usuário precisa fazer isso manualmente
+      // através do dashboard do Supabase ou usar Admin API
+      await _authService.signOut();
+      
+      // 4. Limpar todos os dados locais
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.clear();
+      } catch (e) {
+        // Ignorar erro ao limpar dados locais
+      }
+
+      // 5. Navegar para AuthWrapper (que vai redirecionar para login)
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => const AuthWrapper(),
+          ),
+          (route) => false,
+        );
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Conta deletada com sucesso'),
+            backgroundColor: AppTheme.incomeGreen,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isDeletingAccount = false;
+          _errorMessage = 'Erro ao deletar conta: $e';
         });
       }
     }
@@ -511,6 +638,66 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 fontWeight: FontWeight.w600,
                                 fontSize: 16,
                               ),
+                            ),
+                    ),
+                    const SizedBox(height: 32),
+                    
+                    // Divisor
+                    const Divider(),
+                    const SizedBox(height: 24),
+                    
+                    // Seção de deletar conta
+                    Text(
+                      'Zona Perigosa',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                            color: AppTheme.expenseRed,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Ao deletar sua conta, todos os seus dados serão permanentemente removidos e não poderão ser recuperados.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.grey[600],
+                            fontSize: 12,
+                          ),
+                    ),
+                    const SizedBox(height: 16),
+                    OutlinedButton(
+                      onPressed: _isDeletingAccount ? null : _deleteAccount,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        foregroundColor: AppTheme.expenseRed,
+                        side: BorderSide(color: AppTheme.expenseRed),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: _isDeletingAccount
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  AppTheme.expenseRed,
+                                ),
+                              ),
+                            )
+                          : const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.delete_forever, size: 20),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Deletar Conta',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ],
                             ),
                     ),
                   ],

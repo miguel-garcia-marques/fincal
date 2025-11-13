@@ -61,6 +61,25 @@ Adicione as seguintes variáveis:
 2. Vá em **Settings** → **API**
 3. Copie a **anon/public key**
 
+#### SUPABASE_SERVICE_ROLE_KEY (OBRIGATÓRIA para deletar contas)
+
+- **Key**: `SUPABASE_SERVICE_ROLE_KEY`
+- **Value**: `sua-service-role-key-aqui` (substitua pela service role key do seu projeto)
+
+**Como obter:**
+1. Acesse [Supabase Dashboard](https://app.supabase.com)
+2. Vá em **Settings** → **API**
+3. Role a página até encontrar a seção **Project API keys**
+4. Copie a **service_role key** (secret)
+   - ⚠️ **ATENÇÃO**: Esta chave tem permissões administrativas completas!
+   - ⚠️ **NUNCA** exponha esta chave no frontend ou em código público
+   - ⚠️ **SOMENTE** use no backend e mantenha segura
+
+**Por que é necessária?**
+- A Service Role Key permite deletar usuários do Supabase Auth via Admin API
+- Sem ela, o backend não consegue deletar o usuário do Supabase quando a conta é deletada
+- A anon key não tem permissões suficientes para deletar usuários
+
 #### NODE_ENV (Opcional, mas recomendado)
 
 - **Key**: `NODE_ENV`
@@ -125,6 +144,7 @@ Após adicionar as variáveis:
 - [ ] Nome do banco (`fincal`) está na connection string
 - [ ] Network Access no MongoDB Atlas permite 0.0.0.0/0
 - [ ] Variáveis `SUPABASE_URL` e `SUPABASE_ANON_KEY` configuradas
+- [ ] Variável `SUPABASE_SERVICE_ROLE_KEY` configurada (necessária para deletar contas)
 - [ ] Serviço reiniciado após adicionar variáveis
 - [ ] Logs mostram conexão bem-sucedida
 
