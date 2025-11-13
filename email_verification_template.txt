@@ -1,0 +1,22 @@
+═══════════════════════════════════════════════════════════════
+                    FinCal - Gestão Financeira Inteligente
+═══════════════════════════════════════════════════════════════
+
+VERIFIQUE SEU EMAIL
+
+Olá! Obrigado por se registrar no FinCal.
+
+Para ativar sua conta e começar a gerenciar suas finanças, por favor confirme seu endereço de email acessando o link abaixo:
+
+{{ .ConfirmationURL }}
+
+⚠️ IMPORTANTE: Sua conta só ficará ativa após a verificação do email. O link de verificação expira em 24 horas.
+
+───────────────────────────────────────────────────────────────
+
+Se você não criou uma conta no FinCal, pode ignorar este email com segurança.
+
+Este é um email automático, por favor não responda.
+
+© 2025 FinCal. Todos os direitos reservados.
+

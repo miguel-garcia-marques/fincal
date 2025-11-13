@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Verifique seu Email - FinCal</title>
+    <!--[if mso]>
+    <style type="text/css">
+        body, table, td {font-family: Arial, sans-serif !important;}
+    </style>
+    <![endif]-->
+</head>
+<body style="margin: 0; padding: 0; background-color: #F5F5F5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #F5F5F5;">
+        <tr>
+            <td align="center" style="padding: 40px 20px;">
+                <!-- Container Principal -->
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="max-width: 600px; background-color: #FFFFFF; border-radius: 20px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                    
+                    <!-- Header -->
+                    <tr>
+                        <td align="center" style="padding: 40px 40px 20px 40px; background-color: #1A1A1A; border-radius: 20px 20px 0 0;">
+                            <h1 style="margin: 0; color: #FFFFFF; font-size: 28px; font-weight: 600; letter-spacing: -0.5px;">
+                                FinCal
+                            </h1>
+                            <p style="margin: 8px 0 0 0; color: #FFFFFF; font-size: 14px; opacity: 0.9;">
+                                Gestão Financeira Inteligente
+                            </p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Conteúdo Principal -->
+                    <tr>
+                        <td style="padding: 40px 40px 20px 40px;">
+                            <!-- Ícone -->
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                                <tr>
+                                    <td align="center" style="padding-bottom: 24px;">
+                                        <div style="width: 80px; height: 80px; background-color: #F5F5F5; border-radius: 50%; display: inline-block; line-height: 80px; text-align: center;">
+                                            <span style="font-size: 40px;">✉️</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            <!-- Título -->
+                            <h2 style="margin: 0 0 16px 0; color: #1A1A1A; font-size: 24px; font-weight: 600; text-align: center; letter-spacing: -0.3px;">
+                                Verifique seu Email
+                            </h2>
+                            
+                            <!-- Mensagem Principal -->
+                            <p style="margin: 0 0 24px 0; color: #2A2A2A; font-size: 16px; line-height: 1.6; text-align: center;">
+                                Olá! Obrigado por se registrar no <strong>FinCal</strong>.
+                            </p>
+                            
+                            <p style="margin: 0 0 24px 0; color: #2A2A2A; font-size: 16px; line-height: 1.6; text-align: center;">
+                                Para ativar sua conta e começar a gerenciar suas finanças, por favor confirme seu endereço de email clicando no botão abaixo:
+                            </p>
+                            
+                            <!-- Botão de Verificação -->
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 32px 0;">
+                                <tr>
+                                    <td align="center">
+                                        <a href="{{ .ConfirmationURL }}" style="display: inline-block; padding: 16px 32px; background-color: #1A1A1A; color: #FFFFFF; text-decoration: none; border-radius: 12px; font-size: 16px; font-weight: 600; letter-spacing: 0.5px;">
+                                            Verificar Email
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            <!-- Link Alternativo -->
+                            <p style="margin: 24px 0 0 0; color: #6A6A6A; font-size: 14px; line-height: 1.6; text-align: center;">
+                                Ou copie e cole este link no seu navegador:
+                            </p>
+                            <p style="margin: 8px 0 24px 0; word-break: break-all;">
+                                <a href="{{ .ConfirmationURL }}" style="color: #4CAF50; text-decoration: none; font-size: 12px; font-family: monospace;">
+                                    {{ .ConfirmationURL }}
+                                </a>
+                            </p>
+                            
+                            <!-- Aviso Importante -->
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 32px 0;">
+                                <tr>
+                                    <td style="padding: 16px; background-color: #FFF3CD; border-left: 4px solid #FFC107; border-radius: 8px;">
+                                        <p style="margin: 0; color: #856404; font-size: 14px; line-height: 1.6;">
+                                            <strong>⚠️ Importante:</strong> Sua conta só ficará ativa após a verificação do email. O link de verificação expira em 24 horas.
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+                            
+                            <!-- Informações Adicionais -->
+                            <p style="margin: 24px 0 0 0; color: #6A6A6A; font-size: 14px; line-height: 1.6; text-align: center;">
+                                Se você não criou uma conta no FinCal, pode ignorar este email com segurança.
+                            </p>
+                        </td>
+                    </tr>
+                    
+                    <!-- Footer -->
+                    <tr>
+                        <td style="padding: 24px 40px 40px 40px; background-color: #F5F5F5; border-radius: 0 0 20px 20px;">
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                                <tr>
+                                    <td align="center" style="padding-bottom: 16px;">
+                                        <p style="margin: 0; color: #6A6A6A; font-size: 12px; line-height: 1.6;">
+                                            Este é um email automático, por favor não responda.
+                                        </p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td align="center">
+                                        <p style="margin: 0; color: #6A6A6A; font-size: 12px;">
+                                            © 2025 FinCal. Todos os direitos reservados.
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    
+                </table>
+                
+                <!-- Link de Suporte (opcional) -->
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="max-width: 600px; margin-top: 20px;">
+                    <tr>
+                        <td align="center">
+                            <p style="margin: 0; color: #6A6A6A; font-size: 12px;">
+                                Precisa de ajuda? Entre em contato através do suporte da aplicação.
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+                
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+

@@ -161,11 +161,20 @@ class UserService {
   // Atualizar foto de perfil
   Future<User> updateProfilePicture(String profilePictureUrl) async {
     try {
+      print('[UserService] Atualizando foto de perfil: $profilePictureUrl');
+      
+      final token = _authService.currentAccessToken;
+      if (token == null) {
+        throw Exception('Token de acesso não disponível para atualizar foto de perfil');
+      }
+      
       final response = await http.put(
         Uri.parse('$baseUrl/users/me'),
         headers: _getHeaders(),
         body: json.encode({'profilePictureUrl': profilePictureUrl}),
       );
+
+      print('[UserService] Resposta do servidor: ${response.statusCode}');
 
       // Verificar se é erro 401 e redirecionar para login
       await ApiErrorHandler.handleResponse(response);
@@ -174,15 +183,21 @@ class UserService {
         final decoded = json.decode(response.body);
         final user = User.fromJson(decoded);
         
+        print('[UserService] Foto de perfil atualizada com sucesso. URL salva: ${user.profilePictureUrl}');
+        
         // Atualizar cache
         await _cacheService.cacheUser(user);
         
         return user;
       } else {
         final errorBody = json.decode(response.body);
-        throw Exception(errorBody['message'] ?? 'Failed to update profile picture');
+        final errorMessage = errorBody['message'] ?? 'Failed to update profile picture';
+        print('[UserService] ERRO ao atualizar foto de perfil: $errorMessage');
+        throw Exception(errorMessage);
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('[UserService] Exceção ao atualizar foto de perfil: $e');
+      print('[UserService] Stack trace: $stackTrace');
       rethrow;
     }
   }

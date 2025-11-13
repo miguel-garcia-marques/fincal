@@ -9,12 +9,11 @@ import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/invite_accept_screen.dart';
 import 'screens/wallet_selection_screen.dart';
+import 'screens/profile_picture_selection_screen.dart';
+import 'screens/email_verification_screen.dart';
 import 'services/auth_service.dart';
-import 'services/user_service.dart';
-import 'services/wallet_service.dart';
-import 'services/wallet_storage_service.dart';
 import 'services/navigation_service.dart';
-import 'models/wallet.dart';
+import 'services/onboarding_orchestrator.dart';
 import 'theme/app_theme.dart';
 import 'config/supabase_config.dart';
 
@@ -59,6 +58,12 @@ void main() async {
       return true; // Erro tratado
     }
     
+    // Logar outros erros assíncronos para debug
+    print('ERRO ASSÍNCRONO NÃO TRATADO: $error');
+    print('Stack trace: $stack');
+    
+    // Retornar true para evitar que o erro seja propagado e cause crash
+    // Mas logamos para debug
     return true;
   };
 
@@ -165,12 +170,10 @@ class AuthWrapper extends StatefulWidget {
 
 class _AuthWrapperState extends State<AuthWrapper> {
   final _authService = AuthService();
-  final _userService = UserService();
-  final _walletService = WalletService();
-  final _walletStorageService = WalletStorageService();
+  final _onboardingOrchestrator = OnboardingOrchestrator();
+  
   bool _isLoading = true;
-  bool _isAuthenticated = false;
-  bool _needsWalletSelection = false;
+  OnboardingState _onboardingState = OnboardingState.notAuthenticated;
 
   StreamSubscription<AuthState>? _authSubscription;
   StreamSubscription<Uri>? _linkSubscription;
@@ -201,31 +204,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     // Escutar mudanças de autenticação
     _authSubscription = _authService.authStateChanges.listen((AuthState state) {
       if (mounted) {
-        final isAuthenticated = state.session != null;
-        // Verificar se o email foi confirmado se houver usuário
-        if (isAuthenticated && state.session?.user != null) {
-          final emailConfirmed = state.session!.user.emailConfirmedAt != null;
-          
-          if (emailConfirmed) {
-            setState(() {
-              _isAuthenticated = true;
-              _isLoading = false;
-            });
-            
-            // Se autenticado, verificar seleção de wallet
-            _checkWalletSelection();
-          } else {
-            setState(() {
-              _isAuthenticated = false;
-              _isLoading = false;
-            });
-          }
-        } else {
-          setState(() {
-            _isAuthenticated = false;
-            _isLoading = false;
-          });
-        }
+        // Sempre re-verificar o estado do onboarding quando a autenticação muda
+        _checkAuth();
       }
     });
   }
@@ -274,7 +254,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
     if (inviteToken != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          if (!_isAuthenticated) {
+          final isAuthenticated = _onboardingState != OnboardingState.notAuthenticated;
+          if (!isAuthenticated) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
                 builder: (context) => LoginScreen(inviteToken: inviteToken),
@@ -326,7 +307,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             // Se não estiver autenticado, redirecionar para login com token
-            if (!_isAuthenticated) {
+            final isAuthenticated = _onboardingState != OnboardingState.notAuthenticated;
+            if (!isAuthenticated) {
               Navigator.of(context).pushReplacement(
                 MaterialPageRoute(
                   builder: (context) => LoginScreen(inviteToken: inviteToken),
@@ -346,202 +328,30 @@ class _AuthWrapperState extends State<AuthWrapper> {
     }
   }
 
+  /// Verifica o estado do onboarding usando o orquestrador
   Future<void> _checkAuth() async {
     try {
-      final user = _authService.currentUser;
-      final isAuthenticated = _authService.isAuthenticated;
-
-      final shouldBeAuthenticated = isAuthenticated && user != null && user.emailConfirmedAt != null;
+      print('[AuthWrapper] Verificando estado do onboarding...');
+      final state = await _onboardingOrchestrator.getCurrentState();
+      print('[AuthWrapper] Estado atual: $state');
       
       if (mounted) {
         setState(() {
-          // Só considerar autenticado se houver sessão E email confirmado
-          _isAuthenticated = shouldBeAuthenticated;
+          _onboardingState = state;
+          _isLoading = false;
         });
-
-        // Se autenticado, GARANTIR que o usuário existe no MongoDB antes de permitir acesso
-        if (_isAuthenticated) {
-          try {
-            // Verificar se o usuário existe no MongoDB
-            final mongoUser = await _userService.getCurrentUser(forceRefresh: true).timeout(
-              const Duration(seconds: 5),
-              onTimeout: () => null,
-            );
-            
-            if (mongoUser == null) {
-              // Usuário não existe no MongoDB - criar agora com sincronização
-              final currentEmail = user?.email ?? '';
-              String userName = currentEmail.isNotEmpty 
-                  ? currentEmail.split('@')[0] 
-                  : 'Usuário';
-              
-              try {
-                // 1. Atualizar Display Name no Supabase
-                await _authService.updateDisplayName(userName);
-                
-                // 2. Criar usuário no MongoDB
-                await _userService.createOrUpdateUser(userName);
-                
-                // 3. Verificar que foi criado com sucesso
-                final createdUser = await _userService.getCurrentUser(forceRefresh: true).timeout(
-                  const Duration(seconds: 3),
-                  onTimeout: () => null,
-                );
-                
-                if (createdUser == null) {
-                  // Falha ao criar - não permitir acesso
-                  throw Exception('Falha ao criar usuário no servidor');
-                }
-                
-                // 4. Verificar sincronização do nome
-                if (createdUser.name != userName) {
-                  await _userService.createOrUpdateUser(userName);
-                  await _authService.updateDisplayName(userName);
-                }
-              } catch (e) {
-                // Se falhar ao criar usuário, fazer logout e redirecionar para login
-                if (mounted) {
-                  try {
-                    await _authService.signOut();
-                  } catch (_) {
-                    // Ignorar erro no logout
-                  }
-                  setState(() {
-                    _isAuthenticated = false;
-                    _isLoading = false;
-                    _needsWalletSelection = false;
-                  });
-                }
-                return;
-              }
-            }
-            
-            // Usuário existe no MongoDB - verificar seleção de wallet
-            await _checkWalletSelection().timeout(
-              const Duration(seconds: 5),
-              onTimeout: () {
-                if (mounted) {
-                  setState(() {
-                    _isLoading = false;
-                    _needsWalletSelection = false;
-                  });
-                }
-              },
-            );
-          } catch (e) {
-            // Em caso de erro ao verificar/criar usuário, não permitir acesso
-            if (mounted) {
-              setState(() {
-                _isLoading = false;
-                _isAuthenticated = false;
-                _needsWalletSelection = false;
-              });
-            }
-          }
-        } else {
-          setState(() {
-            _isLoading = false;
-          });
-        }
       }
     } catch (e) {
-      // Em caso de erro, garantir que o loading termine
+      print('[AuthWrapper] Erro ao verificar onboarding: $e');
       if (mounted) {
         setState(() {
+          _onboardingState = OnboardingState.notAuthenticated;
           _isLoading = false;
-          _isAuthenticated = false;
-          _needsWalletSelection = false;
         });
       }
     }
   }
 
-  Future<void> _checkWalletSelection() async {
-    try {
-      // Verificar se há wallet ativa salva
-      final activeWalletId = await _walletStorageService.getActiveWalletId().timeout(
-        const Duration(seconds: 3),
-        onTimeout: () => null,
-      );
-      
-      // Se já houver wallet ativa, não precisa mostrar seleção
-      if (activeWalletId != null) {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _needsWalletSelection = false;
-          });
-        }
-        return;
-      }
-
-      // Carregar dados do usuário com timeout
-      final user = await _userService.getCurrentUser().timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => null,
-      );
-      
-      if (user == null) {
-        // Se não houver usuário no MongoDB, não permitir acesso
-        // O usuário deve ser criado antes de entrar na app
-        // Isso já foi verificado em _checkAuth, mas se chegou aqui, fazer logout
-        if (mounted) {
-          try {
-            await _authService.signOut();
-          } catch (_) {
-            // Ignorar erro no logout
-          }
-          setState(() {
-            _isLoading = false;
-            _isAuthenticated = false;
-            _needsWalletSelection = false;
-          });
-        }
-        return;
-      }
-
-      // Carregar todas as wallets com timeout
-      final wallets = await _walletService.getAllWallets().timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => <Wallet>[],
-      );
-      
-      // Se houver apenas uma wallet (a pessoal), usar ela automaticamente
-      if (wallets.length == 1) {
-        try {
-          await _walletStorageService.setActiveWalletId(wallets.first.id).timeout(
-            const Duration(seconds: 2),
-          );
-        } catch (e) {
-          // Ignorar erro ao salvar wallet ativa
-        }
-        
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _needsWalletSelection = false;
-          });
-        }
-        return;
-      }
-
-      // Se houver múltiplas wallets, mostrar tela de seleção
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _needsWalletSelection = wallets.length > 1;
-        });
-      }
-    } catch (e) {
-      // Em caso de erro, ir direto para home
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _needsWalletSelection = false;
-        });
-      }
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -551,16 +361,34 @@ class _AuthWrapperState extends State<AuthWrapper> {
       );
     }
 
-    if (!_isAuthenticated) {
-      return const LoginScreen();
+    // Navegar baseado no estado do onboarding
+    switch (_onboardingState) {
+      case OnboardingState.notAuthenticated:
+        return const LoginScreen();
+        
+      case OnboardingState.emailNotVerified:
+        // Se não autenticado mas tem sessão, mostrar tela de verificação
+        final user = _authService.currentUser;
+        if (user != null) {
+          return EmailVerificationScreen(
+            email: user.email ?? '',
+            inviteToken: null,
+          );
+        }
+        return const LoginScreen();
+        
+      case OnboardingState.needsProfilePicture:
+        final user = _authService.currentUser;
+        return ProfilePictureSelectionScreen(
+          email: user?.email ?? '',
+          inviteToken: null,
+        );
+        
+      case OnboardingState.needsWalletSelection:
+        return const WalletSelectionScreen();
+        
+      case OnboardingState.completed:
+        return const HomeScreen();
     }
-
-    // Se precisa de seleção de wallet, mostrar tela de seleção
-    if (_needsWalletSelection) {
-      return const WalletSelectionScreen();
-    }
-
-    // Caso contrário, mostrar home
-    return const HomeScreen();
   }
 }

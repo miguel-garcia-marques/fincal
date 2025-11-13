@@ -99,7 +99,11 @@ class StorageService {
   // Se currentProfilePictureUrl for fornecido, deleta a foto antiga antes de fazer upload da nova
   Future<String> uploadProfilePicture(Uint8List imageBytes, {String? currentProfilePictureUrl}) async {
     try {
+      print('[StorageService] Iniciando upload da foto de perfil...');
+      print('[StorageService] Tamanho da imagem: ${imageBytes.lengthInBytes} bytes');
+      
       final userId = _currentUserId;
+      print('[StorageService] UserId: $userId');
       if (userId == null) {
         throw Exception('Usuário não autenticado');
       }
@@ -107,29 +111,39 @@ class StorageService {
       // Deletar todas as fotos antigas do usuário antes de fazer upload da nova
       // Isso evita acumulação de arquivos antigos
       try {
+        print('[StorageService] Deletando fotos antigas...');
         await _deleteAllUserProfilePictures(userId);
+        print('[StorageService] Fotos antigas deletadas');
       } catch (e) {
+        print('[StorageService] Aviso: Erro ao deletar fotos antigas (continuando): $e');
         // Continuar mesmo se falhar ao deletar fotos antigas
         // O upload continuará normalmente
       }
       
       // Obter caminho do arquivo (com timestamp único)
       final filePath = _getFilePath(userId);
+      print('[StorageService] Caminho do arquivo: $filePath');
       
       // Redimensionar imagem antes de fazer upload
+      print('[StorageService] Redimensionando imagem...');
       final resizedImage = await _resizeImage(imageBytes);
+      print('[StorageService] Imagem redimensionada. Novo tamanho: ${resizedImage.lengthInBytes} bytes');
       
       // Fazer upload para o Supabase Storage usando HTTP diretamente
       // Isso funciona tanto para web quanto para mobile
       final accessToken = _authService.currentAccessToken;
+      print('[StorageService] Token disponível: ${accessToken != null}');
       if (accessToken == null) {
         throw Exception('Token de acesso não disponível');
       }
       
       final supabaseUrl = SupabaseConfig.supabaseUrl;
       final uploadUrl = '$supabaseUrl/storage/v1/object/$_bucketName/$filePath';
+      print('[StorageService] URL de upload: $uploadUrl');
+      print('[StorageService] Bucket: $_bucketName');
       
       // Fazer upload via HTTP PUT (com upsert para substituir se já existir)
+      print('[StorageService] Fazendo upload via HTTP PUT...');
       final response = await http.put(
         Uri.parse(uploadUrl),
         headers: {
@@ -140,7 +154,12 @@ class StorageService {
         body: resizedImage,
       );
       
+      print('[StorageService] Resposta do upload: ${response.statusCode}');
+      print('[StorageService] Corpo da resposta: ${response.body}');
+      
       if (response.statusCode != 200 && response.statusCode != 201) {
+        print('[StorageService] ERRO: Status code inválido: ${response.statusCode}');
+        print('[StorageService] ERRO: Resposta completa: ${response.body}');
         throw Exception('Erro ao fazer upload: ${response.statusCode} - ${response.body}');
       }
       
@@ -149,8 +168,29 @@ class StorageService {
           .from(_bucketName)
           .getPublicUrl(filePath);
       
+      print('[StorageService] Upload concluído com sucesso!');
+      print('[StorageService] URL pública: $publicUrl');
+      
+      // Verificar se o arquivo realmente existe no storage
+      try {
+        print('[StorageService] Verificando se arquivo existe no storage...');
+        final files = await _supabase.storage
+            .from(_bucketName)
+            .list(path: userId);
+        print('[StorageService] Arquivos encontrados na pasta do usuário: ${files.length}');
+        final fileExists = files.any((file) => file.name.contains(filePath.split('/').last));
+        print('[StorageService] Arquivo existe no storage: $fileExists');
+        if (!fileExists) {
+          print('[StorageService] AVISO: Arquivo não encontrado no storage após upload!');
+        }
+      } catch (verifyError) {
+        print('[StorageService] Aviso: Erro ao verificar arquivo no storage: $verifyError');
+      }
+      
       return publicUrl;
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('[StorageService] ERRO ao fazer upload da imagem: $e');
+      print('[StorageService] Stack trace: $stackTrace');
       throw Exception('Erro ao fazer upload da imagem: $e');
     }
   }

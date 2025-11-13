@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -13,6 +12,7 @@ import '../theme/app_theme.dart';
 import '../main.dart';
 import 'email_verification_screen.dart';
 import 'invite_accept_screen.dart';
+import 'profile_picture_selection_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final String? inviteToken;
@@ -30,14 +30,11 @@ class _LoginScreenState extends State<LoginScreen> {
   final _nameController = TextEditingController();
   final _authService = AuthService();
   final _userService = UserService();
-  final _storageService = StorageService();
   
   bool _isLoading = false;
   bool _isLoginMode = true; // true = login, false = signup
   bool _obscurePassword = true;
   String? _inviteTokenFromUrl;
-  Uint8List? _selectedProfilePicture;
-  bool _isUploadingPicture = false;
 
   @override
   void initState() {
@@ -76,40 +73,7 @@ class _LoginScreenState extends State<LoginScreen> {
     return _inviteTokenFromUrl ?? widget.inviteToken;
   }
 
-  // Selecionar foto de perfil
-  Future<void> _selectProfilePicture() async {
-    try {
-      setState(() {
-        _isUploadingPicture = true;
-      });
 
-      final imageBytes = await _storageService.pickImage();
-      
-      if (imageBytes != null) {
-        setState(() {
-          _selectedProfilePicture = imageBytes;
-          _isUploadingPicture = false;
-        });
-      } else {
-        setState(() {
-          _isUploadingPicture = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isUploadingPicture = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao selecionar foto: $e'),
-            backgroundColor: AppTheme.expenseRed,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-    }
-  }
 
   @override
   void dispose() {
@@ -245,23 +209,49 @@ class _LoginScreenState extends State<LoginScreen> {
                   }
                   
                   // Se houver foto pendente, fazer upload agora
+                  // Tentar salvar de forma robusta com retries
                   if (pendingProfilePictureBase64 != null) {
                     try {
+                      print('Encontrada foto pendente. Fazendo upload...');
                       // Decodificar foto base64 e fazer upload
                       final imageBytes = base64Decode(pendingProfilePictureBase64);
-                      final profilePictureUrl = await _storageService.uploadProfilePicture(imageBytes);
+                      final storageService = StorageService();
+                      final profilePictureUrl = await storageService.uploadProfilePicture(imageBytes);
+                      print('Upload da foto pendente concluído. URL: $profilePictureUrl');
+                      
                       // Atualizar perfil com a URL da foto
                       await _userService.updateProfilePicture(profilePictureUrl);
-                      // Limpar foto pendente após sucesso
-                      await prefs.remove('pending_profile_picture');
-                      await prefs.remove('pending_profile_picture_url');
+                      
+                      // Verificar que foi salvo
+                      await Future.delayed(const Duration(milliseconds: 300));
+                      final userWithPhoto = await _userService.getCurrentUser(forceRefresh: true);
+                      if (userWithPhoto != null && userWithPhoto.profilePictureUrl == profilePictureUrl) {
+                        // Limpar foto pendente após sucesso confirmado
+                        await prefs.remove('pending_profile_picture');
+                        await prefs.remove('pending_profile_picture_url');
+                        print('Foto pendente salva e verificada com sucesso');
+                      } else {
+                        // Tentar novamente se não foi salvo
+                        print('Foto não foi salva. Tentando novamente...');
+                        await _userService.updateProfilePicture(profilePictureUrl);
+                        await Future.delayed(const Duration(milliseconds: 300));
+                        final retryUser = await _userService.getCurrentUser(forceRefresh: true);
+                        if (retryUser != null && retryUser.profilePictureUrl == profilePictureUrl) {
+                          await prefs.remove('pending_profile_picture');
+                          await prefs.remove('pending_profile_picture_url');
+                          print('Foto pendente salva após retry');
+                        } else {
+                          throw Exception('Não foi possível salvar foto pendente após tentativas');
+                        }
+                      }
                     } catch (e) {
                       // Se falhar, guardar erro mas continuar - foto pode ser adicionada depois
                       // Manter a foto pendente para tentar novamente depois
+                      print('ERRO ao fazer upload da foto pendente: $e');
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('Aviso: Não foi possível fazer upload da foto. Você pode adicioná-la depois no perfil.'),
+                            content: Text('Aviso: Não foi possível fazer upload da foto pendente. Você pode adicioná-la depois no perfil.'),
                             backgroundColor: Colors.orange,
                             duration: const Duration(seconds: 4),
                           ),
@@ -271,11 +261,18 @@ class _LoginScreenState extends State<LoginScreen> {
                   } else if (pendingProfilePictureUrl != null) {
                     // Se já houver URL da foto, apenas atualizar o perfil
                     try {
+                      print('Encontrada URL de foto pendente. Atualizando perfil...');
                       await _userService.updateProfilePicture(pendingProfilePictureUrl);
-                      await prefs.remove('pending_profile_picture');
-                      await prefs.remove('pending_profile_picture_url');
+                      await Future.delayed(const Duration(milliseconds: 300));
+                      final userWithPhoto = await _userService.getCurrentUser(forceRefresh: true);
+                      if (userWithPhoto != null && userWithPhoto.profilePictureUrl == pendingProfilePictureUrl) {
+                        await prefs.remove('pending_profile_picture');
+                        await prefs.remove('pending_profile_picture_url');
+                        print('URL de foto pendente salva com sucesso');
+                      }
                     } catch (e) {
-                      // Se falhar, continuar mesmo assim
+                      print('ERRO ao salvar URL de foto pendente: $e');
+                      // Se falhar, continuar mesmo assim - não crítico
                     }
                   }
                 }
@@ -497,40 +494,38 @@ class _LoginScreenState extends State<LoginScreen> {
           final session = response.session;
           
           if (user != null) {
-            // Guardar o nome do usuário e foto em SharedPreferences para usar após verificação de email
-            // NÃO fazer upload agora porque vamos fazer logout logo depois
-            // A foto será enviada quando o usuário fizer login pela primeira vez após verificar o email
+            // Guardar o nome do usuário em SharedPreferences para usar após verificação de email (se não houver sessão)
             try {
               final prefs = await SharedPreferences.getInstance();
               await prefs.setString('pending_user_name', userName);
               await prefs.setString('pending_user_email', _emailController.text.trim());
-              if (_selectedProfilePicture != null) {
-                // Guardar foto como base64 para fazer upload depois da verificação de email
-                final base64Image = base64Encode(_selectedProfilePicture!);
-                await prefs.setString('pending_profile_picture', base64Image);
-              }
             } catch (e) {
               // Ignorar erro - não crítico
             }
             
-            // GARANTIR criação simultânea no MongoDB e Supabase com as mesmas informações
-            // O usuário NÃO pode entrar na app sem que ambos estejam sincronizados
+            // PASSO 1: Criar conta no Supabase e MongoDB
+            // Neste passo apenas criamos a conta, SEM foto
             if (session != null) {
+              bool supabaseFailed = false;
+              bool mongoFailed = false;
+              
               try {
-                // 1. Atualizar Display Name no Supabase PRIMEIRO
+                // PASSO 1.1: Atualizar Display Name no Supabase
+                print('PASSO 1: Atualizando nome no Supabase...');
                 await _authService.updateDisplayName(userName);
+                print('Nome atualizado no Supabase com sucesso');
                 
-                // 2. Criar usuário no MongoDB com o mesmo nome
-                // Se falhar, mostrar erro e não permitir continuar
+                // PASSO 1.2: Criar usuário no MongoDB
+                print('PASSO 1: Criando usuário no MongoDB...');
                 await _userService.createOrUpdateUser(userName);
                 
-                // 3. Verificar que o usuário foi criado com sucesso no MongoDB
+                // Verificar que o usuário foi criado com sucesso no MongoDB
                 final createdUser = await _userService.getCurrentUser(forceRefresh: true);
                 if (createdUser == null) {
                   throw Exception('Falha ao verificar criação do usuário no servidor');
                 }
                 
-                // 4. Verificar que o nome está correto em ambos os sistemas
+                // Verificar que o nome está correto em ambos os sistemas
                 if (createdUser.name != userName) {
                   // Tentar corrigir
                   await _userService.createOrUpdateUser(userName);
@@ -541,138 +536,87 @@ class _LoginScreenState extends State<LoginScreen> {
                     throw Exception('Falha ao sincronizar informações do usuário');
                   }
                 }
+                print('PASSO 1: Usuário criado no MongoDB com sucesso');
                 
-                // 5. Se houver foto selecionada, fazer upload para o bucket e guardar o link
-                if (_selectedProfilePicture != null) {
-                  String? uploadedProfilePictureUrl;
-                  bool uploadSuccess = false;
-                  
-                  try {
-                    // Verificar que o token está disponível antes de fazer upload
-                    final accessToken = _authService.currentAccessToken;
-                    if (accessToken == null) {
-                      print('AVISO: Token de acesso não disponível para fazer upload da foto durante registro');
-                      // Guardar como pendente em vez de lançar exceção
-                      final prefs = await SharedPreferences.getInstance();
-                      final base64Image = base64Encode(_selectedProfilePicture!);
-                      await prefs.setString('pending_profile_picture', base64Image);
-                      print('Foto guardada como pendente (token não disponível)');
-                    } else {
-                      print('Iniciando upload da foto de perfil...');
-                      
-                      // Fazer upload da foto para o Supabase Storage
-                      uploadedProfilePictureUrl = await _storageService.uploadProfilePicture(_selectedProfilePicture!);
-                      print('Upload concluído. URL: $uploadedProfilePictureUrl');
-                      
-                      // Salvar o link da foto no MongoDB
-                      print('Salvando URL da foto no MongoDB...');
-                      await _userService.updateProfilePicture(uploadedProfilePictureUrl);
-                      print('URL salva no MongoDB');
-                      
-                      // Aguardar um pouco para garantir que o MongoDB processou
-                      await Future.delayed(const Duration(milliseconds: 300));
-                      
-                      // Verificar que o link foi salvo corretamente
-                      final userWithPhoto = await _userService.getCurrentUser(forceRefresh: true);
-                      if (userWithPhoto == null) {
-                        print('ERRO: Não foi possível obter usuário após salvar foto');
-                        // Tentar novamente
-                        await _userService.updateProfilePicture(uploadedProfilePictureUrl);
-                        await Future.delayed(const Duration(milliseconds: 300));
-                        final retryUser = await _userService.getCurrentUser(forceRefresh: true);
-                        if (retryUser != null && retryUser.profilePictureUrl == uploadedProfilePictureUrl) {
-                          uploadSuccess = true;
-                          print('Foto salva com sucesso após retry');
-                        } else {
-                          print('ERRO: Foto não foi salva mesmo após retry');
-                        }
-                      } else if (userWithPhoto.profilePictureUrl == uploadedProfilePictureUrl) {
-                        uploadSuccess = true;
-                        print('Foto de perfil salva com sucesso: $uploadedProfilePictureUrl');
-                      } else {
-                        print('AVISO: URL salva diferente da esperada. Tentando corrigir...');
-                        // Tentar novamente se não foi salvo
-                        await _userService.updateProfilePicture(uploadedProfilePictureUrl);
-                        await Future.delayed(const Duration(milliseconds: 300));
-                        final recheckUser = await _userService.getCurrentUser(forceRefresh: true);
-                        if (recheckUser != null && recheckUser.profilePictureUrl == uploadedProfilePictureUrl) {
-                          uploadSuccess = true;
-                          print('Foto salva com sucesso após correção');
-                        } else {
-                          print('ERRO: Foto não foi salva corretamente após correção');
-                        }
-                      }
-                      
-                      if (uploadSuccess) {
-                        // Limpar foto pendente do SharedPreferences já que foi enviada
-                        try {
-                          final prefs = await SharedPreferences.getInstance();
-                          await prefs.remove('pending_profile_picture');
-                          await prefs.remove('pending_profile_picture_url');
-                        } catch (prefsError) {
-                          print('Aviso: Erro ao limpar foto pendente (não crítico): $prefsError');
-                        }
-                      }
-                    }
-                  } catch (e, stackTrace) {
-                    // Log detalhado do erro para debug
-                    print('ERRO ao fazer upload da foto de perfil durante registro: $e');
-                    print('Stack trace: $stackTrace');
-                    
-                    // Se falhar ao fazer upload da foto, não bloquear o registro
-                    // A foto pode ser adicionada depois no perfil
-                    // Mas guardar como pendente para tentar novamente no login
-                    try {
-                      final prefs = await SharedPreferences.getInstance();
-                      if (_selectedProfilePicture != null) {
-                        final base64Image = base64Encode(_selectedProfilePicture!);
-                        await prefs.setString('pending_profile_picture', base64Image);
-                        print('Foto guardada como pendente para upload posterior');
-                      }
-                    } catch (prefsError) {
-                      print('ERRO ao guardar foto pendente: $prefsError');
-                    }
-                  }
-                }
-              } catch (e) {
-                // Se falhar ao criar/sincronizar, mostrar erro e não permitir continuar
+                // PASSO 1 concluído com sucesso - navegar para tela de seleção de foto
+                print('PASSO 1: Navegando para ProfilePictureSelectionScreen...');
                 if (mounted) {
+                  setState(() => _isLoading = false);
+                  print('PASSO 1: Estado atualizado, iniciando navegação...');
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (context) {
+                        print('PASSO 1: Construindo ProfilePictureSelectionScreen...');
+                        return ProfilePictureSelectionScreen(
+                          email: _emailController.text.trim(),
+                          inviteToken: _effectiveInviteToken,
+                        );
+                      },
+                    ),
+                  );
+                  print('PASSO 1: Navegação concluída');
+                } else {
+                  print('PASSO 1: ERRO - Widget não está montado, não é possível navegar');
+                }
+                
+              } catch (e, stackTrace) {
+                // Erro no Supabase ou MongoDB - falha crítica
+                print('ERRO CRÍTICO no Supabase ou MongoDB: $e');
+                print('Stack trace: $stackTrace');
+                
+                final errorString = e.toString().toLowerCase();
+                if (errorString.contains('supabase') || 
+                    errorString.contains('auth') ||
+                    errorString.contains('token') ||
+                    errorString.contains('signup')) {
+                  supabaseFailed = true;
+                } else {
+                  mongoFailed = true;
+                }
+                
+                // Fazer logout e mostrar form novamente
+                if (mounted) {
+                  try {
+                    await _authService.signOut();
+                  } catch (logoutError) {
+                    print('Aviso: Erro ao fazer logout: $logoutError');
+                  }
+                  
+                  setState(() => _isLoading = false);
+                  
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Erro ao criar conta: ${e.toString()}. Por favor, tente novamente.'),
+                      content: Text(
+                        supabaseFailed 
+                          ? 'Erro ao criar conta no Supabase. Por favor, tente novamente.'
+                          : mongoFailed
+                            ? 'Erro ao criar conta no servidor (MongoDB). Por favor, tente novamente.'
+                            : 'Erro ao criar conta. Por favor, tente novamente.'
+                      ),
                       backgroundColor: AppTheme.expenseRed,
                       duration: const Duration(seconds: 5),
                     ),
                   );
-                  setState(() => _isLoading = false);
-                  
-                  // Fazer logout para garantir estado limpo
-                  try {
-                    await _authService.signOut();
-                  } catch (_) {
-                    // Ignorar erro no logout
-                  }
                 }
                 return;
               }
-              // Fazer logout para garantir estado limpo (usuário precisa verificar email)
-              await _authService.signOut();
             } else {
               // Se não houver sessão, não podemos criar no MongoDB agora
               // O usuário será criado quando fizer login pela primeira vez após verificar email
               // Mas guardamos as informações para garantir sincronização depois
+              
+              // Navegar para tela de verificação (sem sessão, não há nada para salvar agora)
+              if (mounted) {
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (context) => EmailVerificationScreen(
+                      email: _emailController.text.trim(),
+                      inviteToken: _effectiveInviteToken,
+                    ),
+                  ),
+                );
+              }
             }
-            
-            // Sempre navegar para tela de verificação quando criar conta
-            // A tela de verificação vai verificar se o email já foi confirmado
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (context) => EmailVerificationScreen(
-                  email: _emailController.text.trim(),
-                  inviteToken: _effectiveInviteToken,
-                ),
-              ),
-            );
           } else {
             // Erro ao criar usuário, mas não lançou exceção
             ScaffoldMessenger.of(context).showSnackBar(
@@ -765,91 +709,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                     ),
                     SizedBox(height: isDesktop ? 32 : 48),
-                    
-                    // Foto de perfil (apenas no signup)
-                    if (!_isLoginMode) ...[
-                      Center(
-                        child: GestureDetector(
-                          onTap: _isUploadingPicture ? null : _selectProfilePicture,
-                          child: Stack(
-                            children: [
-                              Container(
-                                width: 100,
-                                height: 100,
-                                decoration: BoxDecoration(
-                                  color: AppTheme.primaryColor.withOpacity(0.1),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: AppTheme.primaryColor.withOpacity(0.3),
-                                    width: 2,
-                                  ),
-                                ),
-                                child: _isUploadingPicture
-                                    ? const Center(
-                                        child: CircularProgressIndicator(),
-                                      )
-                                    : _selectedProfilePicture != null
-                                        ? ClipOval(
-                                            child: Image.memory(
-                                              _selectedProfilePicture!,
-                                              width: 100,
-                                              height: 100,
-                                              fit: BoxFit.cover,
-                                            ),
-                                          )
-                                        : Icon(
-                                            Icons.person,
-                                            size: 60,
-                                            color: AppTheme.primaryColor,
-                                          ),
-                              ),
-                              if (_selectedProfilePicture != null && !_isUploadingPicture)
-                                Positioned(
-                                  right: 0,
-                                  top: 0,
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        _selectedProfilePicture = null;
-                                      });
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.all(4),
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.expenseRed,
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: AppTheme.white,
-                                          width: 2,
-                                        ),
-                                      ),
-                                      child: const Icon(
-                                        Icons.close,
-                                        size: 16,
-                                        color: AppTheme.white,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Center(
-                        child: TextButton.icon(
-                          onPressed: _isUploadingPicture ? null : _selectProfilePicture,
-                          icon: const Icon(Icons.camera_alt, size: 18),
-                          label: Text(
-                            _selectedProfilePicture != null
-                                ? 'Alterar foto'
-                                : 'Adicionar foto (opcional)',
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
                     
                     // Nome field (apenas no signup)
                     if (!_isLoginMode) ...[
