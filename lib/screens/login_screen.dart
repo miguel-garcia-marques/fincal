@@ -37,6 +37,8 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoginMode = true; // true = login, false = signup
   bool _obscurePassword = true;
   String? _inviteTokenFromUrl;
+  bool _passkeySupported = false;
+  bool _emailEntered = false; // Controla se email foi inserido (para mostrar senha ou passkey)
 
   @override
   void initState() {
@@ -53,7 +55,65 @@ class _LoginScreenState extends State<LoginScreen> {
     // Verificar se o usuário já está autenticado (após verificar email)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkIfAlreadyAuthenticated();
+      _checkPasskeySupport();
     });
+  }
+
+  // Verificar suporte a passkeys após o widget estar montado
+  void _checkPasskeySupport() {
+    if (kIsWeb) {
+      // Tentar múltiplas vezes para garantir que o JavaScript está carregado
+      _tryCheckPasskeySupport(attempt: 1);
+    }
+  }
+
+  void _tryCheckPasskeySupport({int attempt = 1}) {
+    if (!kIsWeb || !mounted) return;
+    
+    // Tentar verificar suporte
+    try {
+      final supported = _passkeyService.isSupported;
+      print('[Passkey] Tentativa $attempt - Suporte: $supported');
+      
+      if (supported) {
+        if (mounted) {
+          setState(() {
+            _passkeySupported = true;
+          });
+        }
+        print('[Passkey] ✅ Suporte detectado!');
+        return;
+      }
+    } catch (e) {
+      print('[Passkey] Erro na verificação: $e');
+    }
+    
+    // Se não suportado e ainda não tentamos muitas vezes, tentar novamente
+    if (attempt < 5 && mounted) {
+      Future.delayed(Duration(milliseconds: 300 * attempt), () {
+        _tryCheckPasskeySupport(attempt: attempt + 1);
+      });
+    } else {
+      // Após várias tentativas, verificar diretamente a API do navegador
+      print('[Passkey] Tentativas esgotadas. Verificando diretamente...');
+      _checkDirectWebAuthnSupport();
+    }
+  }
+
+  void _checkDirectWebAuthnSupport() {
+    if (!kIsWeb || !mounted) return;
+    
+    try {
+      // Forçar verificação direta
+      if (mounted) {
+        setState(() {
+          // Tentar verificar uma última vez
+          _passkeySupported = _passkeyService.isSupported;
+        });
+      }
+    } catch (e) {
+      print('[Passkey] Erro na verificação direta: $e');
+    }
   }
 
   Future<void> _checkIfAlreadyAuthenticated() async {
@@ -673,23 +733,33 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // Handler para quando usuário submete apenas o email
+  Future<void> _handleEmailSubmit() async {
+    if (_isLoading) return;
+    
+    // Validar email
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+    
+    // Mostrar campo de senha e botão de passkey (se disponível)
+    setState(() {
+      _emailEntered = true;
+    });
+  }
+
   // Handler para login com passkey
   Future<void> _handlePasskeyLogin() async {
     if (_isLoading) return;
     
     final email = _emailController.text.trim();
     if (email.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Por favor, insira seu email para usar passkey'),
-            backgroundColor: AppTheme.expenseRed,
-          ),
-        );
+      // Validar email primeiro
+      if (!_formKey.currentState!.validate()) {
+        return;
       }
-      return;
     }
-
+    
     setState(() => _isLoading = true);
 
     try {
@@ -700,94 +770,94 @@ class _LoginScreenState extends State<LoginScreen> {
         final magicLink = result['magicLink'] as String?;
         final requiresPasswordLogin = result['requiresPasswordLogin'] as bool? ?? false;
         
-        if (requiresPasswordLogin) {
-          // Se precisar de login com senha, mostrar mensagem
+        if (requiresPasswordLogin || magicLink == null) {
+          // Se precisar de login com senha ou não houver magic link
+          // Mostrar campo de senha para completar login
           if (mounted) {
+            setState(() {
+              _emailEntered = true; // Mostrar campo de senha
+            });
+            
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Autenticação com passkey bem-sucedida! Por favor, faça login uma vez com senha para ativar sessão completa.'),
+                content: Text('Autenticação com passkey verificada! Por favor, insira sua senha para completar o login.'),
                 backgroundColor: Colors.orange,
-                duration: Duration(seconds: 5),
+                duration: Duration(seconds: 4),
               ),
             );
           }
           return;
         }
         
-        if (magicLink != null) {
-          // Tentar fazer login usando o magic link
-          try {
-            // Extrair token do magic link se possível
-            final uri = Uri.parse(magicLink);
-            final token = uri.queryParameters['token'] ?? 
-                (uri.fragment.contains('token=') ? uri.fragment.split('token=')[1].split('&')[0] : null);
+        // Tentar fazer login usando o magic link
+        try {
+          // Extrair token do magic link se possível
+          final uri = Uri.parse(magicLink);
+          final token = uri.queryParameters['token'] ?? 
+              (uri.fragment.contains('token=') ? uri.fragment.split('token=')[1].split('&')[0] : null);
+          
+          if (token != null && token.isNotEmpty) {
+            // Tentar fazer login com o token
+            // Nota: O Supabase pode não ter uma função direta para isso
+            // Vamos tentar usar signInWithOtp ou similar
             
-            if (token != null && token.isNotEmpty) {
-              // Tentar fazer login com o token
-              // Nota: O Supabase pode não ter uma função direta para isso
-              // Vamos tentar usar signInWithOtp ou similar
-              
-              // Por enquanto, vamos mostrar sucesso e pedir login normal
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Autenticação com passkey bem-sucedida! Redirecionando...'),
-                    backgroundColor: AppTheme.incomeGreen,
-                  ),
-                );
-                
-                // Tentar fazer refresh da sessão
-                try {
-                  await _authService.supabase.auth.refreshSession();
-                  // Verificar se há sessão ativa
-                  if (_authService.isAuthenticated) {
-                    // Navegar para AuthWrapper
-                    if (mounted) {
-                      Navigator.of(context).pushAndRemoveUntil(
-                        MaterialPageRoute(
-                          builder: (context) => const AuthWrapper(),
-                        ),
-                        (route) => false,
-                      );
-                      return;
-                    }
-                  }
-                } catch (e) {
-                  // Ignorar erro
-                }
-                
-                // Se não houver sessão, mostrar mensagem
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Por favor, faça login uma vez com senha para ativar sessão completa.'),
-                      backgroundColor: Colors.orange,
-                      duration: Duration(seconds: 5),
-                    ),
-                  );
-                }
-              }
-            }
-          } catch (e) {
-            // Se falhar, mostrar mensagem
+            // Por enquanto, vamos mostrar sucesso e pedir login normal
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Autenticação com passkey bem-sucedida! Por favor, faça login uma vez com senha.'),
-                  backgroundColor: Colors.orange,
-                  duration: Duration(seconds: 5),
+                  content: Text('Autenticação com passkey bem-sucedida! Redirecionando...'),
+                  backgroundColor: AppTheme.incomeGreen,
                 ),
               );
+              
+              // Tentar fazer refresh da sessão
+              try {
+                await _authService.supabase.auth.refreshSession();
+                // Verificar se há sessão ativa
+                if (_authService.isAuthenticated) {
+                  // Navegar para AuthWrapper
+                  if (mounted) {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(
+                        builder: (context) => const AuthWrapper(),
+                      ),
+                      (route) => false,
+                    );
+                    return;
+                  }
+                }
+              } catch (e) {
+                // Ignorar erro
+              }
+              
+              // Se não houver sessão, mostrar campo de senha
+              if (mounted) {
+                setState(() {
+                  _emailEntered = true;
+                });
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Autenticação verificada! Por favor, insira sua senha para completar o login.'),
+                    backgroundColor: Colors.orange,
+                    duration: Duration(seconds: 4),
+                  ),
+                );
+              }
             }
           }
-        } else {
-          // Se não houver magic link, mostrar mensagem
+        } catch (e) {
+          // Se falhar, mostrar campo de senha
           if (mounted) {
+            setState(() {
+              _emailEntered = true;
+            });
+            
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Autenticação com passkey bem-sucedida! Por favor, faça login uma vez com senha.'),
+                content: Text('Autenticação verificada! Por favor, insira sua senha para completar o login.'),
                 backgroundColor: Colors.orange,
-                duration: Duration(seconds: 5),
+                duration: Duration(seconds: 4),
               ),
             );
           }
@@ -890,6 +960,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     TextFormField(
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
+                      textInputAction: _isLoginMode && !_emailEntered 
+                          ? TextInputAction.next 
+                          : TextInputAction.done,
+                      onFieldSubmitted: _isLoginMode && !_emailEntered
+                          ? (_) => _handleEmailSubmit()
+                          : null,
                       decoration: InputDecoration(
                         labelText: 'Email',
                         prefixIcon: const Icon(Icons.email),
@@ -911,83 +987,85 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 16),
                     
-                    // Password field
-                    TextFormField(
-                      controller: _passwordController,
-                      obscureText: _obscurePassword,
-                      decoration: InputDecoration(
-                        labelText: 'Senha',
-                        prefixIcon: const Icon(Icons.lock),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscurePassword
-                                ? Icons.visibility
-                                : Icons.visibility_off,
+                    // Password field (apenas se email foi inserido no modo login, ou sempre no signup)
+                    if (_isLoginMode && _emailEntered || !_isLoginMode) ...[
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: _obscurePassword,
+                        decoration: InputDecoration(
+                          labelText: 'Senha',
+                          prefixIcon: const Icon(Icons.lock),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility
+                                  : Icons.visibility_off,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _obscurePassword = !_obscurePassword;
+                              });
+                            },
                           ),
-                          onPressed: () {
-                            setState(() {
-                              _obscurePassword = !_obscurePassword;
-                            });
-                          },
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          filled: true,
+                          fillColor: AppTheme.white,
                         ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        filled: true,
-                        fillColor: AppTheme.white,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Por favor, insira sua senha';
+                          }
+                          if (!_isLoginMode && value.length < 6) {
+                            return 'A senha deve ter pelo menos 6 caracteres';
+                          }
+                          return null;
+                        },
                       ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Por favor, insira sua senha';
-                        }
-                        if (!_isLoginMode && value.length < 6) {
-                          return 'A senha deve ter pelo menos 6 caracteres';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 24),
-                    
-                    // Submit button
-                    ElevatedButton(
-                      onPressed: _isLoading ? null : _handleSubmit,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _isLoading 
-                            ? AppTheme.black.withOpacity(0.5)
-                            : AppTheme.black,
-                        foregroundColor: AppTheme.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                      const SizedBox(height: 24),
+                    ] else if (_isLoginMode && !_emailEntered) ...[
+                      // Botões de ação quando apenas email está preenchido
+                      const SizedBox(height: 8),
+                      
+                      // Botão de continuar com email
+                      ElevatedButton(
+                        onPressed: _isLoading ? null : _handleEmailSubmit,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _isLoading 
+                              ? AppTheme.black.withOpacity(0.5)
+                              : AppTheme.black,
+                          foregroundColor: AppTheme.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          disabledBackgroundColor: AppTheme.black.withOpacity(0.5),
+                          disabledForegroundColor: AppTheme.white.withOpacity(0.7),
                         ),
-                        disabledBackgroundColor: AppTheme.black.withOpacity(0.5),
-                        disabledForegroundColor: AppTheme.white.withOpacity(0.7),
-                      ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  AppTheme.white,
+                        child: _isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    AppTheme.white,
+                                  ),
+                                ),
+                              )
+                            : const Text(
+                                'Continuar',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                            )
-                          : Text(
-                              _isLoginMode ? 'Entrar' : 'Criar Conta',
-                              style: TextStyle(
-                                fontSize: ResponsiveFonts.getFontSize(context, 16),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Passkey buttons (apenas em web e se suportado)
-                    if (kIsWeb && _passkeyService.isSupported) ...[
-                      if (_isLoginMode) ...[
-                        // Botão de login com passkey
+                      ),
+                      const SizedBox(height: 12),
+                      
+                      // Botão de passkey (se suportado)
+                      if (kIsWeb && _passkeySupported) ...[
                         OutlinedButton.icon(
                           onPressed: _isLoading ? null : _handlePasskeyLogin,
                           icon: const Icon(Icons.fingerprint, size: 20),
@@ -1002,8 +1080,93 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 12),
                       ],
-                      const Divider(),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 16),
+                    ],
+                    
+                    // Submit button (apenas se senha está visível)
+                    if (_isLoginMode && _emailEntered || !_isLoginMode) ...[
+                      ElevatedButton(
+                        onPressed: _isLoading ? null : _handleSubmit,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _isLoading 
+                              ? AppTheme.black.withOpacity(0.5)
+                              : AppTheme.black,
+                          foregroundColor: AppTheme.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          disabledBackgroundColor: AppTheme.black.withOpacity(0.5),
+                          disabledForegroundColor: AppTheme.white.withOpacity(0.7),
+                        ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    AppTheme.white,
+                                  ),
+                                ),
+                              )
+                            : Text(
+                                _isLoginMode ? 'Entrar' : 'Criar Conta',
+                                style: TextStyle(
+                                  fontSize: ResponsiveFonts.getFontSize(context, 16),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                      ),
+                      
+                      // Botão de passkey (se suportado e no modo login)
+                      if (kIsWeb && _passkeySupported && _isLoginMode && _emailEntered) ...[
+                        const SizedBox(height: 12),
+                        const Row(
+                          children: [
+                            Expanded(child: Divider()),
+                            Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 12),
+                              child: Text('ou'),
+                            ),
+                            Expanded(child: Divider()),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: _isLoading ? null : _handlePasskeyLogin,
+                          icon: const Icon(Icons.fingerprint, size: 20),
+                          label: const Text('Entrar com Passkey'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            side: const BorderSide(color: AppTheme.black),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                    ],
+                    
+                    // Botão para voltar (se email foi inserido)
+                    if (_isLoginMode && _emailEntered) ...[
+                      TextButton.icon(
+                        onPressed: _isLoading
+                            ? null
+                            : () {
+                                setState(() {
+                                  _emailEntered = false;
+                                  _passwordController.clear();
+                                });
+                              },
+                        icon: const Icon(Icons.arrow_back, size: 18),
+                        label: const Text('Voltar'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppTheme.black,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                     ],
                     
                     // Toggle between login and signup
@@ -1013,6 +1176,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           : () {
                               setState(() {
                                 _isLoginMode = !_isLoginMode;
+                                _emailEntered = false; // Reset ao trocar modo
+                                _passwordController.clear();
                               });
                             },
                       child: Text(

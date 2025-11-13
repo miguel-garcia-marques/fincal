@@ -86,16 +86,21 @@ router.post('/register/options', authenticateUser, async (req, res) => {
     
     // Buscar passkeys existentes do usuário
     const existingPasskeys = await Passkey.find({ userId });
+    // Converter credentialID de base64url string para Buffer
     const excludeCredentials = existingPasskeys.map(passkey => ({
-      id: passkey.credentialID,
+      id: Buffer.from(passkey.credentialID, 'base64url'),
       type: 'public-key',
       transports: ['internal', 'hybrid']
     }));
 
+    // Converter userId (UUID string) para Buffer
+    // O userID deve ser um Buffer, não uma string
+    const userIDBuffer = Buffer.from(userId, 'utf-8');
+
     const options = await generateRegistrationOptions({
       rpName,
       rpID,
-      userID: userId,
+      userID: userIDBuffer,
       userName: req.user.email || userId,
       userDisplayName: req.user.user_metadata?.display_name || req.user.email || 'Usuário',
       timeout: 60000,
@@ -112,9 +117,24 @@ router.post('/register/options', authenticateUser, async (req, res) => {
     // Armazenar challenge temporariamente (em produção, usar Redis ou similar)
     // Por simplicidade, vamos armazenar no req.session ou em memória
     // Por enquanto, vamos retornar o challenge e o cliente deve enviá-lo de volta
+    // Converter challenge de Buffer para string base64url para envio ao frontend
+    const challengeStr = Buffer.isBuffer(options.challenge) 
+      ? options.challenge.toString('base64url')
+      : options.challenge;
+    
     res.json({
       ...options,
-      challenge: options.challenge // Incluir challenge na resposta
+      challenge: challengeStr, // Incluir challenge na resposta como string base64url
+      user: {
+        ...options.user,
+        id: Buffer.isBuffer(options.user.id) 
+          ? options.user.id.toString('base64url')
+          : options.user.id
+      },
+      excludeCredentials: options.excludeCredentials?.map(cred => ({
+        ...cred,
+        id: Buffer.isBuffer(cred.id) ? cred.id.toString('base64url') : cred.id
+      }))
     });
   } catch (error) {
     console.error('Erro ao gerar opções de registro:', error);
@@ -134,10 +154,15 @@ router.post('/register', authenticateUser, async (req, res) => {
 
     const userId = req.userId;
     
+    // Converter challenge de string base64url para Buffer se necessário
+    const expectedChallenge = typeof challenge === 'string' 
+      ? Buffer.from(challenge, 'base64url')
+      : challenge;
+    
     // Verificar a resposta de registro
     const verification = await verifyRegistrationResponse({
       response: credential,
-      expectedChallenge: challenge,
+      expectedChallenge: expectedChallenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
       requireUserVerification: true
@@ -216,8 +241,9 @@ router.post('/authenticate/options', async (req, res) => {
       return res.status(404).json({ message: 'Nenhuma passkey encontrada para este usuário' });
     }
 
+    // Converter credentialID de base64url string para Buffer
     const allowCredentials = passkeys.map(passkey => ({
-      id: passkey.credentialID,
+      id: Buffer.from(passkey.credentialID, 'base64url'),
       type: 'public-key',
       transports: ['internal', 'hybrid']
     }));
@@ -229,9 +255,18 @@ router.post('/authenticate/options', async (req, res) => {
       userVerification: 'preferred'
     });
 
+    // Converter challenge e credential IDs de Buffer para string base64url
+    const challengeStr = Buffer.isBuffer(options.challenge) 
+      ? options.challenge.toString('base64url')
+      : options.challenge;
+
     res.json({
       ...options,
-      challenge: options.challenge,
+      challenge: challengeStr,
+      allowCredentials: options.allowCredentials?.map(cred => ({
+        ...cred,
+        id: Buffer.isBuffer(cred.id) ? cred.id.toString('base64url') : cred.id
+      })),
       userId: user.id // Incluir userId para uso na verificação
     });
   } catch (error) {
@@ -250,20 +285,29 @@ router.post('/authenticate', async (req, res) => {
       return res.status(400).json({ message: 'Credencial, challenge e userId são obrigatórios' });
     }
 
+    // O credential.id vem como string base64url do frontend
+    // Precisamos garantir que está no formato correto para busca
+    const credentialIdStr = credential.id || credential.rawId;
+    
     // Buscar a passkey
     const passkey = await Passkey.findOne({ 
       userId,
-      credentialID: credential.id 
+      credentialID: credentialIdStr
     });
 
     if (!passkey) {
       return res.status(404).json({ message: 'Passkey não encontrada' });
     }
 
+    // Converter challenge de string base64url para Buffer se necessário
+    const expectedChallenge = typeof challenge === 'string' 
+      ? Buffer.from(challenge, 'base64url')
+      : challenge;
+    
     // Verificar a resposta de autenticação
     const verification = await verifyAuthenticationResponse({
       response: credential,
-      expectedChallenge: challenge,
+      expectedChallenge: expectedChallenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
       authenticator: {

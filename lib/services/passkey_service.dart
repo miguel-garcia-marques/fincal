@@ -14,15 +14,53 @@ class PasskeyService {
   // Verificar se passkeys são suportadas
   bool get isSupported {
     if (!kIsWeb) {
+      print('[Passkey] Não é web, retornando false');
       return false; // Por enquanto, apenas suporte web
     }
     
     try {
-      final helpers = js.context['webauthnHelpers'];
-      if (helpers == null) return false;
-      final helpersObj = js.JsObject.jsify(helpers);
-      return helpersObj.callMethod('isSupported') as bool? ?? false;
+      print('[Passkey] Verificando suporte...');
+      
+      // Verificar diretamente a API do navegador usando eval (mais confiável)
+      try {
+        final result = js.context.callMethod('eval', [
+          'typeof navigator !== "undefined" && typeof navigator.credentials !== "undefined" && typeof navigator.credentials.create === "function" && typeof navigator.credentials.get === "function"'
+        ]);
+        if (result != null && result is bool && result) {
+          print('[Passkey] ✅ Suporte detectado via Navigator API');
+          return true;
+        } else {
+          print('[Passkey] Navigator.credentials não disponível');
+        }
+      } catch (e) {
+        print('[Passkey] Erro ao verificar Navigator API: $e');
+      }
+      
+      // Tentar usar função helper se disponível
+      try {
+        final helpersCheck = js.context.callMethod('eval', [
+          'typeof window.webauthnHelpers !== "undefined" && typeof window.webauthnHelpers.isSupported === "function"'
+        ]);
+        if (helpersCheck == true) {
+          print('[Passkey] webauthnHelpers encontrado');
+          final result = js.context.callMethod('eval', [
+            'window.webauthnHelpers.isSupported()'
+          ]);
+          if (result != null && result is bool) {
+            print('[Passkey] Helper retornou: $result');
+            return result;
+          }
+        } else {
+          print('[Passkey] webauthnHelpers não encontrado');
+        }
+      } catch (e) {
+        print('[Passkey] Erro ao usar helper: $e');
+      }
+      
+      print('[Passkey] ❌ Suporte não detectado');
+      return false;
     } catch (e) {
+      print('[Passkey] Erro geral na verificação: $e');
       return false;
     }
   }
@@ -42,7 +80,7 @@ class PasskeyService {
 
       // 1. Obter opções de registro do servidor
       final optionsResponse = await http.post(
-        Uri.parse('$_baseUrl/api/passkeys/register/options'),
+        Uri.parse('$_baseUrl/passkeys/register/options'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -56,63 +94,79 @@ class PasskeyService {
       final optionsData = jsonDecode(optionsResponse.body);
       final challenge = optionsData['challenge'] as String;
 
-      // Preparar opções usando funções JavaScript
-      final helpers = js.context['webauthnHelpers'];
-      if (helpers == null) {
+      // Preparar opções usando funções JavaScript via eval
+      // Verificar se helpers estão disponíveis
+      final helpersCheck = js.context.callMethod('eval', [
+        'typeof window.webauthnHelpers !== "undefined"'
+      ]);
+      if (helpersCheck != true) {
         throw Exception('WebAuthn helpers não disponíveis');
       }
-      final helpersObj = js.JsObject.jsify(helpers);
 
-      // Converter challenge e userID usando função JavaScript
-      final challengeBuffer = helpersObj.callMethod('base64UrlToArrayBuffer', [challenge]);
-      final userIdBuffer = helpersObj.callMethod('base64UrlToArrayBuffer', [optionsData['user']['id'] as String]);
+      final userIdStr = optionsData['user']['id'] as String;
 
-      // Preparar opções
-      final excludeCreds = (optionsData['excludeCredentials'] as List?)
+      // Preparar opções usando eval para construir o objeto completo
+      // Isso é mais complexo, então vamos usar uma abordagem diferente
+      // Criar o objeto de opções como string JSON e depois converter
+      final excludeCredsJson = (optionsData['excludeCredentials'] as List?)
           ?.map((cred) {
-            final credIdBuffer = helpersObj.callMethod('base64UrlToArrayBuffer', [cred['id'] as String]);
-            return js.JsObject.jsify({
-              'id': credIdBuffer,
-              'type': cred['type'],
-              'transports': cred['transports'],
-            });
+            final credId = cred['id'] as String;
+            return '{"id": window.webauthnHelpers.base64UrlToArrayBuffer("$credId"), "type": "${cred['type']}", "transports": ${jsonEncode(cred['transports'])}}';
           })
-          .toList();
-
-      final publicKeyOptions = js.JsObject.jsify({
-        'challenge': challengeBuffer,
-        'rp': {
-          'name': optionsData['rp']['name'],
-          'id': optionsData['rp']['id'],
-        },
-        'user': {
-          'id': userIdBuffer,
-          'name': optionsData['user']['name'],
-          'displayName': optionsData['user']['displayName'],
-        },
-        'pubKeyCredParams': optionsData['pubKeyCredParams'],
-        'timeout': optionsData['timeout'],
-        'attestation': optionsData['attestation'],
-        'authenticatorSelection': optionsData['authenticatorSelection'],
-        'excludeCredentials': excludeCreds,
-      });
-
-      // 2. Criar credencial usando função JavaScript helper
-      final credentialJs = await helpersObj.callMethod('createCredential', [publicKeyOptions]);
+          .join(',');
       
-      if (credentialJs == null) {
+      final excludeCredsStr = excludeCredsJson != null ? '[$excludeCredsJson]' : '[]';
+      
+      // Construir objeto completo via eval
+      final publicKeyOptionsStr = '''
+      {
+        challenge: window.webauthnHelpers.base64UrlToArrayBuffer("$challenge"),
+        rp: ${jsonEncode(optionsData['rp'])},
+        user: {
+          id: window.webauthnHelpers.base64UrlToArrayBuffer("$userIdStr"),
+          name: ${jsonEncode(optionsData['user']['name'])},
+          displayName: ${jsonEncode(optionsData['user']['displayName'])}
+        },
+        pubKeyCredParams: ${jsonEncode(optionsData['pubKeyCredParams'])},
+        timeout: ${optionsData['timeout']},
+        attestation: ${jsonEncode(optionsData['attestation'])},
+        authenticatorSelection: ${jsonEncode(optionsData['authenticatorSelection'])},
+        excludeCredentials: $excludeCredsStr
+      }
+      ''';
+
+      // 2. Criar credencial e converter usando função wrapper JavaScript
+      // Usar Promise.resolve para garantir que retorna uma Promise
+      final credentialMapStr = await _executeAsyncJs(
+        '''
+        (async () => {
+          try {
+            const credential = await window.webauthnHelpers.createCredential($publicKeyOptionsStr);
+            if (!credential) return null;
+            const credentialObj = window.webauthnHelpers.credentialToObject(credential);
+            return JSON.stringify(credentialObj);
+          } catch (e) {
+            return JSON.stringify({error: e.message});
+          }
+        })()
+        '''
+      );
+      
+      if (credentialMapStr == null) {
         throw Exception('Registro de passkey cancelado pelo usuário');
       }
-
-      // Converter credencial para objeto usando função JavaScript
-      final credentialMapJs = helpersObj.callMethod('credentialToObject', [credentialJs]);
-      final credentialMap = (js.context['JSON'].callMethod('parse', [
-        js.context['JSON'].callMethod('stringify', [credentialMapJs])
-      ]) as Map).cast<String, dynamic>();
+      
+      final credentialMapJson = credentialMapStr as String;
+      final credentialMap = jsonDecode(credentialMapJson) as Map<String, dynamic>;
+      
+      // Verificar se há erro
+      if (credentialMap.containsKey('error')) {
+        throw Exception('Erro ao criar passkey: ${credentialMap['error']}');
+      }
 
       // 3. Enviar credencial para o servidor para verificação
       final registerResponse = await http.post(
-        Uri.parse('$_baseUrl/api/passkeys/register'),
+        Uri.parse('$_baseUrl/passkeys/register'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -144,7 +198,7 @@ class PasskeyService {
     try {
       // 1. Obter opções de autenticação do servidor
       final optionsResponse = await http.post(
-        Uri.parse('$_baseUrl/api/passkeys/authenticate/options'),
+        Uri.parse('$_baseUrl/passkeys/authenticate/options'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -166,50 +220,58 @@ class PasskeyService {
         throw Exception('Usuário não encontrado');
       }
 
-      // Preparar opções usando funções JavaScript
-      final helpers = js.context['webauthnHelpers'];
-      if (helpers == null) {
-        throw Exception('WebAuthn helpers não disponíveis');
-      }
-      final helpersObj = js.JsObject.jsify(helpers);
-
-      final challengeBuffer = helpersObj.callMethod('base64UrlToArrayBuffer', [challenge]);
-      
-      final allowCredentials = (optionsData['allowCredentials'] as List?)
+      // Preparar opções usando eval
+      final allowCredentialsJson = (optionsData['allowCredentials'] as List?)
           ?.map((cred) {
-            final credIdBuffer = helpersObj.callMethod('base64UrlToArrayBuffer', [cred['id'] as String]);
-            return js.JsObject.jsify({
-              'id': credIdBuffer,
-              'type': cred['type'],
-              'transports': cred['transports'],
-            });
+            final credId = cred['id'] as String;
+            return '{"id": window.webauthnHelpers.base64UrlToArrayBuffer("$credId"), "type": "${cred['type']}", "transports": ${jsonEncode(cred['transports'])}}';
           })
-          .toList();
-
-      final publicKeyOptions = js.JsObject.jsify({
-        'challenge': challengeBuffer,
-        'timeout': optionsData['timeout'],
-        'rpId': optionsData['rpId'],
-        'allowCredentials': allowCredentials,
-        'userVerification': optionsData['userVerification'] ?? 'preferred',
-      });
-
-      // 2. Obter credencial usando função JavaScript helper
-      final credentialJs = await helpersObj.callMethod('getCredential', [publicKeyOptions]);
+          .join(',');
       
-      if (credentialJs == null) {
+      final allowCredsStr = allowCredentialsJson != null ? '[$allowCredentialsJson]' : '[]';
+      
+      // Construir objeto de opções via eval
+      final publicKeyOptionsStr = '''
+      {
+        challenge: window.webauthnHelpers.base64UrlToArrayBuffer("$challenge"),
+        timeout: ${optionsData['timeout']},
+        rpId: ${jsonEncode(optionsData['rpId'])},
+        allowCredentials: $allowCredsStr,
+        userVerification: ${jsonEncode(optionsData['userVerification'] ?? 'preferred')}
+      }
+      ''';
+
+      // 2. Obter credencial e converter usando função wrapper JavaScript
+      final credentialMapStr = await _executeAsyncJs(
+        '''
+        (async () => {
+          try {
+            const credential = await window.webauthnHelpers.getCredential($publicKeyOptionsStr);
+            if (!credential) return null;
+            const credentialObj = window.webauthnHelpers.authenticationResponseToObject(credential);
+            return JSON.stringify(credentialObj);
+          } catch (e) {
+            return JSON.stringify({error: e.message});
+          }
+        })()
+        '''
+      );
+      
+      if (credentialMapStr == null) {
         throw Exception('Autenticação cancelada pelo usuário');
       }
-
-      // Converter credencial para objeto usando função JavaScript
-      final credentialMapJs = helpersObj.callMethod('authenticationResponseToObject', [credentialJs]);
-      final credentialMap = (js.context['JSON'].callMethod('parse', [
-        js.context['JSON'].callMethod('stringify', [credentialMapJs])
-      ]) as Map).cast<String, dynamic>();
+      
+      final credentialMapJson = credentialMapStr as String;
+      final credentialMap = jsonDecode(credentialMapJson) as Map<String, dynamic>;
+      
+      // Verificar se há erro
+      if (credentialMap.containsKey('error')) {
+        throw Exception('Erro ao autenticar com passkey: ${credentialMap['error']}');
+      }
 
       // 3. Enviar credencial para o servidor para verificação
       final authResponse = await http.post(
-        Uri.parse('$_baseUrl/api/passkeys/authenticate'),
+        Uri.parse('$_baseUrl/passkeys/authenticate'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -245,7 +307,7 @@ class PasskeyService {
       }
 
       final response = await http.get(
-        Uri.parse('$_baseUrl/api/passkeys'),
+        Uri.parse('$_baseUrl/passkeys'),
         headers: {
           'Authorization': 'Bearer $token',
         },
@@ -271,7 +333,7 @@ class PasskeyService {
       }
 
       final response = await http.delete(
-        Uri.parse('$_baseUrl/api/passkeys/$passkeyId'),
+        Uri.parse('$_baseUrl/passkeys/$passkeyId'),
         headers: {
           'Authorization': 'Bearer $token',
         },
@@ -287,6 +349,76 @@ class PasskeyService {
     }
   }
 
+
+  // Helper: Executar código JavaScript assíncrono e aguardar resultado
+  Future<dynamic> _executeAsyncJs(String code) async {
+    // Criar uma Promise wrapper que retorna o resultado
+    final promiseCode = '''
+      new Promise((resolve) => {
+        (async () => {
+          try {
+            const result = await ($code);
+            resolve(result);
+          } catch (e) {
+            resolve(JSON.stringify({error: e.message}));
+          }
+        })();
+      })
+    ''';
+    
+    // Usar eval para executar e retornar Promise
+    // Nota: dart:js não suporta Promises diretamente, então vamos usar uma abordagem diferente
+    // Vamos criar uma função global temporária
+    final tempFuncName = '_tempPasskeyFunc_${DateTime.now().millisecondsSinceEpoch}';
+    
+    // Criar função temporária que retorna Promise
+    js.context.callMethod('eval', [
+      'window.$tempFuncName = function() { return $promiseCode; }'
+    ]);
+    
+    // Chamar função e aguardar resultado usando polling
+    // (Não ideal, mas funciona com dart:js)
+    dynamic result;
+    int attempts = 0;
+    
+    // Iniciar Promise
+    js.context.callMethod('eval', [
+      'window.$tempFuncName().then(r => { window._tempPasskeyResult = r; }).catch(e => { window._tempPasskeyResult = JSON.stringify({error: e.message}); })'
+    ]);
+    
+    while (attempts < 100) { // Timeout de ~10 segundos
+      await Future.delayed(const Duration(milliseconds: 100));
+      try {
+        // Verificar se resultado está disponível
+        final hasResult = js.context.callMethod('eval', [
+          'typeof window._tempPasskeyResult !== "undefined"'
+        ]);
+        
+        if (hasResult == true) {
+          result = js.context.callMethod('eval', [
+            'window._tempPasskeyResult'
+          ]);
+          
+          // Limpar variáveis temporárias
+          js.context.callMethod('eval', [
+            'delete window.$tempFuncName; delete window._tempPasskeyResult;'
+          ]);
+          
+          return result;
+        }
+      } catch (e) {
+        // Continuar tentando
+      }
+      attempts++;
+    }
+    
+    // Limpar em caso de timeout
+    js.context.callMethod('eval', [
+      'delete window.$tempFuncName; delete window._tempPasskeyResult;'
+    ]);
+    
+    throw Exception('Timeout ao executar código JavaScript assíncrono');
+  }
 
   // Helper: Detectar tipo de dispositivo
   String _detectDeviceType() {

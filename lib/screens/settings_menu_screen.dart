@@ -7,6 +7,7 @@ import '../services/auth_service.dart';
 import '../main.dart';
 import 'wallet_invites_screen.dart';
 import 'profile_screen.dart';
+import 'security_screen.dart';
 import '../widgets/wallet_selection_dialog.dart';
 
 class SettingsMenuScreen extends StatefulWidget {
@@ -199,6 +200,21 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
                   builder: (context) => WalletInvitesScreen(
                     currentWallet: widget.currentWallet,
                   ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          
+          _buildMenuOption(
+            context,
+            icon: Icons.security,
+            title: 'Segurança',
+            subtitle: 'Gerir passkeys e segurança',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const SecurityScreen(),
                 ),
               );
             },

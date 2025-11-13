@@ -119,17 +119,35 @@
         return !!(navigator.credentials && navigator.credentials.create && navigator.credentials.get);
       },
       
-      // Criar credencial (registro)
+      // Criar credencial (registro) - retorna Promise
       createCredential: function(options) {
         return navigator.credentials.create({
           publicKey: options
         });
       },
       
-      // Obter credencial (autenticação)
+      // Obter credencial (autenticação) - retorna Promise
       getCredential: function(options) {
         return navigator.credentials.get({
           publicKey: options
+        });
+      },
+      
+      // Wrapper para criar credencial e converter para JSON em uma chamada
+      createCredentialAndConvert: function(options) {
+        return navigator.credentials.create({
+          publicKey: options
+        }).then(function(credential) {
+          return window.webauthnHelpers.credentialToObject(credential);
+        });
+      },
+      
+      // Wrapper para obter credencial e converter para JSON em uma chamada
+      getCredentialAndConvert: function(options) {
+        return navigator.credentials.get({
+          publicKey: options
+        }).then(function(credential) {
+          return window.webauthnHelpers.authenticationResponseToObject(credential);
         });
       },
       

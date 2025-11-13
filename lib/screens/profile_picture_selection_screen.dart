@@ -1,8 +1,10 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../services/storage_service.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
+import '../services/passkey_service.dart';
 import '../services/onboarding_orchestrator.dart';
 import '../theme/app_theme.dart';
 import 'email_verification_screen.dart';
@@ -26,11 +28,13 @@ class _ProfilePictureSelectionScreenState extends State<ProfilePictureSelectionS
   final _storageService = StorageService();
   final _userService = UserService();
   final _authService = AuthService();
+  final _passkeyService = PasskeyService();
   final _onboardingOrchestrator = OnboardingOrchestrator();
   
   Uint8List? _selectedProfilePicture;
   bool _isUploading = false;
   bool _isLoading = false;
+  bool _isRegisteringPasskey = false;
 
   @override
   void initState() {
@@ -435,6 +439,39 @@ class _ProfilePictureSelectionScreenState extends State<ProfilePictureSelectionS
   Future<void> _navigateToEmailVerification() async {
     print('[ProfilePictureScreen] ========== Navegando após foto ==========');
     
+    // Se passkeys são suportadas, perguntar se quer registrar
+    if (kIsWeb && _passkeyService.isSupported && _authService.isAuthenticated) {
+      final shouldRegisterPasskey = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Registrar Passkey?'),
+          content: const Text(
+            'Deseja registrar uma passkey agora?\n\n'
+            'Passkeys permitem fazer login sem senha usando biometria ou PIN do seu dispositivo.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Agora não'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                foregroundColor: AppTheme.white,
+              ),
+              child: const Text('Registrar'),
+            ),
+          ],
+        ),
+      );
+      
+      if (shouldRegisterPasskey == true && mounted) {
+        await _registerPasskey();
+      }
+    }
+    
     // Usar o orquestrador para determinar o próximo passo
     try {
       final state = await _onboardingOrchestrator.getCurrentState();
@@ -465,6 +502,52 @@ class _ProfilePictureSelectionScreenState extends State<ProfilePictureSelectionS
             ),
           ),
         );
+      }
+    }
+  }
+
+  Future<void> _registerPasskey() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _isRegisteringPasskey = true;
+    });
+
+    try {
+      await _passkeyService.registerPasskey();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Passkey registrada com sucesso!'),
+            backgroundColor: AppTheme.incomeGreen,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        final errorStr = e.toString().toLowerCase();
+        String errorMsg = 'Erro ao registrar passkey';
+        if (errorStr.contains('cancelado')) {
+          errorMsg = 'Registro cancelado';
+        } else if (errorStr.contains('não suportadas')) {
+          errorMsg = 'Passkeys não são suportadas neste dispositivo';
+        }
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMsg),
+            backgroundColor: AppTheme.expenseRed,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRegisteringPasskey = false;
+        });
       }
     }
   }
