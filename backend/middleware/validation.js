@@ -190,7 +190,7 @@ const validateBulkTransactions = [
   handleValidationErrors
 ];
 
-// Validação para usuário
+// Validação para usuário (criação)
 const validateUser = [
   body('name')
     .notEmpty().withMessage('Nome é obrigatório')
@@ -203,6 +203,60 @@ const validateUser = [
       }
       return true;
     }),
+  
+  handleValidationErrors
+];
+
+// Validação para atualização de perfil (permite atualizar apenas name, apenas profilePictureUrl, ou ambos)
+const validateUserUpdate = [
+  body('name')
+    .optional({ nullable: true })
+    .trim()
+    .isLength({ min: 1, max: 100 }).withMessage('Nome deve ter entre 1 e 100 caracteres')
+    .custom((value) => {
+      if (value === null || value === undefined || value === '') {
+        return true; // Permitir null/undefined/vazio quando opcional
+      }
+      // Permitir letras, números, espaços e alguns caracteres especiais comuns
+      if (!/^[\p{L}\p{N}\s.'-]+$/u.test(value)) {
+        throw new Error('Nome contém caracteres inválidos');
+      }
+      return true;
+    }),
+  
+  body('profilePictureUrl')
+    .optional({ nullable: true, checkFalsy: true })
+    .custom((value) => {
+      // Permitir null, undefined ou string vazia
+      if (value === null || value === undefined || value === '') {
+        return true;
+      }
+      // Se for uma string, validar formato e tamanho
+      if (typeof value !== 'string') {
+        throw new Error('profilePictureUrl deve ser uma string');
+      }
+      if (value.length > 500) {
+        throw new Error('URL da foto de perfil deve ter no máximo 500 caracteres');
+      }
+      // Validar formato de URL básico
+      try {
+        new URL(value);
+        return true;
+      } catch {
+        throw new Error('profilePictureUrl deve ser uma URL válida');
+      }
+    }),
+  
+  // Garantir que pelo menos um campo seja fornecido
+  body().custom((value, { req }) => {
+    const hasName = value.name !== undefined && value.name !== null && value.name !== '';
+    const hasProfilePictureUrl = value.profilePictureUrl !== undefined;
+    
+    if (!hasName && !hasProfilePictureUrl) {
+      throw new Error('Pelo menos um campo (name ou profilePictureUrl) deve ser fornecido');
+    }
+    return true;
+  }),
   
   handleValidationErrors
 ];
@@ -243,6 +297,7 @@ module.exports = {
   validateTransactionId,
   validateBulkTransactions,
   validateUser,
+  validateUserUpdate,
   validatePeriodHistory,
   validatePeriodId,
   handleValidationErrors

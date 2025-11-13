@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getUserModel } = require('../models/User');
 const { authenticateUser } = require('../middleware/auth');
-const { validateUser } = require('../middleware/validation');
+const { validateUser, validateUserUpdate } = require('../middleware/validation');
 
 // Aplicar middleware de autenticação em todas as rotas
 router.use(authenticateUser);
@@ -265,7 +265,7 @@ router.post('/', validateUser, async (req, res) => {
 });
 
 // PUT atualizar nome do usuário ou foto de perfil
-router.put('/me', validateUser, async (req, res) => {
+router.put('/me', validateUserUpdate, async (req, res) => {
   try {
     const User = getUserModel();
     const { name, profilePictureUrl } = req.body;
@@ -283,7 +283,10 @@ router.put('/me', validateUser, async (req, res) => {
     }
     
     if (profilePictureUrl !== undefined) {
-      updateData.profilePictureUrl = profilePictureUrl || null;
+      // Converter string vazia para null
+      updateData.profilePictureUrl = (profilePictureUrl && profilePictureUrl.trim() !== '') 
+        ? profilePictureUrl.trim() 
+        : null;
     }
     
     // Sempre atualizar email se disponível
