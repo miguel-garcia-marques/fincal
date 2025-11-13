@@ -3,6 +3,7 @@ const router = express.Router();
 const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 const { generateAuthenticationOptions, verifyAuthenticationResponse } = require('@simplewebauthn/server');
 const { getPasskeyModel } = require('../models/Passkey');
+const { getChallengeModel } = require('../models/Challenge');
 const { getUserModel } = require('../models/User');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
@@ -127,16 +128,25 @@ router.post('/register/options', authenticateUser, async (req, res) => {
     // O challenge será codificado no clientDataJSON pelo navegador
     const challengeStr = challengeBuffer.toString('base64url');
     
-    // Armazenar o challenge original em memória para comparação posterior
-    // Em produção, usar Redis ou session storage
-    if (!global.passkeyChallenges) {
-      global.passkeyChallenges = new Map();
+    // Armazenar o challenge original no MongoDB para comparação posterior
+    // O MongoDB vai expirar automaticamente após 5 minutos (TTL)
+    const Challenge = getChallengeModel();
+    try {
+      await Challenge.create({
+        challenge: challengeStr,
+        challengeBuffer: challengeBuffer.toString('base64'), // Armazenar como base64 para preservar bytes
+        userId: userId,
+        type: 'registration',
+        createdAt: new Date()
+      });
+      console.log('[Passkey Register Options] Challenge armazenado no MongoDB:', challengeStr);
+    } catch (error) {
+      console.error('[Passkey Register Options] Erro ao armazenar challenge:', error);
+      // Continuar mesmo se falhar ao armazenar (fallback para decodificação)
     }
-    global.passkeyChallenges.set(challengeStr, challengeBuffer);
     
     console.log('[Passkey Register Options] Challenge gerado:', challengeStr);
     console.log('[Passkey Register Options] Challenge length:', challengeBuffer.length);
-    console.log('[Passkey Register Options] Challenge bytes:', Array.from(challengeBuffer));
     
     res.json({
       ...options,
@@ -170,23 +180,48 @@ router.post('/register', authenticateUser, async (req, res) => {
 
     const userId = req.userId;
     
-    // Tentar recuperar o challenge original do armazenamento em memória
-    // Se não estiver disponível, usar o challenge recebido
+    // Tentar recuperar o challenge original do MongoDB
+    const Challenge = getChallengeModel();
     let expectedChallenge;
-    if (global.passkeyChallenges && global.passkeyChallenges.has(challenge)) {
-      // Usar o challenge original armazenado
-      expectedChallenge = global.passkeyChallenges.get(challenge);
-      console.log('[Passkey Register] Usando challenge original do armazenamento');
-      // Limpar após uso (opcional, mas recomendado para não acumular memória)
-      global.passkeyChallenges.delete(challenge);
-    } else {
+    
+    try {
+      const storedChallenge = await Challenge.findOne({ 
+        challenge: challenge,
+        userId: userId,
+        type: 'registration'
+      });
+      
+      if (storedChallenge && storedChallenge.challengeBuffer) {
+        // Usar o challenge original armazenado (decodificar de base64)
+        expectedChallenge = Buffer.from(storedChallenge.challengeBuffer, 'base64');
+        console.log('[Passkey Register] Usando challenge original do MongoDB');
+        
+        // Deletar após uso para limpar o banco
+        await Challenge.deleteOne({ _id: storedChallenge._id });
+      } else {
+        // Fallback: decodificar o challenge recebido
+        if (typeof challenge === 'string') {
+          try {
+            // Tentar decodificar como base64url
+            expectedChallenge = Buffer.from(challenge, 'base64url');
+          } catch (e) {
+            // Se falhar, tentar como base64 normal
+            expectedChallenge = Buffer.from(challenge, 'base64');
+          }
+        } else if (Buffer.isBuffer(challenge)) {
+          expectedChallenge = challenge;
+        } else {
+          return res.status(400).json({ message: 'Formato de challenge inválido' });
+        }
+        console.log('[Passkey Register] Usando challenge decodificado (fallback)');
+      }
+    } catch (error) {
+      console.error('[Passkey Register] Erro ao recuperar challenge do MongoDB:', error);
       // Fallback: decodificar o challenge recebido
       if (typeof challenge === 'string') {
         try {
-          // Tentar decodificar como base64url
           expectedChallenge = Buffer.from(challenge, 'base64url');
         } catch (e) {
-          // Se falhar, tentar como base64 normal
           expectedChallenge = Buffer.from(challenge, 'base64');
         }
       } else if (Buffer.isBuffer(challenge)) {
@@ -194,13 +229,12 @@ router.post('/register', authenticateUser, async (req, res) => {
       } else {
         return res.status(400).json({ message: 'Formato de challenge inválido' });
       }
-      console.log('[Passkey Register] Usando challenge decodificado (fallback)');
+      console.log('[Passkey Register] Usando challenge decodificado (fallback após erro)');
     }
     
     console.log('[Passkey Register] Challenge recebido (string):', challenge);
     console.log('[Passkey Register] Challenge como Buffer (base64url):', expectedChallenge.toString('base64url'));
     console.log('[Passkey Register] Challenge Buffer length:', expectedChallenge.length);
-    console.log('[Passkey Register] Challenge Buffer bytes:', Array.from(expectedChallenge));
     
     // Verificar a resposta de registro
     let verification;
@@ -322,9 +356,26 @@ router.post('/authenticate/options', async (req, res) => {
     });
 
     // Converter challenge e credential IDs de Buffer para string base64url
-    const challengeStr = Buffer.isBuffer(options.challenge) 
-      ? options.challenge.toString('base64url')
-      : options.challenge;
+    const challengeBuffer = Buffer.isBuffer(options.challenge) 
+      ? options.challenge 
+      : Buffer.from(options.challenge);
+    const challengeStr = challengeBuffer.toString('base64url');
+    
+    // Armazenar o challenge original no MongoDB para comparação posterior
+    const Challenge = getChallengeModel();
+    try {
+      await Challenge.create({
+        challenge: challengeStr,
+        challengeBuffer: challengeBuffer.toString('base64'), // Armazenar como base64 para preservar bytes
+        userId: user.id,
+        type: 'authentication',
+        createdAt: new Date()
+      });
+      console.log('[Passkey Auth Options] Challenge armazenado no MongoDB:', challengeStr);
+    } catch (error) {
+      console.error('[Passkey Auth Options] Erro ao armazenar challenge:', error);
+      // Continuar mesmo se falhar ao armazenar (fallback para decodificação)
+    }
 
     res.json({
       ...options,
@@ -365,10 +416,55 @@ router.post('/authenticate', async (req, res) => {
       return res.status(404).json({ message: 'Passkey não encontrada' });
     }
 
-    // Converter challenge de string base64url para Buffer se necessário
-    const expectedChallenge = typeof challenge === 'string' 
-      ? Buffer.from(challenge, 'base64url')
-      : challenge;
+    // Tentar recuperar o challenge original do MongoDB
+    const Challenge = getChallengeModel();
+    let expectedChallenge;
+    
+    try {
+      const storedChallenge = await Challenge.findOne({ 
+        challenge: challenge,
+        userId: userId,
+        type: 'authentication'
+      });
+      
+      if (storedChallenge && storedChallenge.challengeBuffer) {
+        // Usar o challenge original armazenado (decodificar de base64)
+        expectedChallenge = Buffer.from(storedChallenge.challengeBuffer, 'base64');
+        console.log('[Passkey Authenticate] Usando challenge original do MongoDB');
+        
+        // Deletar após uso para limpar o banco
+        await Challenge.deleteOne({ _id: storedChallenge._id });
+      } else {
+        // Fallback: decodificar o challenge recebido
+        if (typeof challenge === 'string') {
+          try {
+            expectedChallenge = Buffer.from(challenge, 'base64url');
+          } catch (e) {
+            expectedChallenge = Buffer.from(challenge, 'base64');
+          }
+        } else if (Buffer.isBuffer(challenge)) {
+          expectedChallenge = challenge;
+        } else {
+          return res.status(400).json({ message: 'Formato de challenge inválido' });
+        }
+        console.log('[Passkey Authenticate] Usando challenge decodificado (fallback)');
+      }
+    } catch (error) {
+      console.error('[Passkey Authenticate] Erro ao recuperar challenge do MongoDB:', error);
+      // Fallback: decodificar o challenge recebido
+      if (typeof challenge === 'string') {
+        try {
+          expectedChallenge = Buffer.from(challenge, 'base64url');
+        } catch (e) {
+          expectedChallenge = Buffer.from(challenge, 'base64');
+        }
+      } else if (Buffer.isBuffer(challenge)) {
+        expectedChallenge = challenge;
+      } else {
+        return res.status(400).json({ message: 'Formato de challenge inválido' });
+      }
+      console.log('[Passkey Authenticate] Usando challenge decodificado (fallback após erro)');
+    }
     
     // Verificar a resposta de autenticação
     const verification = await verifyAuthenticationResponse({
