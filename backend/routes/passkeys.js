@@ -122,10 +122,21 @@ router.post('/register/options', authenticateUser, async (req, res) => {
     const challengeBuffer = Buffer.isBuffer(options.challenge) 
       ? options.challenge 
       : Buffer.from(options.challenge);
+    
+    // Usar base64url encoding para garantir compatibilidade com WebAuthn
+    // O challenge será codificado no clientDataJSON pelo navegador
     const challengeStr = challengeBuffer.toString('base64url');
     
-    console.log('[Passkey Register Options] Challenge gerado:', challengeBuffer.toString('base64url'));
+    // Armazenar o challenge original em memória para comparação posterior
+    // Em produção, usar Redis ou session storage
+    if (!global.passkeyChallenges) {
+      global.passkeyChallenges = new Map();
+    }
+    global.passkeyChallenges.set(challengeStr, challengeBuffer);
+    
+    console.log('[Passkey Register Options] Challenge gerado:', challengeStr);
     console.log('[Passkey Register Options] Challenge length:', challengeBuffer.length);
+    console.log('[Passkey Register Options] Challenge bytes:', Array.from(challengeBuffer));
     
     res.json({
       ...options,
@@ -159,28 +170,37 @@ router.post('/register', authenticateUser, async (req, res) => {
 
     const userId = req.userId;
     
-    // O challenge vem como string base64url do frontend
-    // Precisamos convertê-lo para Buffer para comparação
-    // O verifyRegistrationResponse vai extrair o challenge do clientDataJSON
-    // e compará-lo com o expectedChallenge
+    // Tentar recuperar o challenge original do armazenamento em memória
+    // Se não estiver disponível, usar o challenge recebido
     let expectedChallenge;
-    if (typeof challenge === 'string') {
-      try {
-        // Tentar decodificar como base64url
-        expectedChallenge = Buffer.from(challenge, 'base64url');
-      } catch (e) {
-        // Se falhar, tentar como base64 normal
-        expectedChallenge = Buffer.from(challenge, 'base64');
-      }
-    } else if (Buffer.isBuffer(challenge)) {
-      expectedChallenge = challenge;
+    if (global.passkeyChallenges && global.passkeyChallenges.has(challenge)) {
+      // Usar o challenge original armazenado
+      expectedChallenge = global.passkeyChallenges.get(challenge);
+      console.log('[Passkey Register] Usando challenge original do armazenamento');
+      // Limpar após uso (opcional, mas recomendado para não acumular memória)
+      global.passkeyChallenges.delete(challenge);
     } else {
-      return res.status(400).json({ message: 'Formato de challenge inválido' });
+      // Fallback: decodificar o challenge recebido
+      if (typeof challenge === 'string') {
+        try {
+          // Tentar decodificar como base64url
+          expectedChallenge = Buffer.from(challenge, 'base64url');
+        } catch (e) {
+          // Se falhar, tentar como base64 normal
+          expectedChallenge = Buffer.from(challenge, 'base64');
+        }
+      } else if (Buffer.isBuffer(challenge)) {
+        expectedChallenge = challenge;
+      } else {
+        return res.status(400).json({ message: 'Formato de challenge inválido' });
+      }
+      console.log('[Passkey Register] Usando challenge decodificado (fallback)');
     }
     
-    console.log('[Passkey Register] Challenge recebido:', challenge);
-    console.log('[Passkey Register] Challenge como Buffer:', expectedChallenge.toString('base64url'));
+    console.log('[Passkey Register] Challenge recebido (string):', challenge);
+    console.log('[Passkey Register] Challenge como Buffer (base64url):', expectedChallenge.toString('base64url'));
     console.log('[Passkey Register] Challenge Buffer length:', expectedChallenge.length);
+    console.log('[Passkey Register] Challenge Buffer bytes:', Array.from(expectedChallenge));
     
     // Verificar a resposta de registro
     let verification;
