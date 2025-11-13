@@ -53,9 +53,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final user = await _userService.getCurrentUser(forceRefresh: true);
       final email = _authService.currentUser?.email;
       
+      // Obter nome do Supabase se disponível (prioridade sobre MongoDB)
+      String? displayName;
+      try {
+        final supabaseUser = _authService.currentUser;
+        if (supabaseUser != null) {
+          displayName = supabaseUser.userMetadata?['display_name'] as String?;
+        }
+      } catch (e) {
+        // Ignorar erro ao obter display_name do Supabase
+      }
+      
       if (mounted) {
         setState(() {
-          _nameController.text = user?.name ?? '';
+          // Usar nome do Supabase se disponível, senão usar do MongoDB, senão string vazia
+          _nameController.text = displayName ?? user?.name ?? '';
           _email = email ?? user?.email;
           _profilePictureUrl = user?.profilePictureUrl;
           _isLoading = false;

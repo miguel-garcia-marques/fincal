@@ -265,7 +265,8 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
 
               if (shouldLogout == true && mounted) {
                 try {
-                  // Fazer logout (já inclui limpeza completa e delay)
+                  // Fazer logout (já inclui limpeza completa e tratamento de erros)
+                  // O método signOut trata erros de rede internamente e continua mesmo se falhar
                   await _authService.signOut();
 
                   // Aguardar um pouco adicional para garantir que tudo foi processado
@@ -282,22 +283,30 @@ class _SettingsMenuScreenState extends State<SettingsMenuScreen> {
                     );
                   }
                 } catch (e) {
+                  // O signOut já trata erros de rede internamente, mas se houver
+                  // algum erro inesperado, ainda assim navegar para AuthWrapper
+                  // para garantir que o usuário não fique preso
                   if (mounted) {
-                    // Mesmo em caso de erro, navegar para AuthWrapper
-                    // para garantir que o usuário não fique preso
                     Navigator.of(context).pushAndRemoveUntil(
                       MaterialPageRoute(
                         builder: (context) => const AuthWrapper(),
                       ),
                       (route) => false,
                     );
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Erro ao fazer logout: $e'),
-                        backgroundColor: AppTheme.expenseRed,
-                      ),
-                    );
+                    
+                    // Só mostrar erro se for algo crítico (não erro de rede)
+                    final errorString = e.toString().toLowerCase();
+                    if (!errorString.contains('network') && 
+                        !errorString.contains('connection') &&
+                        !errorString.contains('load failed') &&
+                        !errorString.contains('authretryablefetchexception')) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Erro ao fazer logout: $e'),
+                          backgroundColor: AppTheme.expenseRed,
+                        ),
+                      );
+                    }
                   }
                 }
               }

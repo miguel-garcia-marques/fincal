@@ -20,8 +20,10 @@ class StorageService {
   String? get _currentUserId => _authService.currentUserId;
   
   // Obter o caminho do arquivo no storage baseado no userId
+  // Usar timestamp para garantir nome único e evitar conflitos
   String _getFilePath(String userId) {
-    return '$userId/profile.jpg';
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    return '$userId/profile_$timestamp.jpg';
   }
   
   // Redimensionar imagem para otimizar tamanho
@@ -102,20 +104,17 @@ class StorageService {
         throw Exception('Usuário não autenticado');
       }
       
-      // Obter caminho do arquivo
-      final filePath = _getFilePath(userId);
-      
-      // Se houver uma foto antiga, deletá-la antes de fazer upload da nova
-      if (currentProfilePictureUrl != null && currentProfilePictureUrl.isNotEmpty) {
-        try {
-          // Verificar se a foto antiga está no mesmo bucket e caminho esperado
-          // Se estiver, deletar antes de fazer upload da nova
-          await deleteProfilePicture();
-        } catch (e) {
-          // Se falhar ao deletar, continuar mesmo assim (pode ser que a foto não exista mais)
-          // O upsert vai substituir o arquivo de qualquer forma
-        }
+      // Deletar todas as fotos antigas do usuário antes de fazer upload da nova
+      // Isso evita acumulação de arquivos antigos
+      try {
+        await _deleteAllUserProfilePictures(userId);
+      } catch (e) {
+        // Continuar mesmo se falhar ao deletar fotos antigas
+        // O upload continuará normalmente
       }
+      
+      // Obter caminho do arquivo (com timestamp único)
+      final filePath = _getFilePath(userId);
       
       // Redimensionar imagem antes de fazer upload
       final resizedImage = await _resizeImage(imageBytes);
@@ -156,6 +155,27 @@ class StorageService {
     }
   }
   
+  // Deletar todas as fotos de perfil do usuário
+  Future<void> _deleteAllUserProfilePictures(String userId) async {
+    try {
+      // Listar todos os arquivos na pasta do usuário
+      final files = await _supabase.storage
+          .from(_bucketName)
+          .list(path: userId);
+      
+      if (files.isNotEmpty) {
+        // Deletar todos os arquivos encontrados
+        final filePaths = files.map((file) => '$userId/${file.name}').toList();
+        await _supabase.storage
+            .from(_bucketName)
+            .remove(filePaths);
+      }
+    } catch (e) {
+      // Ignorar erro se a pasta não existir ou não houver arquivos
+      // Isso é normal para usuários sem foto
+    }
+  }
+  
   // Deletar foto de perfil
   Future<void> deleteProfilePicture() async {
     try {
@@ -164,11 +184,8 @@ class StorageService {
         throw Exception('Usuário não autenticado');
       }
       
-      final filePath = _getFilePath(userId);
-      
-      await _supabase.storage
-          .from(_bucketName)
-          .remove([filePath]);
+      // Deletar todas as fotos do usuário
+      await _deleteAllUserProfilePictures(userId);
     } catch (e) {
       // Ignorar erro se o arquivo não existir
       if (!e.toString().contains('not found')) {

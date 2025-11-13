@@ -99,10 +99,12 @@ router.get('/me', async (req, res) => {
       const personalWallet = await ensurePersonalWallet(req.userId);
       
       // Criar novo usuário com dados básicos do Supabase
+      // Buscar display_name do Supabase (que é onde salvamos o nome)
+      const displayName = req.user.user_metadata?.display_name || req.user.user_metadata?.name;
       user = new User({
         userId: req.userId,
         email: req.user.email || null,
-        name: req.user.user_metadata?.name || req.user.email?.split('@')[0] || 'Usuário',
+        name: displayName || req.user.email?.split('@')[0] || 'Usuário',
         personalWalletId: personalWallet._id,
         walletsInvited: []
       });
@@ -164,6 +166,14 @@ router.get('/me', async (req, res) => {
           // Ignorar erro ao salvar
         }
       }
+    }
+    
+    // Sincronizar nome do Supabase se disponível e diferente do MongoDB
+    const displayName = req.user.user_metadata?.display_name || req.user.user_metadata?.name;
+    if (displayName && user.name !== displayName) {
+      // Se o nome do Supabase estiver disponível e for diferente, atualizar no MongoDB
+      user.name = displayName;
+      await user.save();
     }
     
     // Recarregar usuário para garantir que temos os dados mais recentes

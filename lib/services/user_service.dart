@@ -113,6 +113,16 @@ class UserService {
   // Atualizar nome do usuário
   Future<User> updateUserName(String name) async {
     try {
+      // Primeiro atualizar no Supabase
+      try {
+        final authService = AuthService();
+        await authService.updateDisplayName(name);
+      } catch (e) {
+        // Continuar mesmo se falhar ao atualizar no Supabase
+        // O MongoDB será atualizado de qualquer forma
+      }
+      
+      // Depois atualizar no MongoDB
       final response = await http.put(
         Uri.parse('$baseUrl/users/me'),
         headers: _getHeaders(),

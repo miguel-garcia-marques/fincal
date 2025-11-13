@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../main.dart';
@@ -155,6 +156,35 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     });
   }
 
+  Future<void> _openEmailClient() async {
+    try {
+      // Abrir o cliente de email padrão (sem especificar destinatário)
+      // Isso abre o cliente de email para que o usuário possa verificar sua caixa de entrada
+      final emailUri = Uri(scheme: 'mailto');
+      if (await canLaunchUrl(emailUri)) {
+        await launchUrl(emailUri, mode: LaunchMode.externalApplication);
+      } else {
+        if (!_isDisposed && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Não foi possível abrir o cliente de email. Verifique manualmente sua caixa de entrada.'),
+              backgroundColor: AppTheme.darkGray,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (!_isDisposed && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao abrir email: ${e.toString()}'),
+            backgroundColor: AppTheme.expenseRed,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -235,7 +265,21 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                             color: AppTheme.darkGray,
                           ),
                     ),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 24),
+                    
+                    // Botão para abrir email
+                    OutlinedButton.icon(
+                      onPressed: _openEmailClient,
+                      icon: const Icon(Icons.email_outlined),
+                      label: const Text('Abrir Email'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     
                     // Botão "Já verifiquei"
                     ElevatedButton(

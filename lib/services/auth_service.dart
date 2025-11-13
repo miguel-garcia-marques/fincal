@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:html' as html;
 import 'cache_service.dart';
 import 'wallet_storage_service.dart';
+import '../config/app_config.dart';
 
 class AuthService {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -63,21 +64,66 @@ class AuthService {
       return null;
     }
     
+    // Primeiro, verificar se há uma URL configurada explicitamente via --dart-define
+    const envUrl = String.fromEnvironment('APP_BASE_URL');
+    if (envUrl.isNotEmpty) {
+      return envUrl;
+    }
+    
+    // Verificar se há uma URL configurada no AppConfig
+    final configuredUrl = AppConfig.getAppBaseUrl();
+    if (configuredUrl != null && configuredUrl.isNotEmpty) {
+      return configuredUrl;
+    }
+    
     try {
-      // Obter a URL base atual (funciona tanto em desenvolvimento quanto em produção)
+      // Obter a URL base atual
       final uri = Uri.base;
-      // Construir URL base (sem path, query ou fragment)
-      final redirectUrl = '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}';
+      final host = uri.host.toLowerCase();
+      
+      // Se estiver em localhost ou 127.0.0.1, retornar null
+      // O Supabase usará a URL padrão configurada no dashboard
+      // Isso evita que localhost seja usado em produção
+      if (host == 'localhost' || host == '127.0.0.1' || host.isEmpty) {
+        // Em desenvolvimento, ainda retornar localhost para facilitar testes
+        // Mas em produção build, retornar null para usar a URL do dashboard
+        const isProd = bool.fromEnvironment('dart.vm.product');
+        if (isProd) {
+          // Em produção, não usar localhost - deixar Supabase usar URL do dashboard
+          return null;
+        }
+        // Em desenvolvimento, usar localhost
+        return '${uri.scheme}://$host${uri.hasPort ? ':${uri.port}' : ''}';
+      }
+      
+      // Se não for localhost, estamos em produção
+      // Construir URL sem porta (Firebase Hosting não usa porta)
+      final redirectUrl = '${uri.scheme}://$host';
       return redirectUrl;
     } catch (e) {
       // Se falhar, tentar usar window.location
       try {
         if (kIsWeb) {
           final location = html.window.location;
-          return '${location.protocol}//${location.host}${location.port.isNotEmpty ? ':${location.port}' : ''}';
+          final host = location.host.toLowerCase();
+          
+          // Se for localhost, retornar null em produção
+          if (host.contains('localhost') || host.contains('127.0.0.1') || host.isEmpty) {
+            const isProd = bool.fromEnvironment('dart.vm.product');
+            if (isProd) {
+              return null; // Deixar Supabase usar URL do dashboard
+            }
+            // Em desenvolvimento, usar localhost
+            return location.port.isNotEmpty 
+                ? '${location.protocol}//$host:${location.port}'
+                : '${location.protocol}//$host';
+          }
+          
+          // Em produção, não incluir porta
+          return '${location.protocol}//$host';
         }
       } catch (e2) {
-        // Se ainda falhar, retornar null (Supabase usará o padrão configurado)
+        // Se ainda falhar, retornar null (Supabase usará o padrão configurado no dashboard)
       }
       return null;
     }
@@ -121,8 +167,30 @@ class AuthService {
       // Ignorar erros ao limpar dados pendentes
     }
     
-    // Fazer logout do Supabase por último
-    await _supabase.auth.signOut();
+    // Tentar fazer logout do Supabase com tratamento de erros robusto
+    // Se falhar (erro de rede, etc), continuar mesmo assim pois já limpamos tudo localmente
+    try {
+      // Verificar se há sessão antes de tentar logout
+      if (_supabase.auth.currentSession != null) {
+        // Tentar logout com timeout para evitar travamento
+        await _supabase.auth.signOut().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            // Se timeout, limpar sessão localmente
+            // O Supabase vai limpar automaticamente quando conseguir conectar
+          },
+        );
+      }
+    } catch (e) {
+      // Se falhar o logout do Supabase (erro de rede, timeout, etc),
+      // continuar mesmo assim pois já limpamos todos os dados locais
+      // O importante é garantir que o usuário possa continuar usando o app
+      // A sessão do Supabase será limpa quando conseguir conectar novamente
+      print('Aviso: Erro ao fazer logout do Supabase (continuando mesmo assim): $e');
+      
+      // O Supabase gerencia seus próprios tokens localmente
+      // Se houver erro de rede, a sessão será limpa quando conseguir conectar novamente
+    }
     
     // Aguardar um pouco para garantir que o logout foi processado completamente
     await Future.delayed(const Duration(milliseconds: 300));
