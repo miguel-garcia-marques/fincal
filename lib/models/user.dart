@@ -2,6 +2,7 @@ class User {
   final String userId;
   final String email;
   final String name;
+  final String? profilePictureUrl;
   final String? personalWalletId;
   final List<String> walletsInvited;
   final DateTime? createdAt;
@@ -11,6 +12,7 @@ class User {
     required this.userId,
     required this.email,
     required this.name,
+    this.profilePictureUrl,
     this.personalWalletId,
     List<String>? walletsInvited,
     this.createdAt,
@@ -51,6 +53,7 @@ class User {
       userId: json['userId'] as String,
       email: json['email'] as String,
       name: json['name'] as String,
+      profilePictureUrl: json['profilePictureUrl'] as String?,
       personalWalletId: personalWalletIdStr,
       walletsInvited: walletsInvitedList,
       createdAt: json['createdAt'] != null
@@ -67,6 +70,7 @@ class User {
       'userId': userId,
       'email': email,
       'name': name,
+      'profilePictureUrl': profilePictureUrl,
       'personalWalletId': personalWalletId,
       'walletsInvited': walletsInvited,
       'createdAt': createdAt?.toIso8601String(),

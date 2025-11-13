@@ -1,7 +1,9 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../services/user_service.dart';
 import '../services/auth_service.dart';
+import '../services/storage_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -13,12 +15,16 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final UserService _userService = UserService();
   final AuthService _authService = AuthService();
+  final StorageService _storageService = StorageService();
   final TextEditingController _nameController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   
   bool _isLoading = false;
   bool _isSaving = false;
+  bool _isUploadingPicture = false;
   String? _email;
+  String? _profilePictureUrl;
+  Uint8List? _selectedImageBytes;
   String? _errorMessage;
   String? _successMessage;
 
@@ -48,6 +54,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         setState(() {
           _nameController.text = user?.name ?? '';
           _email = email ?? user?.email;
+          _profilePictureUrl = user?.profilePictureUrl;
           _isLoading = false;
         });
       }
@@ -56,6 +63,100 @@ class _ProfileScreenState extends State<ProfileScreen> {
         setState(() {
           _errorMessage = 'Erro ao carregar dados do usuário: $e';
           _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _selectAndUploadPicture() async {
+    try {
+      setState(() {
+        _isUploadingPicture = true;
+        _errorMessage = null;
+      });
+
+      // Selecionar imagem
+      final imageBytes = await _storageService.pickImage();
+      
+      if (imageBytes == null) {
+        // Usuário cancelou a seleção
+        setState(() {
+          _isUploadingPicture = false;
+        });
+        return;
+      }
+
+      // Fazer upload da imagem (deleta a foto antiga se existir)
+      final imageUrl = await _storageService.uploadProfilePicture(
+        imageBytes,
+        currentProfilePictureUrl: _profilePictureUrl,
+      );
+      
+      // Atualizar perfil do usuário com a URL da imagem
+      await _userService.updateProfilePicture(imageUrl);
+      
+      if (mounted) {
+        setState(() {
+          _profilePictureUrl = imageUrl;
+          _selectedImageBytes = imageBytes;
+          _isUploadingPicture = false;
+          _successMessage = 'Foto de perfil atualizada com sucesso!';
+        });
+        
+        // Limpar mensagem de sucesso após 3 segundos
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) {
+            setState(() {
+              _successMessage = null;
+            });
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isUploadingPicture = false;
+          _errorMessage = 'Erro ao fazer upload da foto: $e';
+        });
+      }
+    }
+  }
+
+  Future<void> _removePicture() async {
+    try {
+      setState(() {
+        _isUploadingPicture = true;
+        _errorMessage = null;
+      });
+
+      // Deletar imagem do storage
+      await _storageService.deleteProfilePicture();
+      
+      // Atualizar perfil do usuário removendo a URL
+      await _userService.updateProfilePicture('');
+      
+      if (mounted) {
+        setState(() {
+          _profilePictureUrl = null;
+          _selectedImageBytes = null;
+          _isUploadingPicture = false;
+          _successMessage = 'Foto de perfil removida com sucesso!';
+        });
+        
+        // Limpar mensagem de sucesso após 3 segundos
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) {
+            setState(() {
+              _successMessage = null;
+            });
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isUploadingPicture = false;
+          _errorMessage = 'Erro ao remover foto: $e';
         });
       }
     }
@@ -121,23 +222,109 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Avatar/Icon
+                    // Avatar/Icon com opção de upload
                     Center(
-                      child: Container(
-                        width: 100,
-                        height: 100,
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryColor.withOpacity(0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.person,
-                          size: 60,
-                          color: AppTheme.primaryColor,
+                      child: Stack(
+                        children: [
+                          GestureDetector(
+                            onTap: _isUploadingPicture ? null : _selectAndUploadPicture,
+                            child: Container(
+                              width: 100,
+                              height: 100,
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryColor.withOpacity(0.1),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: AppTheme.primaryColor.withOpacity(0.3),
+                                  width: 2,
+                                ),
+                              ),
+                              child: _isUploadingPicture
+                                  ? const Center(
+                                      child: CircularProgressIndicator(),
+                                    )
+                                  : _selectedImageBytes != null
+                                      ? ClipOval(
+                                          child: Image.memory(
+                                            _selectedImageBytes!,
+                                            width: 100,
+                                            height: 100,
+                                            fit: BoxFit.cover,
+                                          ),
+                                        )
+                                      : _profilePictureUrl != null
+                                          ? ClipOval(
+                                              child: Image.network(
+                                                _profilePictureUrl!,
+                                                width: 100,
+                                                height: 100,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (context, error, stackTrace) {
+                                                  return Icon(
+                                                    Icons.person,
+                                                    size: 60,
+                                                    color: AppTheme.primaryColor,
+                                                  );
+                                                },
+                                                loadingBuilder: (context, child, loadingProgress) {
+                                                  if (loadingProgress == null) {
+                                                    return child;
+                                                  }
+                                                  return const Center(
+                                                    child: CircularProgressIndicator(),
+                                                  );
+                                                },
+                                              ),
+                                            )
+                                          : Icon(
+                                              Icons.person,
+                                              size: 60,
+                                              color: AppTheme.primaryColor,
+                                            ),
+                            ),
+                          ),
+                          // Botão de remover foto (se houver foto)
+                          if ((_profilePictureUrl != null || _selectedImageBytes != null) && !_isUploadingPicture)
+                            Positioned(
+                              right: 0,
+                              top: 0,
+                              child: GestureDetector(
+                                onTap: _removePicture,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.expenseRed,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: AppTheme.white,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: const Icon(
+                                    Icons.close,
+                                    size: 16,
+                                    color: AppTheme.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Center(
+                      child: TextButton.icon(
+                        onPressed: _isUploadingPicture ? null : _selectAndUploadPicture,
+                        icon: const Icon(Icons.camera_alt, size: 18),
+                        label: Text(
+                          _profilePictureUrl != null || _selectedImageBytes != null
+                              ? 'Alterar foto'
+                              : 'Adicionar foto',
+                          style: const TextStyle(fontSize: 14),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 24),
                     
                     // Mensagens de erro/sucesso
                     if (_errorMessage != null)

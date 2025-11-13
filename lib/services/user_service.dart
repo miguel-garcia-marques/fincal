@@ -136,4 +136,30 @@ class UserService {
       rethrow;
     }
   }
+
+  // Atualizar foto de perfil
+  Future<User> updateProfilePicture(String profilePictureUrl) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/users/me'),
+        headers: _getHeaders(),
+        body: json.encode({'profilePictureUrl': profilePictureUrl}),
+      );
+
+      if (response.statusCode == 200) {
+        final decoded = json.decode(response.body);
+        final user = User.fromJson(decoded);
+        
+        // Atualizar cache
+        await _cacheService.cacheUser(user);
+        
+        return user;
+      } else {
+        final errorBody = json.decode(response.body);
+        throw Exception(errorBody['message'] ?? 'Failed to update profile picture');
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
 }

@@ -264,23 +264,36 @@ router.post('/', validateUser, async (req, res) => {
   }
 });
 
-// PUT atualizar nome do usuário
+// PUT atualizar nome do usuário ou foto de perfil
 router.put('/me', validateUser, async (req, res) => {
   try {
     const User = getUserModel();
-    const { name } = req.body;
+    const { name, profilePictureUrl } = req.body;
     
-    if (!name || name.trim().length === 0) {
-      return res.status(400).json({ message: 'Nome é obrigatório' });
+    // Construir objeto de atualização dinamicamente
+    const updateData = {
+      updatedAt: new Date()
+    };
+    
+    if (name !== undefined) {
+      if (!name || name.trim().length === 0) {
+        return res.status(400).json({ message: 'Nome é obrigatório' });
+      }
+      updateData.name = name.trim();
+    }
+    
+    if (profilePictureUrl !== undefined) {
+      updateData.profilePictureUrl = profilePictureUrl || null;
+    }
+    
+    // Sempre atualizar email se disponível
+    if (req.user.email) {
+      updateData.email = req.user.email;
     }
     
     const user = await User.findOneAndUpdate(
       { userId: req.userId },
-      { 
-        name: name.trim(),
-        email: req.user.email,
-        updatedAt: new Date()
-      },
+      updateData,
       { new: true, upsert: true }
     );
     

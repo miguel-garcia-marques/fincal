@@ -105,9 +105,13 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     });
 
     try {
+      // Obter URL de redirecionamento
+      final redirectTo = _authService.getRedirectUrl();
+      
       await _authService.supabase.auth.resend(
         type: OtpType.signup,
         email: widget.email,
+        emailRedirectTo: redirectTo,
       );
       
       if (!_isDisposed && mounted) {

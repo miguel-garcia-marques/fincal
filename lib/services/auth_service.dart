@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:html' as html;
 import 'cache_service.dart';
 import 'wallet_storage_service.dart';
 
@@ -54,13 +56,44 @@ class AuthService {
     }
   }
 
+  // Obter URL de redirecionamento para verificação de email
+  String? getRedirectUrl() {
+    if (!kIsWeb) {
+      // Para apps mobile, não precisa de redirectTo
+      return null;
+    }
+    
+    try {
+      // Obter a URL base atual (funciona tanto em desenvolvimento quanto em produção)
+      final uri = Uri.base;
+      // Construir URL base (sem path, query ou fragment)
+      final redirectUrl = '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}';
+      return redirectUrl;
+    } catch (e) {
+      // Se falhar, tentar usar window.location
+      try {
+        if (kIsWeb) {
+          final location = html.window.location;
+          return '${location.protocol}//${location.host}${location.port.isNotEmpty ? ':${location.port}' : ''}';
+        }
+      } catch (e2) {
+        // Se ainda falhar, retornar null (Supabase usará o padrão configurado)
+      }
+      return null;
+    }
+  }
+
   // Criar conta com email e senha
   Future<AuthResponse> signUpWithEmail(String email, String password, {String? displayName}) async {
     try {
+      // Obter URL de redirecionamento
+      final redirectTo = getRedirectUrl();
+      
       return await _supabase.auth.signUp(
         email: email,
         password: password,
         data: displayName != null ? {'display_name': displayName} : null,
+        emailRedirectTo: redirectTo,
       );
     } catch (e) {
       rethrow;

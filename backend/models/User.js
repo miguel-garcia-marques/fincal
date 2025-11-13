@@ -14,6 +14,10 @@ const UserSchema = new mongoose.Schema({
     type: String, 
     required: true 
   },
+  profilePictureUrl: {
+    type: String,
+    default: null
+  },
   personalWalletId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Wallet',
