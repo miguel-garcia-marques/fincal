@@ -744,6 +744,44 @@ router.post('/authenticate', async (req, res) => {
     console.log('[Passkey Authenticate] ID corresponde ao rawId?', credentialForVerification.id === credentialForVerification.rawId);
     console.log('[Passkey Authenticate] Credential clientDataJSON length:', credentialForVerification.response.clientDataJSON.length);
     
+    // Verificar se passkey tem os campos necessários
+    if (!passkey.credentialID || !passkey.publicKey) {
+      console.error('[Passkey Authenticate] Passkey incompleta:', {
+        hasCredentialID: !!passkey.credentialID,
+        hasPublicKey: !!passkey.publicKey,
+        hasCounter: passkey.counter !== undefined
+      });
+      return res.status(500).json({ message: 'Dados da passkey incompletos' });
+    }
+    
+    // Converter credentialID e publicKey para Buffer
+    let credentialIDBuffer;
+    if (typeof passkey.credentialID === 'string') {
+      credentialIDBuffer = Buffer.from(passkey.credentialID, 'base64url');
+    } else if (Buffer.isBuffer(passkey.credentialID)) {
+      credentialIDBuffer = passkey.credentialID;
+    } else {
+      return res.status(500).json({ message: 'Formato de credentialID inválido' });
+    }
+    
+    let publicKeyBuffer;
+    if (typeof passkey.publicKey === 'string') {
+      publicKeyBuffer = Buffer.from(passkey.publicKey, 'base64url');
+    } else if (Buffer.isBuffer(passkey.publicKey)) {
+      publicKeyBuffer = passkey.publicKey;
+    } else {
+      return res.status(500).json({ message: 'Formato de publicKey inválido' });
+    }
+    
+    // Usar counter da passkey ou 0 como padrão
+    const counter = passkey.counter !== undefined && passkey.counter !== null ? passkey.counter : 0;
+    
+    console.log('[Passkey Authenticate] Dados do authenticator:', {
+      credentialIDLength: credentialIDBuffer.length,
+      publicKeyLength: publicKeyBuffer.length,
+      counter: counter
+    });
+    
     // Verificar a resposta de autenticação
     const verification = await verifyAuthenticationResponse({
       response: credentialForVerification, // Passar o objeto completo, não apenas response
@@ -751,9 +789,9 @@ router.post('/authenticate', async (req, res) => {
       expectedOrigin: origin,
       expectedRPID: rpID,
       authenticator: {
-        credentialID: Buffer.from(passkey.credentialID, 'base64url'),
-        credentialPublicKey: Buffer.from(passkey.publicKey, 'base64url'),
-        counter: passkey.counter
+        credentialID: credentialIDBuffer,
+        credentialPublicKey: publicKeyBuffer,
+        counter: counter
       },
       requireUserVerification: true
     });
