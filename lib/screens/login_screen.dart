@@ -776,6 +776,8 @@ class _LoginScreenState extends State<LoginScreen> {
         if (accessToken != null && userEmail != null) {
           try {
             print('[Passkey Login] Tentando criar sessão com tokens JWT...');
+            print('[Passkey Login] Access Token presente: ${accessToken.isNotEmpty}');
+            print('[Passkey Login] Refresh Token presente: ${refreshToken != null && refreshToken.isNotEmpty}');
             
             // Criar sessão usando os tokens JWT recebidos do backend
             final session = await _authService.setSession(
@@ -783,9 +785,13 @@ class _LoginScreenState extends State<LoginScreen> {
               refreshToken: refreshToken,
             );
             
+            print('[Passkey Login] Resposta do setSession:');
+            print('[Passkey Login] - Session: ${session.session != null}');
+            print('[Passkey Login] - User: ${session.user != null}');
+            
             if (session.session != null && mounted) {
               // Login bem-sucedido sem precisar de senha! 🎉
-              print('[Passkey Login] Sessão criada com sucesso!');
+              print('[Passkey Login] ✅ Sessão criada com sucesso!');
               
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
@@ -802,11 +808,18 @@ class _LoginScreenState extends State<LoginScreen> {
                 (route) => false,
               );
               return;
+            } else {
+              print('[Passkey Login] ❌ Sessão não foi criada. Session: ${session.session}, User: ${session.user}');
             }
-          } catch (e) {
-            print('[Passkey Login] Erro ao criar sessão com tokens JWT: $e');
+          } catch (e, stackTrace) {
+            print('[Passkey Login] ❌ Erro ao criar sessão com tokens JWT: $e');
+            print('[Passkey Login] Stack trace: $stackTrace');
             // Se falhar, tentar fallback ou mostrar campo de senha
           }
+        } else {
+          print('[Passkey Login] ⚠️ Tokens não disponíveis:');
+          print('[Passkey Login] - Access Token: ${accessToken != null}');
+          print('[Passkey Login] - User Email: ${userEmail != null}');
         }
         
         // Fallback: Se não tivermos tokens JWT ou se falhou, tentar token OTP

@@ -288,6 +288,14 @@ class PasskeyService {
       }
 
       final authData = jsonDecode(authResponse.body);
+      
+      // Debug: verificar o que foi recebido do backend
+      print('[PasskeyService] Resposta do backend:');
+      print('[PasskeyService] - success: ${authData['success']}');
+      print('[PasskeyService] - access_token: ${authData['access_token'] != null}');
+      print('[PasskeyService] - refresh_token: ${authData['refresh_token'] != null}');
+      print('[PasskeyService] - requiresPassword: ${authData['requiresPassword']}');
+      
       return {
         'success': true,
         'userId': authData['userId'],
