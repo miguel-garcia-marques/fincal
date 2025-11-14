@@ -40,6 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _passkeySupported = false;
   bool _emailEntered = false; // Controla se email foi inserido (para mostrar senha ou passkey)
   List<String> _previousEmails = []; // Lista de emails usados anteriormente
+  bool _showEmailList = false; // Controla se mostra lista de emails ou formulário
 
   @override
   void initState() {
@@ -53,13 +54,19 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     }
     
-    // Carregar emails usados anteriormente
-    _loadPreviousEmails();
-    
-    // Verificar se o usuário já está autenticado (após verificar email)
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkIfAlreadyAuthenticated();
-      _checkPasskeySupport();
+    // Carregar emails usados anteriormente e depois verificar se deve mostrar lista
+    _loadPreviousEmails().then((_) {
+      // Verificar se o usuário já está autenticado (após verificar email)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _checkIfAlreadyAuthenticated();
+        _checkPasskeySupport();
+        // Se houver emails anteriores e estiver no modo login, mostrar lista primeiro
+        if (mounted && _previousEmails.isNotEmpty && _isLoginMode) {
+          setState(() {
+            _showEmailList = true;
+          });
+        }
+      });
     });
   }
 
@@ -978,44 +985,219 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
+  // Método para selecionar um email da lista
+  void _selectEmailFromList(String email) {
+    setState(() {
+      _emailController.text = email;
+      _showEmailList = false;
+      _emailEntered = true; // Mostrar campo de senha automaticamente
+    });
+  }
+
+  // Método para mostrar formulário de email novo
+  void _showNewEmailForm() {
+    setState(() {
+      _showEmailList = false;
+      _emailController.clear();
+    });
+  }
+
+  // Widget para mostrar lista de emails anteriores
+  Widget _buildEmailList() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth >= 1400;
     
-    return Scaffold(
-      backgroundColor: AppTheme.white,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: EdgeInsets.all(isDesktop ? 32.0 : 24.0),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: isDesktop ? 450 : 400),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Logo/Título
-                    Icon(
-                      Icons.account_balance_wallet,
-                      size: isDesktop ? 60 : 80,
-                      color: AppTheme.black,
-                    ),
-                    SizedBox(height: isDesktop ? 16 : 24),
-                    Text(
-                      'FinCal',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                            fontSize: isDesktop 
-                                ? ResponsiveFonts.getFontSize(context, 24)
-                                : null,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.black,
-                          ),
-                    ),
-                    SizedBox(height: isDesktop ? 32 : 48),
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Logo/Título
+        Icon(
+          Icons.account_balance_wallet,
+          size: isDesktop ? 60 : 80,
+          color: AppTheme.black,
+        ),
+        SizedBox(height: isDesktop ? 16 : 24),
+        Text(
+          'FinCal',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.displayMedium?.copyWith(
+                fontSize: isDesktop 
+                    ? ResponsiveFonts.getFontSize(context, 24)
+                    : null,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.black,
+              ),
+        ),
+        SizedBox(height: isDesktop ? 32 : 48),
+        
+        // Título da lista
+        Text(
+          'Selecione uma conta',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: isDesktop ? 20 : 18,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.black,
+          ),
+        ),
+        SizedBox(height: 8),
+        Text(
+          'Escolha uma conta para continuar',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey[600],
+          ),
+        ),
+        SizedBox(height: 32),
+        
+        // Lista de emails
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey[300]!),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _previousEmails.length,
+            separatorBuilder: (context, index) => Divider(
+              height: 1,
+              color: Colors.grey[300],
+            ),
+            itemBuilder: (context, index) {
+              final email = _previousEmails[index];
+              return InkWell(
+                onTap: () => _selectEmailFromList(email),
+                hoverColor: AppTheme.black.withOpacity(0.05),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16.0,
+                    vertical: 16.0,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AppTheme.black.withOpacity(0.1),
+                        ),
+                        child: Icon(
+                          Icons.email_outlined,
+                          color: AppTheme.black.withOpacity(0.6),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              email,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                                color: AppTheme.black,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Conta existente',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right,
+                        color: Colors.grey[400],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        
+        SizedBox(height: 24),
+        
+        // Botão para usar email novo
+        OutlinedButton.icon(
+          onPressed: _showNewEmailForm,
+          icon: const Icon(Icons.add, size: 20),
+          label: const Text('Usar outro email'),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            side: const BorderSide(color: AppTheme.black),
+          ),
+        ),
+        
+        SizedBox(height: 16),
+        
+        // Toggle para signup
+        TextButton(
+          onPressed: _isLoading
+              ? null
+              : () {
+                  setState(() {
+                    _isLoginMode = !_isLoginMode;
+                    _showEmailList = false;
+                    _emailEntered = false;
+                    _passwordController.clear();
+                  });
+                },
+          child: Text(
+            _isLoginMode
+                ? 'Não tem uma conta? Criar conta'
+                : 'Já tem uma conta? Fazer login',
+            style: const TextStyle(color: AppTheme.black),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Widget para mostrar formulário de login/signup
+  Widget _buildLoginForm() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isDesktop = screenWidth >= 1400;
+    
+    return Form(
+      key: _formKey,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Logo/Título
+          Icon(
+            Icons.account_balance_wallet,
+            size: isDesktop ? 60 : 80,
+            color: AppTheme.black,
+          ),
+          SizedBox(height: isDesktop ? 16 : 24),
+          Text(
+            'FinCal',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayMedium?.copyWith(
+                  fontSize: isDesktop 
+                      ? ResponsiveFonts.getFontSize(context, 24)
+                      : null,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.black,
+                ),
+          ),
+          SizedBox(height: isDesktop ? 32 : 48),
                     
                     // Nome field (apenas no signup)
                     if (!_isLoginMode) ...[
@@ -1356,27 +1538,51 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 8),
                     ],
                     
-                    // Toggle between login and signup
-                    TextButton(
-                      onPressed: _isLoading
-                          ? null
-                          : () {
-                              setState(() {
-                                _isLoginMode = !_isLoginMode;
-                                _emailEntered = false; // Reset ao trocar modo
-                                _passwordController.clear();
-                              });
-                            },
-                      child: Text(
-                        _isLoginMode
-                            ? 'Não tem uma conta? Criar conta'
-                            : 'Já tem uma conta? Fazer login',
-                        style: const TextStyle(color: AppTheme.black),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+          // Toggle between login and signup
+          TextButton(
+            onPressed: _isLoading
+                ? null
+                : () {
+                    setState(() {
+                      _isLoginMode = !_isLoginMode;
+                      _emailEntered = false; // Reset ao trocar modo
+                      _passwordController.clear();
+                      // Se voltar para login e houver emails, mostrar lista
+                      if (_isLoginMode && _previousEmails.isNotEmpty) {
+                        _showEmailList = true;
+                      } else {
+                        _showEmailList = false;
+                      }
+                    });
+                  },
+            child: Text(
+              _isLoginMode
+                  ? 'Não tem uma conta? Criar conta'
+                  : 'Já tem uma conta? Fazer login',
+              style: const TextStyle(color: AppTheme.black),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isDesktop = screenWidth >= 1400;
+    
+    return Scaffold(
+      backgroundColor: AppTheme.white,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.all(isDesktop ? 32.0 : 24.0),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: isDesktop ? 450 : 400),
+              child: _showEmailList && _isLoginMode && _previousEmails.isNotEmpty
+                  ? _buildEmailList()
+                  : _buildLoginForm(),
             ),
           ),
         ),
