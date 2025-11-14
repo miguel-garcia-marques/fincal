@@ -181,15 +181,38 @@ router.post('/register', authenticateUser, async (req, res) => {
     const userId = req.userId;
     
     // Tentar recuperar o challenge original do MongoDB
+    // Buscar pelo userId e type primeiro, depois verificar se o challenge corresponde
     const Challenge = getChallengeModel();
     let expectedChallenge;
     
     try {
-      const storedChallenge = await Challenge.findOne({ 
-        challenge: challenge,
+      // Buscar challenges recentes do usuário (últimos 5 minutos)
+      const recentChallenges = await Challenge.find({ 
         userId: userId,
-        type: 'registration'
-      });
+        type: 'registration',
+        createdAt: { $gte: new Date(Date.now() - 5 * 60 * 1000) } // Últimos 5 minutos
+      }).sort({ createdAt: -1 }).limit(5);
+      
+      // Tentar encontrar o challenge que corresponde (pode haver diferenças de codificação)
+      let storedChallenge = null;
+      for (const ch of recentChallenges) {
+        // Comparar o challenge recebido com o armazenado (ambos como base64url)
+        if (ch.challenge === challenge) {
+          storedChallenge = ch;
+          break;
+        }
+        // Também tentar comparar decodificando ambos
+        try {
+          const receivedBuffer = Buffer.from(challenge, 'base64url');
+          const storedBuffer = Buffer.from(ch.challengeBuffer, 'base64');
+          if (receivedBuffer.equals(storedBuffer)) {
+            storedChallenge = ch;
+            break;
+          }
+        } catch (e) {
+          // Ignorar erro de comparação
+        }
+      }
       
       if (storedChallenge && storedChallenge.challengeBuffer) {
         // Usar o challenge original armazenado (decodificar de base64)
@@ -236,11 +259,38 @@ router.post('/register', authenticateUser, async (req, res) => {
     console.log('[Passkey Register] Challenge como Buffer (base64url):', expectedChallenge.toString('base64url'));
     console.log('[Passkey Register] Challenge Buffer length:', expectedChallenge.length);
     
+    // Converter credential do formato JSON (base64url strings) para formato esperado pela biblioteca
+    // O frontend envia tudo como base64url strings, precisamos converter de volta para Buffers
+    const credentialForVerification = {
+      id: credential.id || credential.rawId,
+      rawId: Buffer.from(credential.rawId || credential.id, 'base64url'),
+      response: {
+        clientDataJSON: Buffer.from(credential.response.clientDataJSON, 'base64url'),
+        attestationObject: credential.response.attestationObject 
+          ? Buffer.from(credential.response.attestationObject, 'base64url')
+          : undefined,
+        authenticatorData: credential.response.authenticatorData
+          ? Buffer.from(credential.response.authenticatorData, 'base64url')
+          : undefined,
+        signature: credential.response.signature
+          ? Buffer.from(credential.response.signature, 'base64url')
+          : undefined,
+        userHandle: credential.response.userHandle
+          ? Buffer.from(credential.response.userHandle, 'base64url')
+          : undefined,
+      },
+      type: credential.type || 'public-key',
+      authenticatorAttachment: credential.authenticatorAttachment,
+      clientExtensionResults: credential.clientExtensionResults || {},
+    };
+    
+    console.log('[Passkey Register] Credential convertido, clientDataJSON length:', credentialForVerification.response.clientDataJSON.length);
+    
     // Verificar a resposta de registro
     let verification;
     try {
       verification = await verifyRegistrationResponse({
-        response: credential,
+        response: credentialForVerification.response,
         expectedChallenge: expectedChallenge,
         expectedOrigin: origin,
         expectedRPID: rpID,
@@ -417,15 +467,38 @@ router.post('/authenticate', async (req, res) => {
     }
 
     // Tentar recuperar o challenge original do MongoDB
+    // Buscar pelo userId e type primeiro, depois verificar se o challenge corresponde
     const Challenge = getChallengeModel();
     let expectedChallenge;
     
     try {
-      const storedChallenge = await Challenge.findOne({ 
-        challenge: challenge,
+      // Buscar challenges recentes do usuário (últimos 5 minutos)
+      const recentChallenges = await Challenge.find({ 
         userId: userId,
-        type: 'authentication'
-      });
+        type: 'authentication',
+        createdAt: { $gte: new Date(Date.now() - 5 * 60 * 1000) } // Últimos 5 minutos
+      }).sort({ createdAt: -1 }).limit(5);
+      
+      // Tentar encontrar o challenge que corresponde (pode haver diferenças de codificação)
+      let storedChallenge = null;
+      for (const ch of recentChallenges) {
+        // Comparar o challenge recebido com o armazenado (ambos como base64url)
+        if (ch.challenge === challenge) {
+          storedChallenge = ch;
+          break;
+        }
+        // Também tentar comparar decodificando ambos
+        try {
+          const receivedBuffer = Buffer.from(challenge, 'base64url');
+          const storedBuffer = Buffer.from(ch.challengeBuffer, 'base64');
+          if (receivedBuffer.equals(storedBuffer)) {
+            storedChallenge = ch;
+            break;
+          }
+        } catch (e) {
+          // Ignorar erro de comparação
+        }
+      }
       
       if (storedChallenge && storedChallenge.challengeBuffer) {
         // Usar o challenge original armazenado (decodificar de base64)
@@ -466,9 +539,32 @@ router.post('/authenticate', async (req, res) => {
       console.log('[Passkey Authenticate] Usando challenge decodificado (fallback após erro)');
     }
     
+    // Converter credential do formato JSON (base64url strings) para formato esperado pela biblioteca
+    const credentialForVerification = {
+      id: credential.id || credential.rawId,
+      rawId: Buffer.from(credential.rawId || credential.id, 'base64url'),
+      response: {
+        clientDataJSON: Buffer.from(credential.response.clientDataJSON, 'base64url'),
+        authenticatorData: credential.response.authenticatorData
+          ? Buffer.from(credential.response.authenticatorData, 'base64url')
+          : undefined,
+        signature: credential.response.signature
+          ? Buffer.from(credential.response.signature, 'base64url')
+          : undefined,
+        userHandle: credential.response.userHandle
+          ? Buffer.from(credential.response.userHandle, 'base64url')
+          : undefined,
+      },
+      type: credential.type || 'public-key',
+      authenticatorAttachment: credential.authenticatorAttachment,
+      clientExtensionResults: credential.clientExtensionResults || {},
+    };
+    
+    console.log('[Passkey Authenticate] Credential convertido, clientDataJSON length:', credentialForVerification.response.clientDataJSON.length);
+    
     // Verificar a resposta de autenticação
     const verification = await verifyAuthenticationResponse({
-      response: credential,
+      response: credentialForVerification.response,
       expectedChallenge: expectedChallenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
