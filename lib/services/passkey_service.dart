@@ -67,7 +67,7 @@ class PasskeyService {
   }
 
   // Registrar nova passkey
-  Future<bool> registerPasskey({String? deviceType}) async {
+  Future<bool> registerPasskey({String? deviceType, String? name}) async {
     final prefs = await SharedPreferences.getInstance();
     if (!isSupported) {
       throw Exception('Passkeys não são suportadas neste dispositivo');
@@ -177,6 +177,7 @@ class PasskeyService {
           'credential': credentialMap,
           'challenge': challenge,
           'deviceType': deviceType ?? _detectDeviceType(),
+          'name': name,
         }),
       );
 
@@ -208,18 +209,61 @@ class PasskeyService {
     }
 
     try {
-      // 1. Obter opções de autenticação do servidor
-      final optionsResponse = await http.post(
-        Uri.parse('$_baseUrl/passkeys/authenticate/options'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'email': email}),
-      );
+      // 1. Obter opções de autenticação do servidor com retry para 429
+      http.Response? optionsResponse;
+      int retryCount = 0;
+      const maxRetries = 3;
+      
+      while (retryCount <= maxRetries) {
+        try {
+          optionsResponse = await http.post(
+            Uri.parse('$_baseUrl/passkeys/authenticate/options'),
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'email': email}),
+          );
+          
+          // Se não for 429, sair do loop
+          if (optionsResponse.statusCode != 429) {
+            break;
+          }
+          
+          // Se for 429 e ainda temos tentativas, aguardar antes de retry
+          if (retryCount < maxRetries) {
+            final delaySeconds = (retryCount + 1) * 2; // Backoff exponencial: 2s, 4s, 6s
+            print('[PasskeyService] Rate limit (429) atingido. Aguardando ${delaySeconds}s antes de tentar novamente...');
+            await Future.delayed(Duration(seconds: delaySeconds));
+            retryCount++;
+            continue;
+          }
+        } catch (e) {
+          // Se não for erro de rede, relançar
+          if (!e.toString().contains('ClientException') && 
+              !e.toString().contains('SocketException')) {
+            rethrow;
+          }
+          // Erro de rede: tentar novamente se ainda temos tentativas
+          if (retryCount < maxRetries) {
+            final delaySeconds = (retryCount + 1) * 2;
+            await Future.delayed(Duration(seconds: delaySeconds));
+            retryCount++;
+            continue;
+          }
+          rethrow;
+        }
+      }
+      
+      if (optionsResponse == null) {
+        throw Exception('Erro ao obter opções de autenticação após múltiplas tentativas');
+      }
 
       if (optionsResponse.statusCode != 200) {
         if (optionsResponse.statusCode == 404) {
           throw Exception('Nenhuma passkey encontrada para este email');
+        }
+        if (optionsResponse.statusCode == 429) {
+          throw Exception('Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.');
         }
         throw Exception('Erro ao obter opções de autenticação: ${optionsResponse.body}');
       }
@@ -281,20 +325,62 @@ class PasskeyService {
         throw Exception('Erro ao autenticar com passkey: ${credentialMap['error']}');
       }
 
-      // 3. Enviar credencial para o servidor para verificação
-      final authResponse = await http.post(
-        Uri.parse('$_baseUrl/passkeys/authenticate'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'credential': credentialMap,
-          'challenge': challenge,
-          'userId': userId,
-        }),
-      );
+      // 3. Enviar credencial para o servidor para verificação com retry para 429
+      http.Response? authResponse;
+      retryCount = 0;
+      
+      while (retryCount <= maxRetries) {
+        try {
+          authResponse = await http.post(
+            Uri.parse('$_baseUrl/passkeys/authenticate'),
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'credential': credentialMap,
+              'challenge': challenge,
+              'userId': userId,
+            }),
+          );
+          
+          // Se não for 429, sair do loop
+          if (authResponse.statusCode != 429) {
+            break;
+          }
+          
+          // Se for 429 e ainda temos tentativas, aguardar antes de retry
+          if (retryCount < maxRetries) {
+            final delaySeconds = (retryCount + 1) * 2; // Backoff exponencial: 2s, 4s, 6s
+            print('[PasskeyService] Rate limit (429) atingido na autenticação. Aguardando ${delaySeconds}s antes de tentar novamente...');
+            await Future.delayed(Duration(seconds: delaySeconds));
+            retryCount++;
+            continue;
+          }
+        } catch (e) {
+          // Se não for erro de rede, relançar
+          if (!e.toString().contains('ClientException') && 
+              !e.toString().contains('SocketException')) {
+            rethrow;
+          }
+          // Erro de rede: tentar novamente se ainda temos tentativas
+          if (retryCount < maxRetries) {
+            final delaySeconds = (retryCount + 1) * 2;
+            await Future.delayed(Duration(seconds: delaySeconds));
+            retryCount++;
+            continue;
+          }
+          rethrow;
+        }
+      }
+      
+      if (authResponse == null) {
+        throw Exception('Erro ao autenticar com passkey após múltiplas tentativas');
+      }
 
       if (authResponse.statusCode != 200) {
+        if (authResponse.statusCode == 429) {
+          throw Exception('Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.');
+        }
         final errorData = jsonDecode(authResponse.body);
         throw Exception(errorData['message'] ?? 'Erro ao autenticar com passkey');
       }
@@ -350,6 +436,36 @@ class PasskeyService {
 
       final List<dynamic> data = jsonDecode(response.body);
       return data.cast<Map<String, dynamic>>();
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Atualizar nome da passkey
+  Future<bool> updatePasskeyName(String passkeyId, String? name) async {
+    try {
+      final token = _authService.currentAccessToken;
+      if (token == null) {
+        throw Exception('Usuário não autenticado');
+      }
+
+      final response = await http.put(
+        Uri.parse('$_baseUrl/passkeys/$passkeyId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'name': name,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        final errorData = jsonDecode(response.body);
+        throw Exception(errorData['message'] ?? 'Erro ao atualizar nome da passkey');
+      }
+
+      return true;
     } catch (e) {
       rethrow;
     }

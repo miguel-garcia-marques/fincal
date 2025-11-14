@@ -20,12 +20,24 @@ class _SecurityScreenState extends State<SecurityScreen> {
   List<Map<String, dynamic>> _passkeys = [];
   String? _errorMessage;
   String? _successMessage;
+  bool? _passkeySupported; // Cache do resultado de isSupported
 
   @override
   void initState() {
     super.initState();
-    if (kIsWeb && _passkeyService.isSupported) {
-      _loadPasskeys();
+    // Verificar suporte apenas uma vez e cachear
+    if (kIsWeb) {
+      try {
+        _passkeySupported = _passkeyService.isSupported;
+        if (_passkeySupported == true) {
+          _loadPasskeys();
+        }
+      } catch (e) {
+        print('[SecurityScreen] Erro ao verificar suporte a passkey: $e');
+        _passkeySupported = false;
+      }
+    } else {
+      _passkeySupported = false;
     }
   }
 
@@ -66,6 +78,40 @@ class _SecurityScreenState extends State<SecurityScreen> {
       return;
     }
 
+    // Mostrar diálogo para inserir nome
+    final nameController = TextEditingController();
+    final nameResult = await showDialog<String?>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Nomear Passkey'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(
+            labelText: 'Nome (opcional)',
+            hintText: 'Ex: MacBook Pro, iPhone, etc.',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+          onSubmitted: (value) => Navigator.of(context).pop(value.trim().isEmpty ? '' : value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(nameController.text.trim().isEmpty ? '' : nameController.text.trim()),
+            child: const Text('Continuar'),
+          ),
+        ],
+      ),
+    );
+
+    // Se cancelou (retornou null), não fazer nada
+    if (nameResult == null) {
+      return;
+    }
+
     setState(() {
       _isRegisteringPasskey = true;
       _errorMessage = null;
@@ -73,7 +119,8 @@ class _SecurityScreenState extends State<SecurityScreen> {
     });
 
     try {
-      await _passkeyService.registerPasskey();
+      final name = nameResult.trim().isEmpty ? null : nameResult.trim();
+      await _passkeyService.registerPasskey(name: name);
       
       if (mounted) {
         setState(() {
@@ -98,6 +145,77 @@ class _SecurityScreenState extends State<SecurityScreen> {
         setState(() {
           _isRegisteringPasskey = false;
           _errorMessage = 'Erro ao registrar passkey: $e';
+        });
+      }
+    }
+  }
+
+  Future<void> _editPasskeyName(String passkeyId, String? currentName) async {
+    final nameController = TextEditingController(text: currentName ?? '');
+    final nameResult = await showDialog<String?>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Editar Nome da Passkey'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(
+            labelText: 'Nome',
+            hintText: 'Ex: MacBook Pro, iPhone, etc.',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+          onSubmitted: (value) => Navigator.of(context).pop(value.trim().isEmpty ? null : value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(nameController.text.trim().isEmpty ? null : nameController.text.trim()),
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+
+    // Se cancelou (retornou null), não fazer nada
+    if (nameResult == null) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final name = nameResult.trim().isEmpty ? null : nameResult.trim();
+      await _passkeyService.updatePasskeyName(passkeyId, name);
+      
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _successMessage = 'Nome da passkey atualizado com sucesso!';
+        });
+        
+        // Recarregar lista de passkeys
+        await _loadPasskeys();
+        
+        // Limpar mensagem de sucesso após 3 segundos
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) {
+            setState(() {
+              _successMessage = null;
+            });
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Erro ao atualizar nome da passkey: $e';
         });
       }
     }
@@ -231,7 +349,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
             ],
             
             // Seção de Passkeys
-            if (kIsWeb && _passkeyService.isSupported) ...[
+            if (kIsWeb && _passkeySupported == true) ...[
               Text(
                 'Passkeys',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -310,20 +428,45 @@ class _SecurityScreenState extends State<SecurityScreen> {
                 ),
                 const SizedBox(height: 12),
                 ..._passkeys.map((passkey) {
+                  final passkeyId = passkey['_id'] as String? ?? passkey['credentialID'] as String;
+                  final name = passkey['name'] as String?;
                   final deviceType = passkey['deviceType'] as String? ?? 'Desconhecido';
+                  final displayName = name ?? deviceType;
                   final lastUsed = passkey['lastUsedAt'] as String?;
                   
                   return Card(
                     margin: const EdgeInsets.only(bottom: 12),
                     child: ListTile(
                       leading: const Icon(Icons.fingerprint, color: AppTheme.black),
-                      title: Text(deviceType),
-                      subtitle: lastUsed != null
-                          ? Text('Último uso: ${_formatDate(lastUsed)}')
-                          : const Text('Nunca usado'),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline, color: AppTheme.expenseRed),
-                        onPressed: () => _deletePasskey(passkey['credentialID'] as String),
+                      title: Text(displayName),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (name != null && deviceType != 'Desconhecido')
+                            Text(
+                              deviceType,
+                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                            ),
+                          if (lastUsed != null)
+                            Text('Último uso: ${_formatDate(lastUsed)}')
+                          else
+                            const Text('Nunca usado'),
+                        ],
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined, color: AppTheme.black),
+                            onPressed: () => _editPasskeyName(passkeyId, name),
+                            tooltip: 'Editar nome',
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: AppTheme.expenseRed),
+                            onPressed: () => _deletePasskey(passkeyId),
+                            tooltip: 'Deletar',
+                          ),
+                        ],
                       ),
                     ),
                   );

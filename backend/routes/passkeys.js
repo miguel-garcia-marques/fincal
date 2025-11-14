@@ -256,7 +256,7 @@ router.post('/register/options', authenticateUser, async (req, res) => {
 router.post('/register', authenticateUser, async (req, res) => {
   try {
     const Passkey = getPasskeyModel();
-    const { credential, challenge, deviceType } = req.body;
+    const { credential, challenge, deviceType, name } = req.body;
     
     if (!credential || !challenge) {
       return res.status(400).json({ message: 'Credencial e challenge são obrigatórios' });
@@ -539,6 +539,7 @@ router.post('/register', authenticateUser, async (req, res) => {
       publicKey: publicKeyBuffer.toString('base64url'),
       counter: counter || 0,
       deviceType: deviceType || 'unknown',
+      name: name || null,
       lastUsedAt: new Date()
     });
 
@@ -1012,6 +1013,45 @@ router.get('/', authenticateUser, async (req, res) => {
   } catch (error) {
     console.error('Erro ao listar passkeys:', error);
     res.status(500).json({ message: 'Erro ao listar passkeys: ' + error.message });
+  }
+});
+
+// PUT /api/passkeys/:id - Atualizar nome da passkey
+router.put('/:id', authenticateUser, async (req, res) => {
+  try {
+    const Passkey = getPasskeyModel();
+    const { name } = req.body;
+    
+    if (name !== undefined && (typeof name !== 'string' || name.trim().length === 0)) {
+      return res.status(400).json({ message: 'Nome inválido. Deve ser uma string não vazia ou null.' });
+    }
+    
+    const passkey = await Passkey.findOne({ 
+      _id: req.params.id,
+      userId: req.userId 
+    });
+
+    if (!passkey) {
+      return res.status(404).json({ message: 'Passkey não encontrada' });
+    }
+
+    passkey.name = name !== undefined ? (name.trim() || null) : passkey.name;
+    await passkey.save();
+    
+    res.json({ 
+      success: true, 
+      message: 'Nome da passkey atualizado com sucesso',
+      passkey: {
+        _id: passkey._id,
+        name: passkey.name,
+        deviceType: passkey.deviceType,
+        createdAt: passkey.createdAt,
+        lastUsedAt: passkey.lastUsedAt
+      }
+    });
+  } catch (error) {
+    console.error('Erro ao atualizar nome da passkey:', error);
+    res.status(500).json({ message: 'Erro ao atualizar nome da passkey: ' + error.message });
   }
 });
 

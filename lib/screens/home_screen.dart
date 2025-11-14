@@ -60,6 +60,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isInitialLoading = true; // Novo estado para loading inicial
   List<PeriodHistory> _periodHistories = [];
   bool _periodSelected = false;
+  bool _periodDialogShown = false; // Flag para evitar diálogo duplicado
   final GlobalKey<CalendarWidgetState> _calendarKey =
       GlobalKey<CalendarWidgetState>();
   Future<double>? _initialBalanceFuture;
@@ -444,10 +445,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _selectDateRangeOnStartup() async {
+    // Evitar mostrar diálogo se já foi mostrado
+    if (_periodDialogShown) return;
+    
     // Set default to current month
     final now = DateTime.now();
     _startDate = DateTime(now.year, now.month, 1);
     _endDate = DateTime(now.year, now.month + 1, 0);
+
+    // Marcar que o diálogo será mostrado
+    _periodDialogShown = true;
 
     // Show period selection dialog if user has past periods
     if (_periodHistories.isNotEmpty) {
@@ -616,9 +623,18 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {}
   }
 
-  Future<void> _selectPeriod() async {
+  Future<void> _selectPeriod({bool isManualCall = false}) async {
+    // Se não for chamada manual e o diálogo já foi mostrado durante inicialização, não mostrar novamente
+    if (!isManualCall && _periodDialogShown) return;
+    
+    // Marcar que o diálogo será mostrado (se ainda não foi marcado)
+    if (!isManualCall) {
+      _periodDialogShown = true;
+    }
+    
     final result = await showDialog(
       context: context,
+      barrierDismissible: isManualCall, // Durante inicialização, não pode fechar sem selecionar
       builder: (context) => PeriodSelectorDialog(
         selectedYear: _selectedYear,
         startDate: _startDate,
@@ -635,6 +651,9 @@ class _HomeScreenState extends State<HomeScreen> {
       });
       await _loadTransactions(
           savePeriod: true, periodName: result['name'] as String? ?? '');
+    } else if (!isManualCall && mounted) {
+      // Se fechou sem selecionar durante inicialização, resetar flag para permitir tentar novamente
+      _periodDialogShown = false;
     }
   }
 
@@ -1499,7 +1518,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               // Período - à esquerda
                               Expanded(
                                 child: InkWell(
-                                  onTap: _selectPeriod,
+                                  onTap: () => _selectPeriod(isManualCall: true),
                                   borderRadius: BorderRadius.circular(12),
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
@@ -1799,7 +1818,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 // Período - à direita (agora ocupa todo o espaço)
                                 Expanded(
                                   child: InkWell(
-                                    onTap: _selectPeriod,
+                                    onTap: () => _selectPeriod(isManualCall: true),
                                     borderRadius: BorderRadius.circular(12),
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(

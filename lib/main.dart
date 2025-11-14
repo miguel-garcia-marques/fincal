@@ -174,6 +174,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
   
   bool _isLoading = true;
   OnboardingState _onboardingState = OnboardingState.notAuthenticated;
+  bool _isCheckingAuth = false; // Flag para prevenir chamadas simultâneas
 
   StreamSubscription<AuthState>? _authSubscription;
   StreamSubscription<Uri>? _linkSubscription;
@@ -197,15 +198,18 @@ class _AuthWrapperState extends State<AuthWrapper> {
       }
     });
     
-    // Verificar autenticação imediatamente ao criar o widget
-    _checkAuth();
+    // Verificar autenticação e invite (já chama _checkAuth internamente)
     _checkAuthAndInvite();
     
-    // Escutar mudanças de autenticação
+    // Escutar mudanças de autenticação com debounce
     _authSubscription = _authService.authStateChanges.listen((AuthState state) {
-      if (mounted) {
-        // Sempre re-verificar o estado do onboarding quando a autenticação muda
-        _checkAuth();
+      if (mounted && !_isCheckingAuth) {
+        // Debounce: aguardar um pouco antes de re-verificar
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted && !_isCheckingAuth) {
+            _checkAuth();
+          }
+        });
       }
     });
   }
@@ -330,6 +334,12 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   /// Verifica o estado do onboarding usando o orquestrador
   Future<void> _checkAuth() async {
+    // Prevenir chamadas simultâneas
+    if (_isCheckingAuth) {
+      return;
+    }
+    
+    _isCheckingAuth = true;
     try {
       print('[AuthWrapper] Verificando estado do onboarding...');
       final state = await _onboardingOrchestrator.getCurrentState();
@@ -349,46 +359,86 @@ class _AuthWrapperState extends State<AuthWrapper> {
           _isLoading = false;
         });
       }
+    } finally {
+      _isCheckingAuth = false;
     }
   }
 
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    // Navegar baseado no estado do onboarding
-    switch (_onboardingState) {
-      case OnboardingState.notAuthenticated:
-        return const LoginScreen();
-        
-      case OnboardingState.emailNotVerified:
-        // Se não autenticado mas tem sessão, mostrar tela de verificação
-        final user = _authService.currentUser;
-        if (user != null) {
-          return EmailVerificationScreen(
-            email: user.email ?? '',
-            inviteToken: null,
-          );
-        }
-        return const LoginScreen();
-        
-      case OnboardingState.needsProfilePicture:
-        final user = _authService.currentUser;
-        return ProfilePictureSelectionScreen(
-          email: user?.email ?? '',
-          inviteToken: null,
+    // Tratar erros durante o build
+    try {
+      if (_isLoading) {
+        return const Scaffold(
+          body: Center(child: CircularProgressIndicator()),
         );
-        
-      case OnboardingState.needsWalletSelection:
-        return const WalletSelectionScreen();
-        
-      case OnboardingState.completed:
-        return const HomeScreen();
+      }
+
+      // Navegar baseado no estado do onboarding
+      switch (_onboardingState) {
+        case OnboardingState.notAuthenticated:
+          return const LoginScreen();
+          
+        case OnboardingState.emailNotVerified:
+          // Se não autenticado mas tem sessão, mostrar tela de verificação
+          try {
+            final user = _authService.currentUser;
+            if (user != null) {
+              return EmailVerificationScreen(
+                email: user.email ?? '',
+                inviteToken: null,
+              );
+            }
+          } catch (e) {
+            print('[AuthWrapper] Erro ao obter usuário: $e');
+          }
+          return const LoginScreen();
+          
+        case OnboardingState.needsProfilePicture:
+          try {
+            final user = _authService.currentUser;
+            return ProfilePictureSelectionScreen(
+              email: user?.email ?? '',
+              inviteToken: null,
+            );
+          } catch (e) {
+            print('[AuthWrapper] Erro ao construir ProfilePictureSelectionScreen: $e');
+            return const LoginScreen();
+          }
+          
+        case OnboardingState.needsWalletSelection:
+          return const WalletSelectionScreen();
+          
+        case OnboardingState.completed:
+          return const HomeScreen();
+      }
+    } catch (e, stackTrace) {
+      // Capturar qualquer erro durante o build
+      print('[AuthWrapper] Erro durante build: $e');
+      print('[AuthWrapper] Stack trace: $stackTrace');
+      
+      // Retornar uma tela de erro segura
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const SizedBox(height: 16),
+              const Text('Erro ao carregar aplicativo'),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () {
+                  // Tentar recarregar
+                  _checkAuth();
+                },
+                child: const Text('Tentar novamente'),
+              ),
+            ],
+          ),
+        ),
+      );
     }
   }
 }

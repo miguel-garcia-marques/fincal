@@ -42,6 +42,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _emailEntered = false; // Controla se email foi inserido (para mostrar senha ou passkey)
   List<String> _previousEmails = []; // Lista de emails usados anteriormente
   bool _showEmailList = false; // Controla se mostra lista de emails ou formulário
+  bool _isAuthenticatingWithPasskey = false; // Flag para prevenir múltiplas tentativas simultâneas
 
   @override
   void initState() {
@@ -842,7 +843,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // Handler para login com passkey
   Future<void> _handlePasskeyLogin() async {
-    if (_isLoading) return;
+    if (_isLoading || _isAuthenticatingWithPasskey) return;
     
     final email = _emailController.text.trim();
     if (email.isEmpty) {
@@ -852,7 +853,10 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     }
     
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _isAuthenticatingWithPasskey = true;
+    });
 
     try {
       // Autenticar com passkey
@@ -1011,7 +1015,10 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } finally {
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          _isAuthenticatingWithPasskey = false;
+        });
       }
     }
   }
@@ -1027,12 +1034,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // Método para tentar autenticar com passkey após selecionar email
   Future<void> _tryPasskeyLogin(String email) async {
-    if (!kIsWeb || !_passkeySupported) {
+    if (!kIsWeb || !_passkeySupported || _isAuthenticatingWithPasskey) {
       return;
     }
 
     try {
-      setState(() => _isLoading = true);
+      setState(() {
+        _isLoading = true;
+        _isAuthenticatingWithPasskey = true;
+      });
       
       // Tentar autenticar com passkey
       final result = await _passkeyService.authenticateWithPasskey(email);
@@ -1110,6 +1120,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         setState(() {
           _isLoading = false;
+          _isAuthenticatingWithPasskey = false;
         });
       }
     }
