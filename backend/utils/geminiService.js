@@ -61,15 +61,49 @@ Retorne APENAS um objeto JSON válido, sem markdown, sem explicações adicionai
     ]
   };
 
-  // Lista de modelos GRATUITOS que suportam análise de imagens
-  // Apenas modelos do tier gratuito são usados aqui
-  // Ordem: tentar primeiro os mais recentes e gratuitos
+  // Primeiro, tentar listar modelos disponíveis para descobrir quais funcionam
+  // Depois tentar os modelos mais recentes primeiro
   const modelsToTry = [
-    { name: 'gemini-1.5-flash', version: 'v1' }, // Tentar v1 primeiro
-    { name: 'gemini-1.5-flash', version: 'v1beta' }, // Depois v1beta
-    { name: 'gemini-1.5-flash-latest', version: 'v1beta' },
+    { name: 'gemini-2.5-flash', version: 'v1beta' }, // Modelo mais recente mencionado na doc
+    { name: 'gemini-2.0-flash-exp', version: 'v1beta' }, // Versão experimental
+    { name: 'gemini-1.5-flash', version: 'v1beta' },
+    { name: 'gemini-1.5-flash-002', version: 'v1beta' }, // Versão específica
     { name: 'gemini-pro-vision', version: 'v1' }, // Modelo legado gratuito com visão
   ];
+
+  // Função auxiliar para listar modelos disponíveis (para debug)
+  const listAvailableModels = () => {
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'generativelanguage.googleapis.com',
+        path: `/v1beta/models?key=${apiKey}`,
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            try {
+              const response = JSON.parse(data);
+              resolve(response.models || []);
+            } catch (e) {
+              reject(e);
+            }
+          } else {
+            reject(new Error(`Erro ao listar modelos: ${res.statusCode}`));
+          }
+        });
+      });
+
+      req.on('error', reject);
+      req.end();
+    });
+  };
 
   // Função para tentar fazer a requisição com um modelo específico
   const tryModel = (modelConfig) => {
@@ -149,6 +183,15 @@ Retorne APENAS um objeto JSON válido, sem markdown, sem explicações adicionai
     });
   };
 
+  // Primeiro, tentar listar modelos disponíveis (opcional, para debug)
+  let availableModels = [];
+  try {
+    availableModels = await listAvailableModels();
+    console.log('📋 Modelos disponíveis:', availableModels.map(m => m.name).join(', '));
+  } catch (error) {
+    console.log('⚠️ Não foi possível listar modelos disponíveis, continuando com tentativas...');
+  }
+
   // Tentar cada modelo até que um funcione
   let lastError = null;
   const errors = [];
@@ -169,12 +212,20 @@ Retorne APENAS um objeto JSON válido, sem markdown, sem explicações adicionai
 
   // Se nenhum modelo funcionou, lançar erro com todos os detalhes
   const allErrors = errors.join('\n');
-  throw new Error(
-    `Todos os modelos gratuitos falharam. Verifique se sua API key está correta e se tem acesso aos modelos gratuitos.\n\nErros:\n${allErrors}\n\nCertifique-se de que:\n` +
+  let errorMessage = `Todos os modelos gratuitos falharam. Verifique se sua API key está correta e se tem acesso aos modelos gratuitos.\n\nErros:\n${allErrors}\n\n`;
+  
+  if (availableModels.length > 0) {
+    const modelNames = availableModels.map(m => m.name).join(', ');
+    errorMessage += `📋 Modelos disponíveis na sua conta: ${modelNames}\n\n`;
+  }
+  
+  errorMessage += `Certifique-se de que:\n` +
     `1. A GEMINI_API_KEY está configurada corretamente\n` +
     `2. Você está usando uma conta com acesso ao tier gratuito\n` +
-    `3. Os modelos gemini-1.5-flash estão disponíveis na sua região`
-  );
+    `3. Os modelos estão disponíveis na sua região\n` +
+    `4. Verifique os logs do servidor para ver quais modelos foram tentados`;
+  
+  throw new Error(errorMessage);
 }
 
 /**
