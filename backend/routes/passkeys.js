@@ -377,21 +377,39 @@ router.post('/register', authenticateUser, async (req, res) => {
       return res.status(500).json({ message: 'Erro ao processar informações de registro' });
     }
 
-    const { credentialID, credentialPublicKey, counter } = verification.registrationInfo;
+    // A estrutura do registrationInfo tem credential dentro, não diretamente
+    // registrationInfo.credential.id, registrationInfo.credential.publicKey, etc.
+    const credentialInfo = verification.registrationInfo.credential;
+    
+    if (!credentialInfo) {
+      console.error('[Passkey Register] credential não disponível no registrationInfo');
+      console.error('[Passkey Register] registrationInfo estrutura:', Object.keys(verification.registrationInfo));
+      return res.status(500).json({ message: 'Erro ao processar informações de credencial' });
+    }
+    
+    const credentialID = credentialInfo.id;
+    const credentialPublicKey = credentialInfo.publicKey;
+    const counter = credentialInfo.counter;
     
     // Log para debug
-    console.log('[Passkey Register] registrationInfo disponível:', {
+    console.log('[Passkey Register] credentialInfo disponível:', {
       hasCredentialID: !!credentialID,
       hasCredentialPublicKey: !!credentialPublicKey,
       hasCounter: counter !== undefined,
       credentialIDType: credentialID ? typeof credentialID : 'undefined',
-      credentialPublicKeyType: credentialPublicKey ? typeof credentialPublicKey : 'undefined'
+      credentialPublicKeyType: credentialPublicKey ? typeof credentialPublicKey : 'undefined',
+      credentialKeys: Object.keys(credentialInfo)
     });
 
-    // Usar o rawIdBuffer que armazenamos anteriormente se credentialID não estiver disponível
-    // O credentialID da biblioteca pode vir como Buffer, Uint8Array ou undefined
-    let credentialIDBuffer;
-    if (credentialID) {
+    // O credentialID da biblioteca vem como string base64url em credential.id
+    // Se não estiver disponível, usar o rawIdBuffer que armazenamos anteriormente
+    let credentialIDBase64Url;
+    if (credentialID && typeof credentialID === 'string') {
+      // credentialID já vem como string base64url
+      credentialIDBase64Url = credentialID;
+    } else if (credentialID) {
+      // Se vier como Buffer ou Uint8Array, converter para base64url
+      let credentialIDBuffer;
       if (Buffer.isBuffer(credentialID)) {
         credentialIDBuffer = credentialID;
       } else if (credentialID instanceof Uint8Array) {
@@ -399,15 +417,14 @@ router.post('/register', authenticateUser, async (req, res) => {
       } else {
         credentialIDBuffer = Buffer.from(credentialID);
       }
+      credentialIDBase64Url = credentialIDBuffer.toString('base64url');
     } else if (credentialForVerification._rawIdBuffer) {
       // Fallback: usar o rawIdBuffer que armazenamos
-      credentialIDBuffer = credentialForVerification._rawIdBuffer;
+      credentialIDBase64Url = credentialForVerification._rawIdBuffer.toString('base64url');
     } else {
       console.error('[Passkey Register] credentialID não disponível e _rawIdBuffer não encontrado');
       return res.status(500).json({ message: 'Erro ao processar credential ID' });
     }
-
-    const credentialIDBase64Url = credentialIDBuffer.toString('base64url');
 
     // Verificar se a credencial já existe
     const existingPasskey = await Passkey.findOne({ credentialID: credentialIDBase64Url });
