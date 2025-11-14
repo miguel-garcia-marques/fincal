@@ -767,88 +767,30 @@ class _LoginScreenState extends State<LoginScreen> {
       final result = await _passkeyService.authenticateWithPasskey(email);
       
       if (mounted && result['success'] == true) {
-        final accessToken = result['accessToken'] as String?;
-        final refreshToken = result['refreshToken'] as String?;
-        final token = result['token'] as String?;
         final userEmail = result['email'] as String?;
         
-        // Tentar usar accessToken e refreshToken diretamente se disponíveis
-        if (accessToken != null && refreshToken != null) {
-          try {
-            // Criar sessão usando os tokens diretamente
-            // setSession aceita apenas o accessToken como string
-            final session = await _authService.supabase.auth.setSession(accessToken);
+        if (userEmail != null) {
+          // Após verificação bem-sucedida da passkey, mostrar campo de senha
+          // para completar o login (limitação do Supabase - não há API direta para criar sessão)
+          if (mounted) {
+            setState(() {
+              _emailEntered = true;
+            });
             
-            if (session.session != null && mounted) {
-              // Login bem-sucedido sem precisar de senha!
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Login com passkey bem-sucedido!'),
-                  backgroundColor: AppTheme.incomeGreen,
-                ),
-              );
-              
-              // Navegar para AuthWrapper
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(
-                  builder: (context) => const AuthWrapper(),
-                ),
-                (route) => false,
-              );
-              return;
-            }
-          } catch (e) {
-            print('Erro ao criar sessão com tokens diretos: $e');
-            // Continuar para tentar verifyOTP
-          }
-        }
-        
-        // Se não tivermos tokens diretos, tentar usar verifyOTP com o token
-        if (token != null && userEmail != null) {
-          try {
-            // Usar verifyOTP com o token para criar sessão automaticamente
-            final session = await _authService.supabase.auth.verifyOTP(
-              type: OtpType.magiclink,
-              email: userEmail,
-              token: token,
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Autenticação com passkey verificada! Por favor, insira sua senha para completar o login.'),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 4),
+              ),
             );
-            
-            if (session.session != null && mounted) {
-              // Login bem-sucedido sem precisar de senha!
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Login com passkey bem-sucedido!'),
-                  backgroundColor: AppTheme.incomeGreen,
-                ),
-              );
-              
-              // Navegar para AuthWrapper
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(
-                  builder: (context) => const AuthWrapper(),
-                ),
-                (route) => false,
-              );
-              return;
-            }
-          } catch (e) {
-            print('Erro ao criar sessão com token OTP: $e');
-            // Se falhar, mostrar erro
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Erro ao criar sessão: ${e.toString()}'),
-                  backgroundColor: Colors.red,
-                ),
-              );
-            }
           }
         } else {
-          // Se não houver token, mostrar erro
+          // Se não houver email, mostrar erro
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Erro: Token de autenticação não recebido'),
+                content: Text('Erro: Email não recebido'),
                 backgroundColor: Colors.red,
               ),
             );

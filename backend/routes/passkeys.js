@@ -815,8 +815,9 @@ router.post('/authenticate', async (req, res) => {
       return res.status(404).json({ message: 'Usuário não encontrado' });
     }
 
-    // Gerar magic link usando Admin API
-    // Vamos fazer uma requisição HTTP para o link para obter os tokens de sessão
+    // Após verificação bem-sucedida da passkey, enviar OTP por email
+    // O frontend vai usar signInWithOtp e então verifyOTP para criar sessão
+    // Isso evita problemas com tokens expirados
     const { data: otpData, error: otpError } = await supabaseAdmin.auth.admin.generateLink({
       type: 'magiclink',
       email: user.email,
@@ -832,100 +833,13 @@ router.post('/authenticate', async (req, res) => {
       });
     }
 
-    const actionLink = otpData.properties?.action_link;
-    
-    if (!actionLink) {
-      console.error('[Passkey Authenticate] Link de ação não encontrado');
-      return res.status(500).json({ 
-        message: 'Erro ao extrair link de login' 
-      });
-    }
-
-    // Fazer requisição HTTP para o action_link para obter os tokens de sessão
-    // O Supabase redireciona para o redirectTo com os tokens na URL
-    let accessToken = null;
-    let refreshToken = null;
-    
-    try {
-      // Fazer requisição GET para o action_link
-      // O Supabase vai processar o link e redirecionar com os tokens
-      const url = new URL(actionLink);
-      const protocol = url.protocol === 'https:' ? https : http;
-      
-      await new Promise((resolve, reject) => {
-        const req = protocol.get(actionLink, (res) => {
-          let data = '';
-          
-          res.on('data', (chunk) => {
-            data += chunk;
-          });
-          
-          res.on('end', () => {
-            // Tentar extrair tokens da resposta ou dos headers de redirecionamento
-            const location = res.headers.location;
-            if (location) {
-              try {
-                const redirectUrl = new URL(location);
-                // Tokens podem estar na query string ou hash
-                accessToken = redirectUrl.searchParams.get('access_token') || 
-                             redirectUrl.searchParams.get('token');
-                refreshToken = redirectUrl.searchParams.get('refresh_token');
-                
-                // Se não estiver nos query params, tentar do hash
-                if (!accessToken && redirectUrl.hash) {
-                  const hashParams = new URLSearchParams(redirectUrl.hash.substring(1));
-                  accessToken = hashParams.get('access_token') || hashParams.get('token');
-                  refreshToken = hashParams.get('refresh_token');
-                }
-              } catch (e) {
-                console.error('[Passkey Authenticate] Erro ao processar redirect:', e);
-              }
-            }
-            resolve();
-          });
-        });
-        
-        req.on('error', (e) => {
-          console.error('[Passkey Authenticate] Erro na requisição HTTP:', e);
-          reject(e);
-        });
-        
-        req.setTimeout(5000, () => {
-          req.destroy();
-          reject(new Error('Timeout na requisição'));
-        });
-      });
-    } catch (e) {
-      console.error('[Passkey Authenticate] Erro ao fazer requisição para action_link:', e);
-      // Continuar mesmo se falhar - vamos tentar extrair token do link diretamente
-    }
-    
-    // Se não conseguimos os tokens da requisição, tentar extrair do link diretamente
-    if (!accessToken) {
-      try {
-        const url = new URL(actionLink);
-        accessToken = url.searchParams.get('token') || url.searchParams.get('access_token');
-        
-        if (!accessToken && url.hash) {
-          const hashParams = new URLSearchParams(url.hash.substring(1));
-          accessToken = hashParams.get('access_token') || hashParams.get('token');
-          refreshToken = hashParams.get('refresh_token');
-        }
-      } catch (e) {
-        console.error('[Passkey Authenticate] Erro ao extrair token do link:', e);
-      }
-    }
-    
-    // Retornar os tokens ou o link como fallback
+    // Retornar sucesso - o frontend vai usar signInWithOtp imediatamente
+    // e então verifyOTP com o token recebido por email
     res.json({
       success: true,
       userId: user.id,
       email: user.email,
-      accessToken: accessToken, // Token de acesso se conseguirmos extrair
-      refreshToken: refreshToken, // Token de refresh se conseguirmos extrair
-      token: accessToken, // Token para usar com verifyOTP (compatibilidade)
-      magicLink: actionLink, // Link completo como fallback
-      message: 'Autenticação bem-sucedida'
+      message: 'Autenticação bem-sucedida. Verifique seu email para o código de login.'
     });
   } catch (error) {
     console.error('Erro ao autenticar com passkey:', error);
