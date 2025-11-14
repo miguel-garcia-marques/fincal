@@ -292,8 +292,13 @@ class PasskeyService {
         'success': true,
         'userId': authData['userId'],
         'email': authData['email'],
-        'token': authData['token'], // Token hash para usar com verifyOtp
+        'access_token': authData['access_token'], // Token JWT para criar sessão
+        'refresh_token': authData['refresh_token'], // Refresh token para renovar sessão
+        'expires_in': authData['expires_in'], // Tempo de expiração em segundos
+        'token_type': authData['token_type'], // Tipo de token (bearer)
+        'token': authData['token'], // Token hash para usar com verifyOtp (fallback)
         'magicLink': authData['magicLink'], // Link completo como fallback
+        'requiresPassword': authData['requiresPassword'], // Indica se precisa de senha
       };
     } catch (e) {
       rethrow;

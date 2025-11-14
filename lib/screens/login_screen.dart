@@ -767,21 +767,94 @@ class _LoginScreenState extends State<LoginScreen> {
       final result = await _passkeyService.authenticateWithPasskey(email);
       
       if (mounted && result['success'] == true) {
+        final accessToken = result['access_token'] as String?;
+        final refreshToken = result['refresh_token'] as String?;
         final userEmail = result['email'] as String?;
+        final requiresPassword = result['requiresPassword'] as bool? ?? false;
         
+        // Prioridade 1: Tentar usar tokens JWT para criar sessão automaticamente
+        if (accessToken != null && userEmail != null) {
+          try {
+            print('[Passkey Login] Tentando criar sessão com tokens JWT...');
+            
+            // Criar sessão usando os tokens JWT recebidos do backend
+            final session = await _authService.setSession(
+              accessToken,
+              refreshToken: refreshToken,
+            );
+            
+            if (session.session != null && mounted) {
+              // Login bem-sucedido sem precisar de senha! 🎉
+              print('[Passkey Login] Sessão criada com sucesso!');
+              
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Login com passkey bem-sucedido!'),
+                  backgroundColor: AppTheme.incomeGreen,
+                ),
+              );
+              
+              // Navegar para AuthWrapper
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (context) => const AuthWrapper(),
+                ),
+                (route) => false,
+              );
+              return;
+            }
+          } catch (e) {
+            print('[Passkey Login] Erro ao criar sessão com tokens JWT: $e');
+            // Se falhar, tentar fallback ou mostrar campo de senha
+          }
+        }
+        
+        // Fallback: Se não tivermos tokens JWT ou se falhou, tentar token OTP
+        final token = result['token'] as String?;
+        if (token != null && userEmail != null && !requiresPassword) {
+          try {
+            print('[Passkey Login] Tentando usar token OTP como fallback...');
+            final session = await _authService.supabase.auth.verifyOTP(
+              type: OtpType.magiclink,
+              email: userEmail,
+              token: token,
+            );
+            
+            if (session.session != null && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Login com passkey bem-sucedido!'),
+                  backgroundColor: AppTheme.incomeGreen,
+                ),
+              );
+              
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (context) => const AuthWrapper(),
+                ),
+                (route) => false,
+              );
+              return;
+            }
+          } catch (e) {
+            print('[Passkey Login] Erro ao usar token OTP: $e');
+          }
+        }
+        
+        // Último fallback: Mostrar campo de senha
         if (userEmail != null) {
-          // Após verificação bem-sucedida da passkey, mostrar campo de senha
-          // para completar o login (limitação do Supabase - não há API direta para criar sessão)
           if (mounted) {
             setState(() {
               _emailEntered = true;
             });
             
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Autenticação com passkey verificada! Por favor, insira sua senha para completar o login.'),
+              SnackBar(
+                content: Text(requiresPassword 
+                  ? 'Autenticação com passkey verificada! Por favor, insira sua senha para completar o login.'
+                  : 'Autenticação com passkey verificada! Por favor, insira sua senha para completar o login.'),
                 backgroundColor: Colors.orange,
-                duration: Duration(seconds: 4),
+                duration: const Duration(seconds: 4),
               ),
             );
           }
@@ -1141,3 +1214,4 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
+

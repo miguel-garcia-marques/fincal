@@ -6,6 +6,8 @@ const { getPasskeyModel } = require('../models/Passkey');
 const { getChallengeModel } = require('../models/Challenge');
 const { getUserModel } = require('../models/User');
 const { createClient } = require('@supabase/supabase-js');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const https = require('https');
 const http = require('http');
 require('dotenv').config();
@@ -17,6 +19,77 @@ function normalizeBase64Url(str) {
   }
   // Remove qualquer padding que possa ter sido adicionado incorretamente
   return str.replace(/=+$/, '');
+}
+
+// Função para criar tokens JWT do Supabase manualmente
+// Isso permite criar uma sessão automaticamente após verificação de passkey
+// Suporta tanto Legacy JWT Secret (HS256) quanto JWT Signing Keys (RS256)
+function createSupabaseTokens(user) {
+  const jwtSecret = process.env.SUPABASE_JWT_SECRET; // Legacy (HS256)
+  const jwtPrivateKey = process.env.SUPABASE_JWT_PRIVATE_KEY; // Novo (RS256)
+  
+  // Priorizar JWT Signing Keys (RS256) se disponível, senão usar Legacy (HS256)
+  const useRS256 = !!jwtPrivateKey;
+  const signingKey = useRS256 ? jwtPrivateKey : jwtSecret;
+  
+  if (!signingKey) {
+    const errorMsg = useRS256
+      ? 'SUPABASE_JWT_PRIVATE_KEY não configurado. Obtenha em: Supabase Dashboard → Settings → Authentication → JWT Signing Keys → Private Key'
+      : 'SUPABASE_JWT_SECRET não configurado. Obtenha em: Supabase Dashboard → Settings → API → JWT Secret';
+    throw new Error(errorMsg);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  // Com JWT Signing Keys, você pode configurar expiry time customizado
+  // Com Legacy JWT Secret, o padrão é 1 hora (3600 segundos)
+  const expiresIn = process.env.JWT_EXPIRES_IN 
+    ? parseInt(process.env.JWT_EXPIRES_IN, 10) 
+    : 3600; // Padrão: 1 hora
+  
+  // Criar payload do access token seguindo a estrutura do Supabase
+  const accessTokenPayload = {
+    aud: 'authenticated',
+    exp: now + expiresIn,
+    sub: user.id,
+    email: user.email,
+    role: 'authenticated',
+    iat: now,
+    app_metadata: user.app_metadata || {
+      provider: 'email',
+      providers: ['email']
+    },
+    user_metadata: user.user_metadata || {}
+  };
+
+  // Criar access token usando RS256 (JWT Signing Keys) ou HS256 (Legacy)
+  const algorithm = useRS256 ? 'RS256' : 'HS256';
+  
+  // Se for RS256, processar a chave privada (pode ter \n no .env)
+  const processedKey = useRS256 
+    ? signingKey.replace(/\\n/g, '\n') 
+    : signingKey;
+  
+  const accessToken = jwt.sign(accessTokenPayload, processedKey, {
+    algorithm: algorithm
+  });
+
+  // Criar refresh token (string aleatória de 40 caracteres, como o Supabase usa)
+  const refreshToken = crypto.randomBytes(40).toString('hex');
+
+  console.log(`[Passkey Tokens] Criado usando ${algorithm} (expires in ${expiresIn}s)`);
+
+  return {
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    expires_in: expiresIn,
+    token_type: 'bearer',
+    user: {
+      id: user.id,
+      email: user.email,
+      user_metadata: user.user_metadata || {},
+      app_metadata: user.app_metadata || {}
+    }
+  };
 }
 
 const supabase = createClient(
@@ -815,32 +888,56 @@ router.post('/authenticate', async (req, res) => {
       return res.status(404).json({ message: 'Usuário não encontrado' });
     }
 
-    // Após verificação bem-sucedida da passkey, enviar OTP por email
-    // O frontend vai usar signInWithOtp e então verifyOTP para criar sessão
-    // Isso evita problemas com tokens expirados
-    const { data: otpData, error: otpError } = await supabaseAdmin.auth.admin.generateLink({
-      type: 'magiclink',
-      email: user.email,
-      options: {
-        redirectTo: origin
-      }
-    });
+    // Criar tokens JWT manualmente para permitir login automático sem senha
+    try {
+      const tokens = createSupabaseTokens(user);
+      
+      console.log('[Passkey Authenticate] Tokens JWT criados com sucesso para usuário:', user.id);
+      
+      // Retornar tokens para o frontend criar sessão automaticamente
+      res.json({
+        success: true,
+        userId: user.id,
+        email: user.email,
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        expires_in: tokens.expires_in,
+        token_type: tokens.token_type,
+        user: tokens.user,
+        message: 'Autenticação bem-sucedida'
+      });
+    } catch (tokenError) {
+      console.error('[Passkey Authenticate] Erro ao criar tokens JWT:', tokenError);
+      
+      // Fallback: tentar usar magic link se JWT secret não estiver configurado
+      const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+        type: 'magiclink',
+        email: user.email,
+        options: {
+          redirectTo: origin
+        }
+      });
 
-    if (otpError || !otpData) {
-      console.error('[Passkey Authenticate] Erro ao gerar magic link:', otpError);
-      return res.status(500).json({ 
-        message: 'Erro ao gerar link de login automático' 
+      if (linkError || !linkData) {
+        console.error('[Passkey Authenticate] Erro ao gerar magic link (fallback):', linkError);
+        return res.status(500).json({ 
+          message: 'Erro ao criar sessão. Configure SUPABASE_JWT_SECRET ou use magic link.',
+          error: tokenError.message
+        });
+      }
+
+      const actionLink = linkData.properties?.action_link;
+      
+      // Retornar magic link como fallback
+      res.json({
+        success: true,
+        userId: user.id,
+        email: user.email,
+        magicLink: actionLink,
+        message: 'Autenticação bem-sucedida. Use magic link para completar login.',
+        requiresPassword: true // Indica que precisa de senha ou magic link
       });
     }
-
-    // Retornar sucesso - o frontend vai usar signInWithOtp imediatamente
-    // e então verifyOTP com o token recebido por email
-    res.json({
-      success: true,
-      userId: user.id,
-      email: user.email,
-      message: 'Autenticação bem-sucedida. Verifique seu email para o código de login.'
-    });
   } catch (error) {
     console.error('Erro ao autenticar com passkey:', error);
     res.status(500).json({ message: 'Erro ao autenticar: ' + error.message });

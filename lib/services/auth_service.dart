@@ -215,6 +215,37 @@ class AuthService {
     }
   }
 
+  // Criar sessão usando tokens JWT (útil para login com passkey)
+  // Permite criar uma sessão automaticamente após verificação de passkey
+  Future<AuthResponse> setSession(String accessToken, {String? refreshToken}) async {
+    try {
+      // O Supabase Flutter SDK setSession aceita refreshToken como string
+      // Usar refreshToken se disponível, caso contrário usar accessToken
+      final tokenToUse = refreshToken ?? accessToken;
+      
+      // Definir a sessão no Supabase usando o refreshToken
+      // O Supabase vai usar o refreshToken para obter uma nova sessão completa
+      final response = await _supabase.auth.setSession(tokenToUse);
+      
+      // Se a sessão foi criada com sucesso, retornar
+      if (response.session != null) {
+        return response;
+      }
+      
+      // Se não funcionou com refreshToken, tentar com accessToken diretamente
+      // Nota: Isso pode não funcionar perfeitamente, mas é um fallback
+      return await _supabase.auth.setSession(accessToken);
+    } catch (e) {
+      // Se ambos falharem, tentar uma última vez apenas com accessToken
+      try {
+        return await _supabase.auth.setSession(accessToken);
+      } catch (e2) {
+        // Re-throw o erro original se ambos falharem
+        throw e;
+      }
+    }
+  }
+
   // Deletar conta do usuário no Supabase Auth
   // Nota: O Supabase não permite deletar o próprio usuário diretamente via SDK
   // Isso deve ser feito através do Admin API ou pelo usuário através do dashboard
