@@ -11,6 +11,7 @@ import 'screens/invite_accept_screen.dart';
 import 'screens/wallet_selection_screen.dart';
 import 'screens/profile_picture_selection_screen.dart';
 import 'screens/email_verification_screen.dart';
+import 'screens/passkey_verification_screen.dart';
 import 'services/auth_service.dart';
 import 'services/navigation_service.dart';
 import 'services/onboarding_orchestrator.dart';
@@ -342,7 +343,17 @@ class _AuthWrapperState extends State<AuthWrapper> {
     _isCheckingAuth = true;
     try {
       print('[AuthWrapper] Verificando estado do onboarding...');
-      final state = await _onboardingOrchestrator.getCurrentState();
+      final state = await _onboardingOrchestrator.getCurrentState().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          print('[AuthWrapper] Timeout ao verificar estado do onboarding');
+          // Em caso de timeout, verificar se está autenticado
+          final isAuthenticated = _authService.isAuthenticated;
+          return isAuthenticated 
+              ? OnboardingState.emailNotVerified // Fallback seguro
+              : OnboardingState.notAuthenticated;
+        },
+      );
       print('[AuthWrapper] Estado atual: $state');
       
       if (mounted) {
@@ -351,11 +362,21 @@ class _AuthWrapperState extends State<AuthWrapper> {
           _isLoading = false;
         });
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       print('[AuthWrapper] Erro ao verificar onboarding: $e');
+      print('[AuthWrapper] Stack trace: $stackTrace');
+      
+      // Em caso de erro, verificar estado básico de autenticação
+      final isAuthenticated = _authService.isAuthenticated;
+      final currentUser = _authService.currentUser;
+      
       if (mounted) {
         setState(() {
-          _onboardingState = OnboardingState.notAuthenticated;
+          // Se autenticado mas erro, assumir emailNotVerified como fallback seguro
+          // Isso evita loops infinitos
+          _onboardingState = (isAuthenticated && currentUser != null)
+              ? OnboardingState.emailNotVerified
+              : OnboardingState.notAuthenticated;
           _isLoading = false;
         });
       }
@@ -392,6 +413,20 @@ class _AuthWrapperState extends State<AuthWrapper> {
             }
           } catch (e) {
             print('[AuthWrapper] Erro ao obter usuário: $e');
+          }
+          return const LoginScreen();
+          
+        case OnboardingState.passkeyNotVerified:
+          // Usuário tem passkeys mas precisa autenticar com passkey
+          try {
+            final user = _authService.currentUser;
+            if (user != null) {
+              return PasskeyVerificationScreen(
+                email: user.email ?? '',
+              );
+            }
+          } catch (e) {
+            print('[AuthWrapper] Erro ao obter usuário para passkey: $e');
           }
           return const LoginScreen();
           

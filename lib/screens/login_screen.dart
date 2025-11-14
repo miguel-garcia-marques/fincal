@@ -910,9 +910,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 // Fazer refresh da sessão para garantir que os dados estão atualizados
                 await _authService.supabase.auth.refreshSession();
                 
-                // Marcar que o usuário tem passkeys (para evitar tela de verificação de email)
+                // Marcar que o usuário tem passkeys e que autenticou com passkey nesta sessão
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setBool('user_has_passkeys_${session.user!.id}', true);
+                await prefs.setBool('passkey_authenticated_${session.user!.id}', true);
                 
                 // Salvar email usado anteriormente
                 await _saveEmail(userEmail);
@@ -957,6 +958,14 @@ class _LoginScreenState extends State<LoginScreen> {
               // Fazer refresh da sessão após login bem-sucedido
               try {
                 await _authService.supabase.auth.refreshSession();
+                
+                // Marcar que o usuário tem passkeys e que autenticou com passkey nesta sessão
+                final prefs = await SharedPreferences.getInstance();
+                final currentUser = _authService.currentUser;
+                if (currentUser != null) {
+                  await prefs.setBool('user_has_passkeys_${currentUser.id}', true);
+                  await prefs.setBool('passkey_authenticated_${currentUser.id}', true);
+                }
               } catch (e) {
                 // Ignorar erros no refresh
               }
@@ -1089,8 +1098,10 @@ class _LoginScreenState extends State<LoginScreen> {
               try {
                 await _authService.supabase.auth.refreshSession();
                 
+                // Marcar que o usuário tem passkeys e que autenticou com passkey nesta sessão
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setBool('user_has_passkeys_${session.user!.id}', true);
+                await prefs.setBool('passkey_authenticated_${session.user!.id}', true);
                 
                 // Salvar email usado anteriormente
                 await _saveEmail(userEmail);
@@ -1176,6 +1187,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // Verificar se usuário tem passkeys e solicitar autenticação se necessário
+  // NOTA: Agora não mostra popup, mas deixa o AuthWrapper navegar para tela de passkey
   Future<bool> _verifyPasskeyIfRequired(String email) async {
     // Verificar se passkeys são suportadas no dispositivo
     if (!kIsWeb || !_passkeySupported) {
@@ -1189,161 +1201,23 @@ class _LoginScreenState extends State<LoginScreen> {
       
       if (passkeys.isEmpty) {
         // Usuário não tem passkeys, permitir acesso apenas com senha
+        // Marcar que não precisa verificar passkey
+        final prefs = await SharedPreferences.getInstance();
+        final currentUser = _authService.currentUser;
+        if (currentUser != null) {
+          await prefs.setBool('passkey_authenticated_${currentUser.id}', true);
+        }
         return true;
       }
 
-      // Usuário tem passkeys configuradas, solicitar autenticação com passkey
-      if (mounted) {
-        // Mostrar diálogo solicitando autenticação com passkey
-        final shouldContinue = await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (BuildContext context) {
-            return AlertDialog(
-              title: const Text('Autenticação adicional necessária'),
-              content: const Text(
-                'Você tem passkeys configuradas. Por favor, autentique com sua passkey para continuar.',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(context).pop(false); // Cancelar
-                  },
-                  child: const Text('Cancelar'),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.of(context).pop(true); // Continuar com passkey
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.black,
-                    foregroundColor: AppTheme.white,
-                  ),
-                  child: const Text('Autenticar com Passkey'),
-                ),
-              ],
-            );
-          },
-        );
-
-        if (shouldContinue != true) {
-          // Usuário cancelou, fazer logout
-          await _authService.signOut();
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Login cancelado. Autenticação com passkey é necessária.'),
-                backgroundColor: AppTheme.expenseRed,
-                duration: Duration(seconds: 3),
-              ),
-            );
-          }
-          return false;
-        }
-
-        // Tentar autenticar com passkey
-        try {
-          final result = await _passkeyService.authenticateWithPasskey(email);
-          
-          if (result['success'] == true) {
-            // Autenticação com passkey bem-sucedida
-            final token = result['token'] as String?;
-            final userEmail = result['email'] as String?;
-            
-            if (token != null && token.isNotEmpty && userEmail != null) {
-              // Criar sessão com o token da passkey
-              final session = await _authService.setSessionWithToken(token, userEmail);
-              
-              if (session.session != null && session.user != null) {
-                // NÃO fazer refresh aqui para evitar que o AuthWrapper navegue antes da verificação terminar
-                // O refresh será feito depois, no método principal, após a verificação ser concluída
-                
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Autenticação com passkey bem-sucedida!'),
-                      backgroundColor: AppTheme.incomeGreen,
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                }
-                return true;
-              }
-            }
-          }
-          
-          // Se falhou, mostrar erro e fazer logout
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Falha na autenticação com passkey. Tente novamente.'),
-                backgroundColor: AppTheme.expenseRed,
-                duration: Duration(seconds: 4),
-              ),
-            );
-          }
-          await _authService.signOut();
-          return false;
-        } catch (e) {
-          // Erro ao autenticar com passkey
-          final errorStr = e.toString().toLowerCase();
-          String errorMessage = 'Erro ao autenticar com passkey';
-          
-          if (errorStr.contains('cancelado')) {
-            errorMessage = 'Autenticação cancelada';
-          } else if (errorStr.contains('não encontrada')) {
-            errorMessage = 'Nenhuma passkey encontrada no dispositivo. Você pode continuar apenas com a senha.';
-            // Se não houver passkey no dispositivo, permitir continuar apenas com senha
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(errorMessage),
-                  backgroundColor: Colors.orange,
-                  duration: const Duration(seconds: 4),
-                ),
-              );
-            }
-            return true; // Permitir continuar apenas com senha
-          } else if (errorStr.contains('muitas tentativas') || errorStr.contains('rate limit') || errorStr.contains('429')) {
-            // Erro de rate limit - mostrar mensagem específica
-            errorMessage = e.toString().contains('Exception:') 
-              ? e.toString().split('Exception:').last.trim()
-              : 'Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.';
-          }
-          
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(errorMessage),
-                backgroundColor: AppTheme.expenseRed,
-                duration: const Duration(seconds: 4),
-              ),
-            );
-          }
-          await _authService.signOut();
-          return false;
-        }
-      }
-      
-      return false;
+      // Usuário tem passkeys configuradas
+      // Não marcar como autenticado - deixar AuthWrapper navegar para tela de passkey
+      // O AuthWrapper vai detectar que tem passkeys mas não autenticou e mostrar tela dedicada
+      return true; // Permitir continuar - AuthWrapper vai lidar com a navegação
     } catch (e) {
       // Se houver erro ao verificar passkeys, permitir acesso (não bloquear login)
       print('[Login] Erro ao verificar passkeys: $e');
-      // Se o erro for que não há passkey no dispositivo, permitir continuar apenas com senha
-      final errorStr = e.toString().toLowerCase();
-      if (errorStr.contains('não encontrada') || errorStr.contains('not found')) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Nenhuma passkey encontrada no dispositivo. Continuando apenas com senha.'),
-              backgroundColor: Colors.orange,
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
-        return true; // Permitir continuar apenas com senha
-      }
-      // Para outros erros, permitir acesso também (não bloquear login)
+      // Para erros, permitir acesso também (não bloquear login)
       return true;
     }
   }

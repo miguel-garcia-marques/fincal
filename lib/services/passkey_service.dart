@@ -221,67 +221,29 @@ class PasskeyService {
     }
 
     try {
-      // 1. Obter opções de autenticação do servidor com retry para 429
-      http.Response? optionsResponse;
-      int retryCount = 0;
-      const maxRetries = 3;
-      
-      while (retryCount <= maxRetries) {
-        try {
-          optionsResponse = await http.post(
-            Uri.parse('$_baseUrl/passkeys/authenticate/options'),
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({'email': email}),
-          );
-          
-          // Se não for 429, sair do loop
-          if (optionsResponse.statusCode != 429) {
-            break;
-          }
-          
-          // Se for 429 e ainda temos tentativas, aguardar antes de retry
-          if (retryCount < maxRetries) {
-            final delaySeconds = (retryCount + 1) * 2; // Backoff exponencial: 2s, 4s, 6s
-            print('[PasskeyService] Rate limit (429) atingido. Aguardando ${delaySeconds}s antes de tentar novamente...');
-            await Future.delayed(Duration(seconds: delaySeconds));
-            retryCount++;
-            continue;
-          }
-        } catch (e) {
-          // Se não for erro de rede, relançar
-          if (!e.toString().contains('ClientException') && 
-              !e.toString().contains('SocketException')) {
-            rethrow;
-          }
-          // Erro de rede: tentar novamente se ainda temos tentativas
-          if (retryCount < maxRetries) {
-            final delaySeconds = (retryCount + 1) * 2;
-            await Future.delayed(Duration(seconds: delaySeconds));
-            retryCount++;
-            continue;
-          }
-          rethrow;
-        }
-      }
-      
-      if (optionsResponse == null) {
-        throw Exception('Erro ao obter opções de autenticação após múltiplas tentativas');
-      }
+      // 1. Obter opções de autenticação do servidor
+      // IMPORTANTE: Não fazer retry infinito para 429 - retornar erro imediatamente
+      final optionsResponse = await http.post(
+        Uri.parse('$_baseUrl/passkeys/authenticate/options'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'email': email}),
+      );
 
       if (optionsResponse.statusCode != 200) {
         if (optionsResponse.statusCode == 404) {
           throw Exception('Nenhuma passkey encontrada para este email');
         }
         if (optionsResponse.statusCode == 429) {
+          // Rate limit excedido - retornar erro imediatamente sem tentar novamente
           try {
             final errorData = jsonDecode(optionsResponse.body);
-            final message = errorData['message'] as String? ?? 'Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.';
+            final message = errorData['message'] as String? ?? 'Muitas tentativas de autenticação. Por favor, aguarde alguns minutos antes de tentar novamente.';
             throw Exception(message);
           } catch (e) {
             if (e is Exception) rethrow;
-            throw Exception('Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.');
+            throw Exception('Muitas tentativas de autenticação. Por favor, aguarde alguns minutos antes de tentar novamente.');
           }
         }
         try {
@@ -361,67 +323,30 @@ class PasskeyService {
         throw Exception('Erro ao autenticar com passkey: $errorMsg');
       }
 
-      // 3. Enviar credencial para o servidor para verificação com retry para 429
-      http.Response? authResponse;
-      retryCount = 0;
-      
-      while (retryCount <= maxRetries) {
-        try {
-          authResponse = await http.post(
-            Uri.parse('$_baseUrl/passkeys/authenticate'),
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'credential': credentialMap,
-              'challenge': challenge,
-              'userId': userId,
-            }),
-          );
-          
-          // Se não for 429, sair do loop
-          if (authResponse.statusCode != 429) {
-            break;
-          }
-          
-          // Se for 429 e ainda temos tentativas, aguardar antes de retry
-          if (retryCount < maxRetries) {
-            final delaySeconds = (retryCount + 1) * 2; // Backoff exponencial: 2s, 4s, 6s
-            print('[PasskeyService] Rate limit (429) atingido na autenticação. Aguardando ${delaySeconds}s antes de tentar novamente...');
-            await Future.delayed(Duration(seconds: delaySeconds));
-            retryCount++;
-            continue;
-          }
-        } catch (e) {
-          // Se não for erro de rede, relançar
-          if (!e.toString().contains('ClientException') && 
-              !e.toString().contains('SocketException')) {
-            rethrow;
-          }
-          // Erro de rede: tentar novamente se ainda temos tentativas
-          if (retryCount < maxRetries) {
-            final delaySeconds = (retryCount + 1) * 2;
-            await Future.delayed(Duration(seconds: delaySeconds));
-            retryCount++;
-            continue;
-          }
-          rethrow;
-        }
-      }
-      
-      if (authResponse == null) {
-        throw Exception('Erro ao autenticar com passkey após múltiplas tentativas');
-      }
+      // 3. Enviar credencial para o servidor para verificação
+      // IMPORTANTE: Não fazer retry infinito para 429 - retornar erro imediatamente
+      final authResponse = await http.post(
+        Uri.parse('$_baseUrl/passkeys/authenticate'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'credential': credentialMap,
+          'challenge': challenge,
+          'userId': userId,
+        }),
+      );
 
       if (authResponse.statusCode != 200) {
         if (authResponse.statusCode == 429) {
+          // Rate limit excedido - retornar erro imediatamente sem tentar novamente
           try {
             final errorData = jsonDecode(authResponse.body);
-            final message = errorData['message'] as String? ?? 'Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.';
+            final message = errorData['message'] as String? ?? 'Muitas tentativas de autenticação. Por favor, aguarde alguns minutos antes de tentar novamente.';
             throw Exception(message);
           } catch (e) {
             if (e is Exception) rethrow;
-            throw Exception('Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.');
+            throw Exception('Muitas tentativas de autenticação. Por favor, aguarde alguns minutos antes de tentar novamente.');
           }
         }
         try {

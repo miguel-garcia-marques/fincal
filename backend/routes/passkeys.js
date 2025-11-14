@@ -6,8 +6,6 @@ const { getPasskeyModel } = require('../models/Passkey');
 const { getChallengeModel } = require('../models/Challenge');
 const { getUserModel } = require('../models/User');
 const { createClient } = require('@supabase/supabase-js');
-const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
 const https = require('https');
 const http = require('http');
 require('dotenv').config();
@@ -19,77 +17,6 @@ function normalizeBase64Url(str) {
   }
   // Remove qualquer padding que possa ter sido adicionado incorretamente
   return str.replace(/=+$/, '');
-}
-
-// Função para criar tokens JWT do Supabase manualmente
-// Isso permite criar uma sessão automaticamente após verificação de passkey
-// Suporta tanto Legacy JWT Secret (HS256) quanto JWT Signing Keys (RS256)
-function createSupabaseTokens(user) {
-  const jwtSecret = process.env.SUPABASE_JWT_SECRET; // Legacy (HS256)
-  const jwtPrivateKey = process.env.SUPABASE_JWT_PRIVATE_KEY; // Novo (RS256)
-  
-  // Priorizar JWT Signing Keys (RS256) se disponível, senão usar Legacy (HS256)
-  const useRS256 = !!jwtPrivateKey;
-  const signingKey = useRS256 ? jwtPrivateKey : jwtSecret;
-  
-  if (!signingKey) {
-    const errorMsg = useRS256
-      ? 'SUPABASE_JWT_PRIVATE_KEY não configurado. Obtenha em: Supabase Dashboard → Settings → Authentication → JWT Signing Keys → Private Key'
-      : 'SUPABASE_JWT_SECRET não configurado. Obtenha em: Supabase Dashboard → Settings → API → JWT Secret';
-    throw new Error(errorMsg);
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  // Com JWT Signing Keys, você pode configurar expiry time customizado
-  // Com Legacy JWT Secret, o padrão é 1 hora (3600 segundos)
-  const expiresIn = process.env.JWT_EXPIRES_IN 
-    ? parseInt(process.env.JWT_EXPIRES_IN, 10) 
-    : 3600; // Padrão: 1 hora
-  
-  // Criar payload do access token seguindo a estrutura do Supabase
-  const accessTokenPayload = {
-    aud: 'authenticated',
-    exp: now + expiresIn,
-    sub: user.id,
-    email: user.email,
-    role: 'authenticated',
-    iat: now,
-    app_metadata: user.app_metadata || {
-      provider: 'email',
-      providers: ['email']
-    },
-    user_metadata: user.user_metadata || {}
-  };
-
-  // Criar access token usando RS256 (JWT Signing Keys) ou HS256 (Legacy)
-  const algorithm = useRS256 ? 'RS256' : 'HS256';
-  
-  // Se for RS256, processar a chave privada (pode ter \n no .env)
-  const processedKey = useRS256 
-    ? signingKey.replace(/\\n/g, '\n') 
-    : signingKey;
-  
-  const accessToken = jwt.sign(accessTokenPayload, processedKey, {
-    algorithm: algorithm
-  });
-
-  // Criar refresh token (string aleatória de 40 caracteres, como o Supabase usa)
-  const refreshToken = crypto.randomBytes(40).toString('hex');
-
-  console.log(`[Passkey Tokens] Criado usando ${algorithm} (expires in ${expiresIn}s)`);
-
-  return {
-    access_token: accessToken,
-    refresh_token: refreshToken,
-    expires_in: expiresIn,
-    token_type: 'bearer',
-    user: {
-      id: user.id,
-      email: user.email,
-      user_metadata: user.user_metadata || {},
-      app_metadata: user.app_metadata || {}
-    }
-  };
 }
 
 const supabase = createClient(

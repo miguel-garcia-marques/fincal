@@ -1,9 +1,12 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../services/wallet_storage_service.dart';
 import '../services/wallet_service.dart';
+import '../services/passkey_service.dart';
 import '../models/wallet.dart';
+import '../models/user.dart';
 
 /// Estado do processo de onboarding do usuário
 enum OnboardingState {
@@ -12,6 +15,9 @@ enum OnboardingState {
   
   /// Email não foi verificado
   emailNotVerified,
+  
+  /// Passkey não foi verificada (usuário tem passkeys mas precisa autenticar)
+  passkeyNotVerified,
   
   /// Email verificado mas falta foto de perfil
   needsProfilePicture,
@@ -30,99 +36,141 @@ class OnboardingOrchestrator {
   final UserService _userService;
   final WalletStorageService _walletStorageService;
   final WalletService _walletService;
+  final PasskeyService _passkeyService;
   
   OnboardingOrchestrator({
     AuthService? authService,
     UserService? userService,
     WalletStorageService? walletStorageService,
     WalletService? walletService,
+    PasskeyService? passkeyService,
   }) : _authService = authService ?? AuthService(),
        _userService = userService ?? UserService(),
        _walletStorageService = walletStorageService ?? WalletStorageService(),
-       _walletService = walletService ?? WalletService();
+       _walletService = walletService ?? WalletService(),
+       _passkeyService = passkeyService ?? PasskeyService();
 
   /// Determina o estado atual do onboarding do usuário
   /// Retorna o próximo passo necessário ou completed se tudo estiver ok
   Future<OnboardingState> getCurrentState() async {
-    // 1. Verificar autenticação
-    final isAuthenticated = _authService.isAuthenticated;
-    final currentUser = _authService.currentUser;
-    
-    if (!isAuthenticated || currentUser == null) {
-      return OnboardingState.notAuthenticated;
-    }
-    
-    // 2. Verificar se email foi confirmado
-    // NOTA: Para login com passkey, o email é considerado verificado automaticamente
-    // porque a passkey já valida a identidade do usuário
-    final emailConfirmed = currentUser.emailConfirmedAt != null;
-    
-    // Se o email não foi confirmado, verificar se o usuário tem passkeys registradas
-    // Se tiver, considerar o email como verificado (passkey já valida identidade)
-    if (!emailConfirmed) {
+    try {
+      // 1. Verificar autenticação
+      final isAuthenticated = _authService.isAuthenticated;
+      final currentUser = _authService.currentUser;
+      
+      if (!isAuthenticated || currentUser == null) {
+        print('[OnboardingOrchestrator] Usuário não autenticado');
+        return OnboardingState.notAuthenticated;
+      }
+      
+      // 2. Verificar se email foi confirmado OU se usuário existe no MongoDB
+      // Se o usuário existe no MongoDB, significa que a conta foi criada e email foi verificado
+      final emailConfirmed = currentUser.emailConfirmedAt != null;
+      
+      // Verificar MongoDB uma única vez (reutilizar resultado)
+      User? mongoUser;
       try {
-        // Verificar se há passkeys registradas para este usuário
-        // Se houver, assumir que o email está verificado (passkey já valida identidade)
-        // Isso evita loops de verificação de email após login com passkey
-        final prefs = await SharedPreferences.getInstance();
-        final hasPasskeys = prefs.getBool('user_has_passkeys_${currentUser.id}') ?? false;
-        
-        // IMPORTANTE: Se o usuário já existe no MongoDB, significa que a conta foi criada
-        // e provavelmente o email já foi verificado em algum momento
-        // Não mostrar tela de verificação se a conta já existe
-        final mongoUserExists = await _userService.getCurrentUser(forceRefresh: false).timeout(
-          const Duration(seconds: 2),
-          onTimeout: () => null,
+        mongoUser = await _userService.getCurrentUser(forceRefresh: false).timeout(
+          const Duration(seconds: 3),
+          onTimeout: () {
+            print('[OnboardingOrchestrator] Timeout ao buscar usuário no MongoDB');
+            return null;
+          },
         );
+      } catch (e) {
+        print('[OnboardingOrchestrator] Erro ao buscar usuário no MongoDB: $e');
+        mongoUser = null;
+      }
+      
+      // Se o email não foi confirmado no Supabase, verificar alternativas
+      if (!emailConfirmed) {
+        // Verificar se há passkeys registradas
+        bool hasPasskeys = false;
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          hasPasskeys = prefs.getBool('user_has_passkeys_${currentUser.id}') ?? false;
+        } catch (e) {
+          print('[OnboardingOrchestrator] Erro ao verificar passkeys: $e');
+        }
         
-        if (hasPasskeys || mongoUserExists != null) {
-          // Usuário tem passkeys OU já existe no MongoDB - email considerado verificado
-          // Continuar para próxima etapa do onboarding
-          print('[OnboardingOrchestrator] Email considerado verificado (passkeys: $hasPasskeys, mongoUser: ${mongoUserExists != null})');
+        // Se usuário existe no MongoDB OU tem passkeys, considerar email verificado
+        if (mongoUser != null || hasPasskeys) {
+          print('[OnboardingOrchestrator] Email considerado verificado (mongoUser: ${mongoUser != null}, passkeys: $hasPasskeys)');
+          // Continuar para próxima etapa
         } else {
           // Usuário não tem passkeys e não existe no MongoDB - precisa verificar email
           print('[OnboardingOrchestrator] Email não verificado - mostrando tela de verificação');
           return OnboardingState.emailNotVerified;
         }
-      } catch (e) {
-        // Em caso de erro, verificar se usuário existe no MongoDB antes de mostrar tela
+      } else {
+        print('[OnboardingOrchestrator] Email confirmado no Supabase');
+      }
+      
+      // 3. Se usuário não existe no MongoDB ainda, tentar criar (mas não bloquear se falhar)
+      if (mongoUser == null) {
+        print('[OnboardingOrchestrator] Usuário não encontrado no MongoDB - tentando criar...');
         try {
-          final mongoUserExists = await _userService.getCurrentUser(forceRefresh: false).timeout(
+          // Tentar criar usuário automaticamente (pode falhar se não tiver permissões)
+          // Não bloquear o fluxo se falhar - usuário pode ser criado depois
+          await _userService.getCurrentUser(forceRefresh: true).timeout(
             const Duration(seconds: 2),
             onTimeout: () => null,
           );
-          
-          // Se usuário existe no MongoDB, não mostrar tela de verificação
-          if (mongoUserExists != null) {
-            print('[OnboardingOrchestrator] Usuário existe no MongoDB - email considerado verificado');
-            // Continuar para próxima etapa
-          } else {
-            // Usuário não existe - mostrar tela de verificação
-            print('[OnboardingOrchestrator] Erro ao verificar passkeys, mas usuário não existe no MongoDB - mostrando tela de verificação');
-            return OnboardingState.emailNotVerified;
-          }
-        } catch (e2) {
-          // Se falhar tudo, seguir com verificação normal de email
-          print('[OnboardingOrchestrator] Erro ao verificar estado: $e2');
+          // Recarregar após tentativa de criação
+          mongoUser = await _userService.getCurrentUser(forceRefresh: false).timeout(
+            const Duration(seconds: 2),
+            onTimeout: () => null,
+          );
+        } catch (e) {
+          print('[OnboardingOrchestrator] Erro ao criar usuário no MongoDB: $e');
+          // Continuar mesmo se falhar - não bloquear o fluxo
+        }
+        
+        // Se ainda não existe após tentativa, mas email está confirmado, continuar mesmo assim
+        // O usuário será criado quando necessário
+        if (mongoUser == null && emailConfirmed) {
+          print('[OnboardingOrchestrator] Email confirmado mas usuário não existe no MongoDB - continuando mesmo assim');
+          // Continuar para próxima etapa - usuário será criado quando necessário
+        } else if (mongoUser == null) {
+          // Se email não confirmado E usuário não existe, mostrar tela de verificação
+          print('[OnboardingOrchestrator] Usuário não existe e email não confirmado - mostrando tela de verificação');
           return OnboardingState.emailNotVerified;
         }
       }
+    
+    // 4. Verificar se precisa autenticar com passkey
+    // Se o usuário tem passkeys configuradas mas ainda não autenticou com passkey nesta sessão
+    if (kIsWeb && _passkeyService.isSupported) {
+      try {
+        // Verificar se há passkeys registradas para este usuário
+        final passkeys = await _passkeyService.listPasskeys().timeout(
+          const Duration(seconds: 2),
+          onTimeout: () => <Map<String, dynamic>>[],
+        );
+        
+        if (passkeys.isNotEmpty) {
+          // Usuário tem passkeys configuradas
+          // Verificar se já autenticou com passkey nesta sessão
+          final prefs = await SharedPreferences.getInstance();
+          final hasAuthenticatedWithPasskey = prefs.getBool('passkey_authenticated_${currentUser.id}') ?? false;
+          
+          if (!hasAuthenticatedWithPasskey) {
+            // Usuário tem passkeys mas ainda não autenticou com passkey nesta sessão
+            print('[OnboardingOrchestrator] Usuário tem passkeys mas não autenticou ainda - mostrando tela de passkey');
+            return OnboardingState.passkeyNotVerified;
+          }
+        }
+      } catch (e) {
+        // Se houver erro ao verificar passkeys, continuar normalmente
+        print('[OnboardingOrchestrator] Erro ao verificar passkeys: $e');
+      }
     }
     
-    // 3. Verificar se usuário existe no MongoDB
-    final mongoUser = await _userService.getCurrentUser(forceRefresh: false).timeout(
-      const Duration(seconds: 3),
-      onTimeout: () => null,
-    );
-    
-    if (mongoUser == null) {
-      // Usuário não existe no MongoDB - ainda está no processo de criação
-      return OnboardingState.emailNotVerified;
-    }
-    
-    // 4. Verificar se tem foto de perfil
+    // 5. Verificar se tem foto de perfil
     // NOTA: Foto de perfil é opcional - não bloqueia o onboarding
-    final hasProfilePicture = mongoUser.profilePictureUrl != null && 
+    // Se mongoUser for null, assumir que não tem foto (mas não bloquear)
+    final hasProfilePicture = mongoUser != null && 
+                             mongoUser.profilePictureUrl != null && 
                              mongoUser.profilePictureUrl!.isNotEmpty;
     
     // Se não tem foto, verificar se o usuário já passou pela tela de foto e escolheu pular
@@ -155,7 +203,7 @@ class OnboardingOrchestrator {
       }
     }
     
-    // 5. Verificar se precisa selecionar wallet
+    // 6. Verificar se precisa selecionar wallet
     final activeWalletId = await _walletStorageService.getActiveWalletId().timeout(
       const Duration(seconds: 2),
       onTimeout: () => null,
@@ -192,6 +240,38 @@ class OnboardingOrchestrator {
     
     // Tudo completo!
     return OnboardingState.completed;
+    } catch (e, stackTrace) {
+      // Capturar qualquer erro não tratado
+      print('[OnboardingOrchestrator] Erro não capturado: $e');
+      print('[OnboardingOrchestrator] Stack trace: $stackTrace');
+      
+      // Em caso de erro, verificar se usuário está autenticado
+      final isAuthenticated = _authService.isAuthenticated;
+      final currentUser = _authService.currentUser;
+      
+      if (!isAuthenticated || currentUser == null) {
+        return OnboardingState.notAuthenticated;
+      }
+      
+      // Se autenticado mas erro, assumir que precisa verificar email como fallback seguro
+      // Mas primeiro verificar se usuário existe no MongoDB
+      try {
+        final mongoUser = await _userService.getCurrentUser(forceRefresh: false).timeout(
+          const Duration(seconds: 1),
+          onTimeout: () => null,
+        );
+        
+        if (mongoUser != null) {
+          // Usuário existe - tentar continuar para completed
+          return OnboardingState.completed;
+        }
+      } catch (e2) {
+        // Ignorar erro na verificação de fallback
+      }
+      
+      // Fallback: retornar emailNotVerified se autenticado mas com erro
+      return OnboardingState.emailNotVerified;
+    }
   }
   
   /// Verifica se o usuário completou o onboarding básico (autenticação + email + foto)
