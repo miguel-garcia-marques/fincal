@@ -370,6 +370,35 @@ class ApiService {
     }
   }
 
+  // Extrair dados de fatura de uma imagem usando IA
+  Future<Map<String, dynamic>> extractInvoiceFromImage(
+    String imageBase64, {
+    required String walletId,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/transactions/extract-from-image?walletId=$walletId'),
+        headers: _getHeaders(),
+        body: json.encode({
+          'imageBase64': imageBase64,
+        }),
+      );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
+
+      if (response.statusCode != 200) {
+        final errorBody = json.decode(response.body);
+        throw Exception(errorBody['message'] ?? 'Erro ao processar imagem');
+      }
+
+      final decoded = json.decode(response.body);
+      return decoded['data'] as Map<String, dynamic>;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   // Função isolada para parsing de transações
   static List<Transaction> _parseTransactions(String responseBody) {
     final List<dynamic> decoded = json.decode(responseBody);

@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import '../models/transaction.dart';
 import '../services/database.dart';
 import '../services/api_service.dart';
@@ -18,6 +20,10 @@ class AddTransactionScreen extends StatefulWidget {
   final String userId;
   final bool skipImportOption;
   final DateTime? initialDate;
+  final double? initialAmount;
+  final String? initialDescription;
+  final TransactionCategory? initialCategory;
+  final TransactionType? initialType;
 
   const AddTransactionScreen({
     super.key,
@@ -26,6 +32,10 @@ class AddTransactionScreen extends StatefulWidget {
     required this.userId,
     this.skipImportOption = false,
     this.initialDate,
+    this.initialAmount,
+    this.initialDescription,
+    this.initialCategory,
+    this.initialType,
   });
 
   @override
@@ -60,6 +70,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   TransactionFrequency _frequency = TransactionFrequency.unique;
   int? _selectedDayOfWeek;
   int? _selectedDayOfMonth;
+  bool _isProcessingImage = false;
+  final ImagePicker _imagePicker = ImagePicker();
 
   @override
   void initState() {
@@ -107,9 +119,17 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             t.salaryAllocation!.poupancaPercent.toStringAsFixed(1);
       }
     } else {
-      _selectedType = TransactionType.despesa;
+      _selectedType = widget.initialType ?? TransactionType.despesa;
       _selectedDate = widget.initialDate ?? DateTime.now();
-      _selectedCategory = TransactionCategory.miscelaneos;
+      _selectedCategory = widget.initialCategory ?? TransactionCategory.miscelaneos;
+
+      // Preencher campos se vierem de extração de imagem
+      if (widget.initialAmount != null) {
+        _amountController.text = widget.initialAmount!.toStringAsFixed(2);
+      }
+      if (widget.initialDescription != null) {
+        _nameController.text = widget.initialDescription!;
+      }
 
       // Se houver data inicial, configurar recorrência automaticamente baseada na frequência
       if (widget.initialDate != null) {
@@ -725,6 +745,58 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 ),
               ),
               const SizedBox(height: 8),
+              // Botão tirar foto de fatura com IA
+              SizedBox(
+                width: double.infinity,
+                child: InkWell(
+                  onTap: _processInvoiceImage,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: AppTheme.black,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.camera_alt,
+                          color: AppTheme.black,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _isProcessingImage
+                                ? 'Processando imagem...'
+                                : 'Tirar Foto da Fatura (IA)',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: AppTheme.black,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (_isProcessingImage)
+                          const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
               // Botão importar em bulk
               SizedBox(
                 width: double.infinity,
@@ -772,6 +844,141 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         SizedBox(height: 30),
       ],
     );
+  }
+
+  Future<void> _processInvoiceImage() async {
+    if (_isProcessingImage) return;
+
+    try {
+      // Mostrar diálogo para escolher entre câmera e galeria
+      final ImageSource? source = await showDialog<ImageSource>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Selecionar Imagem'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt),
+                title: const Text('Tirar Foto'),
+                onTap: () => Navigator.of(context).pop(ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library),
+                title: const Text('Escolher da Galeria'),
+                onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (source == null) return;
+
+      // Solicitar permissão e capturar/selecionar imagem
+      final XFile? image = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 85,
+        preferredCameraDevice: CameraDevice.rear,
+      );
+
+      if (image == null) return;
+
+      setState(() {
+        _isProcessingImage = true;
+      });
+
+      // Converter imagem para base64
+      final Uint8List imageBytes = await image.readAsBytes();
+      final String base64Image = base64Encode(imageBytes);
+      final String imageBase64 = 'data:image/jpeg;base64,$base64Image';
+
+      // Processar imagem com IA
+      final apiService = ApiService();
+      final extractedData = await apiService.extractInvoiceFromImage(
+        imageBase64,
+        walletId: widget.walletId,
+      );
+
+      // Preparar dados para o formulário
+      double? extractedAmount;
+      String? extractedDescription;
+      TransactionCategory? extractedCategory;
+      DateTime? extractedDate;
+      TransactionType extractedType = TransactionType.despesa;
+
+      if (extractedData['amount'] != null) {
+        extractedAmount = (extractedData['amount'] as num).toDouble();
+      }
+
+      if (extractedData['description'] != null) {
+        extractedDescription = extractedData['description'] as String;
+      }
+
+      if (extractedData['category'] != null) {
+        try {
+          extractedCategory = TransactionCategory.values.firstWhere(
+            (cat) => cat.name == extractedData['category'],
+            orElse: () => TransactionCategory.miscelaneos,
+          );
+        } catch (e) {
+          extractedCategory = TransactionCategory.miscelaneos;
+        }
+      }
+
+      // Se houver data extraída, usar ela
+      if (extractedData['date'] != null) {
+        try {
+          final dateStr = extractedData['date'] as String;
+          final dateParts = dateStr.split('-');
+          if (dateParts.length == 3) {
+            extractedDate = DateTime(
+              int.parse(dateParts[0]),
+              int.parse(dateParts[1]),
+              int.parse(dateParts[2]),
+            );
+          }
+        } catch (e) {
+          // Se não conseguir parsear a data, usar data atual
+        }
+      }
+
+      // Fechar a tela de importação
+      Navigator.of(context).pop();
+
+      // Abrir o formulário preenchido com os dados extraídos
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) {
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            isDismissible: true,
+            enableDrag: true,
+            builder: (context) => AddTransactionScreen(
+              walletId: widget.walletId,
+              userId: widget.userId,
+              skipImportOption: true,
+              initialDate: extractedDate,
+              initialAmount: extractedAmount,
+              initialDescription: extractedDescription,
+              initialCategory: extractedCategory,
+              initialType: extractedType,
+            ),
+          );
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        _showErrorDialog('Erro ao processar imagem: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessingImage = false;
+        });
+      }
+    }
   }
 
   Future<void> _importBulkTransactions() async {

@@ -532,4 +532,29 @@ router.post('/bulk', validateBulkTransactions, requireWalletId, checkWritePermis
   }
 });
 
+// POST processar imagem de fatura com IA
+router.post('/extract-from-image', requireWalletId, async (req, res) => {
+  try {
+    const { imageBase64 } = req.body;
+
+    if (!imageBase64) {
+      return res.status(400).json({ message: 'Imagem em base64 é obrigatória' });
+    }
+
+    const { processInvoiceImage } = require('../utils/geminiService');
+    const extractedData = await processInvoiceImage(imageBase64);
+
+    res.json({
+      success: true,
+      data: extractedData
+    });
+  } catch (error) {
+    console.error('Erro ao processar imagem:', error);
+    res.status(500).json({ 
+      message: error.message || 'Erro ao processar imagem da fatura',
+      success: false
+    });
+  }
+});
+
 module.exports = router;
