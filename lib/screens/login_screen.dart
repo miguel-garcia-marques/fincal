@@ -39,6 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _inviteTokenFromUrl;
   bool _passkeySupported = false;
   bool _emailEntered = false; // Controla se email foi inserido (para mostrar senha ou passkey)
+  List<String> _previousEmails = []; // Lista de emails usados anteriormente
 
   @override
   void initState() {
@@ -52,11 +53,58 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     }
     
+    // Carregar emails usados anteriormente
+    _loadPreviousEmails();
+    
     // Verificar se o usuário já está autenticado (após verificar email)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkIfAlreadyAuthenticated();
       _checkPasskeySupport();
     });
+  }
+
+  // Carregar emails usados anteriormente do SharedPreferences
+  Future<void> _loadPreviousEmails() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final emailsJson = prefs.getStringList('previous_emails') ?? [];
+      if (mounted) {
+        setState(() {
+          _previousEmails = emailsJson;
+        });
+      }
+    } catch (e) {
+      // Ignorar erros ao carregar emails anteriores
+    }
+  }
+
+  // Salvar email usado anteriormente
+  Future<void> _saveEmail(String email) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final emails = prefs.getStringList('previous_emails') ?? [];
+      
+      // Remover email se já existir (para mover para o topo)
+      emails.remove(email);
+      
+      // Adicionar no início da lista
+      emails.insert(0, email);
+      
+      // Limitar a 10 emails mais recentes
+      if (emails.length > 10) {
+        emails.removeRange(10, emails.length);
+      }
+      
+      await prefs.setStringList('previous_emails', emails);
+      
+      if (mounted) {
+        setState(() {
+          _previousEmails = emails;
+        });
+      }
+    } catch (e) {
+      // Ignorar erros ao salvar email
+    }
   }
 
   // Verificar suporte a passkeys após o widget estar montado
@@ -493,6 +541,9 @@ class _LoginScreenState extends State<LoginScreen> {
               final emailConfirmed = currentUser?.emailConfirmedAt != null;
               
               if (mounted && isAuthenticated && currentUser != null && emailConfirmed) {
+                // Salvar email usado anteriormente
+                await _saveEmail(_emailController.text.trim());
+                
                 // Navegar de volta para o AuthWrapper que vai detectar a autenticação
                 // e redirecionar para a tela apropriada (home ou wallet selection)
                 Navigator.of(context).pushAndRemoveUntil(
@@ -599,6 +650,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   }
                 }
                 print('PASSO 1: Usuário criado no MongoDB com sucesso');
+                
+                // Salvar email usado anteriormente após signup bem-sucedido
+                await _saveEmail(_emailController.text.trim());
                 
                 // PASSO 1 concluído com sucesso - navegar para tela de seleção de foto
                 print('PASSO 1: Navegando para ProfilePictureSelectionScreen...');
@@ -789,6 +843,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 // Marcar que o usuário tem passkeys (para evitar tela de verificação de email)
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setBool('user_has_passkeys_${session.user!.id}', true);
+                
+                // Salvar email usado anteriormente
+                await _saveEmail(userEmail);
               } catch (e) {
                 // Ignorar erros no refresh - não crítico
               }
@@ -987,33 +1044,132 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 16),
                     ],
                     
-                    // Email field
-                    TextFormField(
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      textInputAction: _isLoginMode && !_emailEntered 
-                          ? TextInputAction.next 
-                          : TextInputAction.done,
-                      onFieldSubmitted: _isLoginMode && !_emailEntered
-                          ? (_) => _handleEmailSubmit()
-                          : null,
-                      decoration: InputDecoration(
-                        labelText: 'Email',
-                        prefixIcon: const Icon(Icons.email),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        filled: true,
-                        fillColor: AppTheme.white,
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Por favor, insira seu email';
+                    // Email field com autocompletar
+                    Autocomplete<String>(
+                      optionsBuilder: (TextEditingValue textEditingValue) {
+                        if (textEditingValue.text.isEmpty) {
+                          // Mostrar os 5 emails mais recentes quando o campo está vazio
+                          return _previousEmails.take(5);
                         }
-                        if (!value.contains('@')) {
-                          return 'Por favor, insira um email válido';
+                        final query = textEditingValue.text.toLowerCase();
+                        // Filtrar emails que contenham o texto digitado (case-insensitive)
+                        return _previousEmails.where((email) {
+                          return email.toLowerCase().contains(query);
+                        }).take(10); // Aumentar para 10 sugestões quando há texto
+                      },
+                      onSelected: (String email) {
+                        // Atualizar o controller principal quando um email é selecionado
+                        _emailController.text = email;
+                        // Se estiver no modo login e email foi selecionado, mostrar campo de senha
+                        if (_isLoginMode && !_emailEntered) {
+                          _handleEmailSubmit();
                         }
-                        return null;
+                      },
+                      fieldViewBuilder: (
+                        BuildContext context,
+                        TextEditingController textEditingController,
+                        FocusNode focusNode,
+                        VoidCallback onFieldSubmitted,
+                      ) {
+                        // Inicializar o controller do autocomplete com o valor atual apenas uma vez
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (textEditingController.text != _emailController.text) {
+                            textEditingController.text = _emailController.text;
+                          }
+                        });
+                        
+                        return TextFormField(
+                          controller: textEditingController,
+                          focusNode: focusNode,
+                          keyboardType: TextInputType.emailAddress,
+                          textInputAction: _isLoginMode && !_emailEntered 
+                              ? TextInputAction.next 
+                              : TextInputAction.done,
+                          onFieldSubmitted: _isLoginMode && !_emailEntered
+                              ? (_) => _handleEmailSubmit()
+                              : null,
+                          onChanged: (value) {
+                            // Sincronizar mudanças do autocomplete para o controller principal
+                            if (_emailController.text != value) {
+                              _emailController.text = value;
+                            }
+                          },
+                          decoration: InputDecoration(
+                            labelText: 'Email',
+                            prefixIcon: const Icon(Icons.email),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            filled: true,
+                            fillColor: AppTheme.white,
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Por favor, insira seu email';
+                            }
+                            if (!value.contains('@')) {
+                              return 'Por favor, insira um email válido';
+                            }
+                            return null;
+                          },
+                        );
+                      },
+                      optionsViewBuilder: (
+                        BuildContext context,
+                        AutocompleteOnSelected<String> onSelected,
+                        Iterable<String> options,
+                      ) {
+                        if (options.isEmpty) {
+                          return const SizedBox.shrink();
+                        }
+                        return Align(
+                          alignment: Alignment.topLeft,
+                          child: Material(
+                            elevation: 4.0,
+                            borderRadius: BorderRadius.circular(12),
+                            color: AppTheme.white,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 250),
+                              child: ListView.builder(
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                shrinkWrap: true,
+                                itemCount: options.length,
+                                itemBuilder: (BuildContext context, int index) {
+                                  final String email = options.elementAt(index);
+                                  return InkWell(
+                                    onTap: () => onSelected(email),
+                                    hoverColor: AppTheme.black.withOpacity(0.05),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16.0,
+                                        vertical: 12.0,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.email_outlined,
+                                            size: 20,
+                                            color: AppTheme.black.withOpacity(0.6),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Text(
+                                              email,
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                color: AppTheme.black,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        );
                       },
                     ),
                     const SizedBox(height: 16),
