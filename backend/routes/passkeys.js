@@ -321,17 +321,14 @@ router.post('/register', authenticateUser, async (req, res) => {
     }
     
     // A biblioteca compara id !== rawId diretamente, então rawId também deve ser uma string base64url
-    // Mas para a verificação interna, ela precisa do rawId como Buffer/ArrayBuffer
-    // Vamos passar rawId como string base64url para passar na validação, mas manter o Buffer para uso interno
+    // A biblioteca também espera clientDataJSON e attestationObject como strings base64url (não Buffers)
     const credentialForVerification = {
       id: credentialIdBase64Url, // String base64url válida
       rawId: credentialIdBase64Url, // String base64url (a biblioteca compara id === rawId como strings)
       type: credential.type || 'public-key',
       response: {
-        clientDataJSON: Buffer.from(credential.response.clientDataJSON, 'base64url'),
-        attestationObject: credential.response.attestationObject 
-          ? Buffer.from(credential.response.attestationObject, 'base64url')
-          : undefined,
+        clientDataJSON: credential.response.clientDataJSON, // String base64url (já vem do frontend)
+        attestationObject: credential.response.attestationObject || undefined, // String base64url (já vem do frontend)
       },
       authenticatorAttachment: credential.authenticatorAttachment,
       clientExtensionResults: credential.clientExtensionResults || {},
@@ -650,21 +647,16 @@ router.post('/authenticate', async (req, res) => {
     }
     
     // A biblioteca compara id !== rawId diretamente, então rawId também deve ser uma string base64url
+    // A biblioteca também espera clientDataJSON e outros campos como strings base64url (não Buffers)
     const credentialForVerification = {
       id: credentialIdBase64Url, // String base64url válida
       rawId: credentialIdBase64Url, // String base64url (a biblioteca compara id === rawId como strings)
       type: credential.type || 'public-key',
       response: {
-        clientDataJSON: Buffer.from(credential.response.clientDataJSON, 'base64url'),
-        authenticatorData: credential.response.authenticatorData
-          ? Buffer.from(credential.response.authenticatorData, 'base64url')
-          : undefined,
-        signature: credential.response.signature
-          ? Buffer.from(credential.response.signature, 'base64url')
-          : undefined,
-        userHandle: credential.response.userHandle
-          ? Buffer.from(credential.response.userHandle, 'base64url')
-          : undefined,
+        clientDataJSON: credential.response.clientDataJSON, // String base64url (já vem do frontend)
+        authenticatorData: credential.response.authenticatorData || undefined, // String base64url (já vem do frontend)
+        signature: credential.response.signature || undefined, // String base64url (já vem do frontend)
+        userHandle: credential.response.userHandle || undefined, // String base64url (já vem do frontend)
       },
       authenticatorAttachment: credential.authenticatorAttachment,
       clientExtensionResults: credential.clientExtensionResults || {},
