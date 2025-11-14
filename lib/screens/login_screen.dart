@@ -567,14 +567,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 }
               }
               
-              // Forçar refresh da sessão para garantir que está atualizada
-              try {
-                await _authService.supabase.auth.refreshSession();
-              } catch (e) {
-                // Ignorar erros no refresh - não crítico
-              }
-              
-              // Verificar novamente se o usuário está autenticado antes de navegar
+              // Verificar novamente se o usuário está autenticado antes de verificar passkey
               final currentUser = _authService.currentUser;
               final isAuthenticated = _authService.isAuthenticated;
               final emailConfirmed = currentUser?.emailConfirmedAt != null;
@@ -583,13 +576,22 @@ class _LoginScreenState extends State<LoginScreen> {
                 // Salvar email usado anteriormente
                 await _saveEmail(_emailController.text.trim());
                 
-                // Verificar se usuário tem passkeys e solicitar autenticação se necessário
+                // IMPORTANTE: Verificar passkey ANTES de fazer refresh da sessão
+                // para evitar que o AuthWrapper detecte autenticação e navegue automaticamente
                 final passkeyVerified = await _verifyPasskeyIfRequired(_emailController.text.trim());
                 
                 if (!passkeyVerified) {
                   // Verificação de passkey falhou ou foi cancelada, logout já foi feito
                   setState(() => _isLoading = false);
                   return;
+                }
+                
+                // Só fazer refresh da sessão DEPOIS da verificação da passkey ser concluída
+                // Isso evita que o AuthWrapper navegue antes da verificação
+                try {
+                  await _authService.supabase.auth.refreshSession();
+                } catch (e) {
+                  // Ignorar erros no refresh - não crítico
                 }
                 
                 // Navegar de volta para o AuthWrapper que vai detectar a autenticação
@@ -609,13 +611,21 @@ class _LoginScreenState extends State<LoginScreen> {
                 final retryEmailConfirmed = retryUser?.emailConfirmedAt != null;
                 
                 if (mounted && retryAuthenticated && retryUser != null && retryEmailConfirmed) {
-                  // Verificar se usuário tem passkeys e solicitar autenticação se necessário
+                  // IMPORTANTE: Verificar passkey ANTES de fazer refresh da sessão
+                  // para evitar que o AuthWrapper detecte autenticação e navegue automaticamente
                   final passkeyVerified = await _verifyPasskeyIfRequired(_emailController.text.trim());
                   
                   if (!passkeyVerified) {
                     // Verificação de passkey falhou ou foi cancelada, logout já foi feito
                     setState(() => _isLoading = false);
                     return;
+                  }
+                  
+                  // Só fazer refresh da sessão DEPOIS da verificação da passkey ser concluída
+                  try {
+                    await _authService.supabase.auth.refreshSession();
+                  } catch (e) {
+                    // Ignorar erros no refresh - não crítico
                   }
                   
                   Navigator.of(context).pushAndRemoveUntil(
@@ -1245,8 +1255,8 @@ class _LoginScreenState extends State<LoginScreen> {
               final session = await _authService.setSessionWithToken(token, userEmail);
               
               if (session.session != null && session.user != null) {
-                // Refresh da sessão
-                await _authService.supabase.auth.refreshSession();
+                // NÃO fazer refresh aqui para evitar que o AuthWrapper navegue antes da verificação terminar
+                // O refresh será feito depois, no método principal, após a verificação ser concluída
                 
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(

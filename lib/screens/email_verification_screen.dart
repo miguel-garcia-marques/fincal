@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
+import '../services/user_service.dart';
 import '../theme/app_theme.dart';
 import '../main.dart';
 import 'login_screen.dart';
@@ -22,6 +23,7 @@ class EmailVerificationScreen extends StatefulWidget {
 
 class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   final _authService = AuthService();
+  final _userService = UserService();
   bool _isChecking = false;
   bool _isVerified = false;
   bool _hasError = false;
@@ -52,10 +54,24 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     try {
       // Tentar verificar se o email foi confirmado e fazer login automático
       try {
+        // Fazer refresh da sessão para obter estado mais recente
+        await _authService.supabase.auth.refreshSession();
+        
         // Verificar se há uma sessão ativa (usuário pode ter clicado no link de verificação)
         final currentUser = _authService.currentUser;
-        if (currentUser != null && currentUser.emailConfirmedAt != null) {
-          // Email já foi verificado, fazer refresh da sessão
+        
+        // Verificar se o usuário existe no MongoDB (se existe, conta já foi criada)
+        final mongoUser = await _userService.getCurrentUser(forceRefresh: false).timeout(
+          const Duration(seconds: 2),
+          onTimeout: () => null,
+        );
+        
+        // Se o email foi confirmado OU se o usuário já existe no MongoDB, considerar verificado
+        final emailConfirmed = currentUser != null && currentUser.emailConfirmedAt != null;
+        final accountExists = mongoUser != null;
+        
+        if (emailConfirmed || accountExists) {
+          // Email já foi verificado ou conta já existe, fazer refresh da sessão
           await _authService.supabase.auth.refreshSession();
           
           // Navegar para AuthWrapper que vai detectar a autenticação e redirecionar
@@ -70,10 +86,11 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
           return;
         }
       } catch (e) {
-
+        // Se houver erro ao verificar, continuar para login
+        print('[EmailVerification] Erro ao verificar estado: $e');
       }
       
-      // Se não houver sessão ativa, redirecionar para login
+      // Se não houver sessão ativa ou email não confirmado, redirecionar para login
       // O usuário pode tentar fazer login e será informado se o email não foi verificado
       if (!_isDisposed && mounted) {
         setState(() {

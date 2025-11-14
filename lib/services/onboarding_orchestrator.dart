@@ -67,16 +67,45 @@ class OnboardingOrchestrator {
         final prefs = await SharedPreferences.getInstance();
         final hasPasskeys = prefs.getBool('user_has_passkeys_${currentUser.id}') ?? false;
         
-        if (hasPasskeys) {
-          // Usuário tem passkeys - email considerado verificado
+        // IMPORTANTE: Se o usuário já existe no MongoDB, significa que a conta foi criada
+        // e provavelmente o email já foi verificado em algum momento
+        // Não mostrar tela de verificação se a conta já existe
+        final mongoUserExists = await _userService.getCurrentUser(forceRefresh: false).timeout(
+          const Duration(seconds: 2),
+          onTimeout: () => null,
+        );
+        
+        if (hasPasskeys || mongoUserExists != null) {
+          // Usuário tem passkeys OU já existe no MongoDB - email considerado verificado
           // Continuar para próxima etapa do onboarding
+          print('[OnboardingOrchestrator] Email considerado verificado (passkeys: $hasPasskeys, mongoUser: ${mongoUserExists != null})');
         } else {
-          // Usuário não tem passkeys - precisa verificar email
+          // Usuário não tem passkeys e não existe no MongoDB - precisa verificar email
+          print('[OnboardingOrchestrator] Email não verificado - mostrando tela de verificação');
           return OnboardingState.emailNotVerified;
         }
       } catch (e) {
-        // Em caso de erro, seguir com verificação normal de email
-        return OnboardingState.emailNotVerified;
+        // Em caso de erro, verificar se usuário existe no MongoDB antes de mostrar tela
+        try {
+          final mongoUserExists = await _userService.getCurrentUser(forceRefresh: false).timeout(
+            const Duration(seconds: 2),
+            onTimeout: () => null,
+          );
+          
+          // Se usuário existe no MongoDB, não mostrar tela de verificação
+          if (mongoUserExists != null) {
+            print('[OnboardingOrchestrator] Usuário existe no MongoDB - email considerado verificado');
+            // Continuar para próxima etapa
+          } else {
+            // Usuário não existe - mostrar tela de verificação
+            print('[OnboardingOrchestrator] Erro ao verificar passkeys, mas usuário não existe no MongoDB - mostrando tela de verificação');
+            return OnboardingState.emailNotVerified;
+          }
+        } catch (e2) {
+          // Se falhar tudo, seguir com verificação normal de email
+          print('[OnboardingOrchestrator] Erro ao verificar estado: $e2');
+          return OnboardingState.emailNotVerified;
+        }
       }
     }
     
