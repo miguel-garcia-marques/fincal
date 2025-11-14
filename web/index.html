@@ -104,10 +104,23 @@
                              errorStr.includes('isDisposed');
       const isLegacyJsError = errorStr.includes('LegacyJavaScriptObject') ||
                              errorStr.includes('DiagnosticsNode');
+      const isPasskeyError = errorStr.includes('PasskeyService') ||
+                            errorStr.includes('webauthnHelpers') ||
+                            errorStr.includes('_tempPasskey');
       
       // Ignorar erros conhecidos do Flutter Web que não afetam funcionalidade
+      // Mas logar erros relacionados a PasskeyService para debug
       if (!isDisposedError && !isLegacyJsError) {
-      console.error('Erro não capturado:', event.error);
+        if (isPasskeyError) {
+          console.warn('[PasskeyService] Erro JavaScript relacionado a passkey:', event.error);
+        } else {
+          console.error('Erro não capturado:', event.error);
+        }
+      }
+      
+      // Prevenir que erros relacionados a passkey causem crash
+      if (isPasskeyError) {
+        event.preventDefault();
       }
     });
     
@@ -118,10 +131,23 @@
                              reasonStr.includes('isDisposed');
       const isLegacyJsError = reasonStr.includes('LegacyJavaScriptObject') ||
                              reasonStr.includes('DiagnosticsNode');
+      const isPasskeyError = reasonStr.includes('PasskeyService') ||
+                            reasonStr.includes('webauthnHelpers') ||
+                            reasonStr.includes('_tempPasskey');
       
       // Ignorar erros conhecidos do Flutter Web
+      // Mas logar erros relacionados a PasskeyService para debug
       if (!isDisposedError && !isLegacyJsError) {
-      console.error('Promise rejeitada não tratada:', event.reason);
+        if (isPasskeyError) {
+          console.warn('[PasskeyService] Promise rejeitada relacionada a passkey:', event.reason);
+        } else {
+          console.error('Promise rejeitada não tratada:', event.reason);
+        }
+      }
+      
+      // Prevenir que rejeições relacionadas a passkey causem crash
+      if (isPasskeyError) {
+        event.preventDefault();
       }
     });
     

@@ -139,31 +139,43 @@ class PasskeyService {
 
       // 2. Criar credencial e converter usando função wrapper JavaScript
       // Usar Promise.resolve para garantir que retorna uma Promise
-      final credentialMapStr = await _executeAsyncJs(
-        '''
-        (async () => {
-          try {
-            const credential = await window.webauthnHelpers.createCredential($publicKeyOptionsStr);
-            if (!credential) return null;
-            const credentialObj = window.webauthnHelpers.credentialToObject(credential);
-            return JSON.stringify(credentialObj);
-          } catch (e) {
-            return JSON.stringify({error: e.message});
-          }
-        })()
-        '''
-      );
+      String? credentialMapStr;
+      try {
+        credentialMapStr = await _executeAsyncJs(
+          '''
+          (async () => {
+            try {
+              const credential = await window.webauthnHelpers.createCredential($publicKeyOptionsStr);
+              if (!credential) return null;
+              const credentialObj = window.webauthnHelpers.credentialToObject(credential);
+              return JSON.stringify(credentialObj);
+            } catch (e) {
+              return JSON.stringify({error: e.message || String(e)});
+            }
+          })()
+          '''
+        ) as String?;
+      } catch (e) {
+        print('[PasskeyService] Erro ao executar JavaScript para registro: $e');
+        throw Exception('Erro ao registrar passkey: $e');
+      }
       
-      if (credentialMapStr == null) {
+      if (credentialMapStr == null || credentialMapStr.isEmpty) {
         throw Exception('Registro de passkey cancelado pelo usuário');
       }
       
-      final credentialMapJson = credentialMapStr as String;
-      final credentialMap = jsonDecode(credentialMapJson) as Map<String, dynamic>;
+      Map<String, dynamic> credentialMap;
+      try {
+        credentialMap = jsonDecode(credentialMapStr) as Map<String, dynamic>;
+      } catch (e) {
+        print('[PasskeyService] Erro ao decodificar resposta JavaScript: $e');
+        throw Exception('Erro ao processar resposta de registro');
+      }
       
       // Verificar se há erro
       if (credentialMap.containsKey('error')) {
-        throw Exception('Erro ao criar passkey: ${credentialMap['error']}');
+        final errorMsg = credentialMap['error'] as String? ?? 'Erro desconhecido';
+        throw Exception('Erro ao criar passkey: $errorMsg');
       }
 
       // 3. Enviar credencial para o servidor para verificação
@@ -263,9 +275,21 @@ class PasskeyService {
           throw Exception('Nenhuma passkey encontrada para este email');
         }
         if (optionsResponse.statusCode == 429) {
-          throw Exception('Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.');
+          try {
+            final errorData = jsonDecode(optionsResponse.body);
+            final message = errorData['message'] as String? ?? 'Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.';
+            throw Exception(message);
+          } catch (e) {
+            if (e is Exception) rethrow;
+            throw Exception('Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.');
+          }
         }
-        throw Exception('Erro ao obter opções de autenticação: ${optionsResponse.body}');
+        try {
+          final errorData = jsonDecode(optionsResponse.body);
+          throw Exception(errorData['message'] ?? 'Erro ao obter opções de autenticação');
+        } catch (e) {
+          throw Exception('Erro ao obter opções de autenticação: ${optionsResponse.statusCode}');
+        }
       }
 
       final optionsData = jsonDecode(optionsResponse.body);
@@ -298,31 +322,43 @@ class PasskeyService {
       ''';
 
       // 2. Obter credencial e converter usando função wrapper JavaScript
-      final credentialMapStr = await _executeAsyncJs(
-        '''
-        (async () => {
-          try {
-            const credential = await window.webauthnHelpers.getCredential($publicKeyOptionsStr);
-            if (!credential) return null;
-            const credentialObj = window.webauthnHelpers.authenticationResponseToObject(credential);
-            return JSON.stringify(credentialObj);
-          } catch (e) {
-            return JSON.stringify({error: e.message});
-          }
-        })()
-        '''
-      );
+      String? credentialMapStr;
+      try {
+        credentialMapStr = await _executeAsyncJs(
+          '''
+          (async () => {
+            try {
+              const credential = await window.webauthnHelpers.getCredential($publicKeyOptionsStr);
+              if (!credential) return null;
+              const credentialObj = window.webauthnHelpers.authenticationResponseToObject(credential);
+              return JSON.stringify(credentialObj);
+            } catch (e) {
+              return JSON.stringify({error: e.message || String(e)});
+            }
+          })()
+          '''
+        ) as String?;
+      } catch (e) {
+        print('[PasskeyService] Erro ao executar JavaScript para autenticação: $e');
+        throw Exception('Erro ao autenticar com passkey: $e');
+      }
       
-      if (credentialMapStr == null) {
+      if (credentialMapStr == null || credentialMapStr.isEmpty) {
         throw Exception('Autenticação cancelada pelo usuário');
       }
       
-      final credentialMapJson = credentialMapStr as String;
-      final credentialMap = jsonDecode(credentialMapJson) as Map<String, dynamic>;
+      Map<String, dynamic> credentialMap;
+      try {
+        credentialMap = jsonDecode(credentialMapStr) as Map<String, dynamic>;
+      } catch (e) {
+        print('[PasskeyService] Erro ao decodificar resposta JavaScript: $e');
+        throw Exception('Erro ao processar resposta de autenticação');
+      }
       
       // Verificar se há erro
       if (credentialMap.containsKey('error')) {
-        throw Exception('Erro ao autenticar com passkey: ${credentialMap['error']}');
+        final errorMsg = credentialMap['error'] as String? ?? 'Erro desconhecido';
+        throw Exception('Erro ao autenticar com passkey: $errorMsg');
       }
 
       // 3. Enviar credencial para o servidor para verificação com retry para 429
@@ -379,10 +415,22 @@ class PasskeyService {
 
       if (authResponse.statusCode != 200) {
         if (authResponse.statusCode == 429) {
-          throw Exception('Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.');
+          try {
+            final errorData = jsonDecode(authResponse.body);
+            final message = errorData['message'] as String? ?? 'Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.';
+            throw Exception(message);
+          } catch (e) {
+            if (e is Exception) rethrow;
+            throw Exception('Muitas tentativas. Por favor, aguarde alguns instantes antes de tentar novamente.');
+          }
         }
-        final errorData = jsonDecode(authResponse.body);
-        throw Exception(errorData['message'] ?? 'Erro ao autenticar com passkey');
+        try {
+          final errorData = jsonDecode(authResponse.body);
+          throw Exception(errorData['message'] ?? 'Erro ao autenticar com passkey');
+        } catch (e) {
+          if (e is Exception) rethrow;
+          throw Exception('Erro ao autenticar com passkey: ${authResponse.statusCode}');
+        }
       }
 
       final authData = jsonDecode(authResponse.body);
@@ -499,72 +547,143 @@ class PasskeyService {
 
   // Helper: Executar código JavaScript assíncrono e aguardar resultado
   Future<dynamic> _executeAsyncJs(String code) async {
-    // Criar uma Promise wrapper que retorna o resultado
-    final promiseCode = '''
-      new Promise((resolve) => {
-        (async () => {
+    try {
+      // Criar uma Promise wrapper que retorna o resultado
+      final promiseCode = '''
+        new Promise((resolve, reject) => {
           try {
-            const result = await ($code);
-            resolve(result);
+            (async () => {
+              try {
+                const result = await ($code);
+                resolve(result);
+              } catch (e) {
+                resolve(JSON.stringify({error: e.message || String(e)}));
+              }
+            })();
           } catch (e) {
-            resolve(JSON.stringify({error: e.message}));
+            resolve(JSON.stringify({error: e.message || String(e)}));
           }
-        })();
-      })
-    ''';
-    
-    // Usar eval para executar e retornar Promise
-    // Nota: dart:js não suporta Promises diretamente, então vamos usar uma abordagem diferente
-    // Vamos criar uma função global temporária
-    final tempFuncName = '_tempPasskeyFunc_${DateTime.now().millisecondsSinceEpoch}';
-    
-    // Criar função temporária que retorna Promise
-    js.context.callMethod('eval', [
-      'window.$tempFuncName = function() { return $promiseCode; }'
-    ]);
-    
-    // Chamar função e aguardar resultado usando polling
-    // (Não ideal, mas funciona com dart:js)
-    dynamic result;
-    int attempts = 0;
-    
-    // Iniciar Promise
-    js.context.callMethod('eval', [
-      'window.$tempFuncName().then(r => { window._tempPasskeyResult = r; }).catch(e => { window._tempPasskeyResult = JSON.stringify({error: e.message}); })'
-    ]);
-    
-    while (attempts < 100) { // Timeout de ~10 segundos
-      await Future.delayed(const Duration(milliseconds: 100));
+        })
+      ''';
+      
+      // Usar eval para executar e retornar Promise
+      // Nota: dart:js não suporta Promises diretamente, então vamos usar uma abordagem diferente
+      // Vamos criar uma função global temporária
+      final tempFuncName = '_tempPasskeyFunc_${DateTime.now().millisecondsSinceEpoch}';
+      final resultVarName = '_tempPasskeyResult_${DateTime.now().millisecondsSinceEpoch}';
+      final errorVarName = '_tempPasskeyError_${DateTime.now().millisecondsSinceEpoch}';
+      
       try {
-        // Verificar se resultado está disponível
-        final hasResult = js.context.callMethod('eval', [
-          'typeof window._tempPasskeyResult !== "undefined"'
+        // Criar função temporária que retorna Promise
+        js.context.callMethod('eval', [
+          '''
+          (function() {
+            try {
+              window.$tempFuncName = function() { 
+                return $promiseCode; 
+              };
+            } catch (e) {
+              window.$errorVarName = e.message || String(e);
+            }
+          })()
+          '''
         ]);
         
-        if (hasResult == true) {
-          result = js.context.callMethod('eval', [
-            'window._tempPasskeyResult'
+        // Verificar se houve erro na criação da função
+        try {
+          final hasError = js.context.callMethod('eval', [
+            'typeof window.$errorVarName !== "undefined"'
           ]);
-          
-          // Limpar variáveis temporárias
-          js.context.callMethod('eval', [
-            'delete window.$tempFuncName; delete window._tempPasskeyResult;'
-          ]);
-          
-          return result;
+          if (hasError == true) {
+            final errorMsg = js.context.callMethod('eval', [
+              'window.$errorVarName'
+            ]);
+            js.context.callMethod('eval', [
+              'delete window.$errorVarName;'
+            ]);
+            throw Exception('Erro ao criar função JavaScript: $errorMsg');
+          }
+        } catch (e) {
+          // Ignorar erros de verificação
         }
+        
+        // Chamar função e aguardar resultado usando polling
+        // (Não ideal, mas funciona com dart:js)
+        dynamic result;
+        int attempts = 0;
+        
+        // Iniciar Promise com tratamento de erros robusto
+        js.context.callMethod('eval', [
+          '''
+          (function() {
+            try {
+              window.$tempFuncName().then(function(r) { 
+                window.$resultVarName = r; 
+              }).catch(function(e) { 
+                window.$resultVarName = JSON.stringify({error: e.message || String(e)}); 
+              });
+            } catch (e) {
+              window.$resultVarName = JSON.stringify({error: e.message || String(e)});
+            }
+          })()
+          '''
+        ]);
+        
+        while (attempts < 100) { // Timeout de ~10 segundos
+          await Future.delayed(const Duration(milliseconds: 100));
+          try {
+            // Verificar se resultado está disponível
+            final hasResult = js.context.callMethod('eval', [
+              'typeof window.$resultVarName !== "undefined"'
+            ]);
+            
+            if (hasResult == true) {
+              result = js.context.callMethod('eval', [
+                'window.$resultVarName'
+              ]);
+              
+              // Limpar variáveis temporárias
+              try {
+                js.context.callMethod('eval', [
+                  'delete window.$tempFuncName; delete window.$resultVarName; delete window.$errorVarName;'
+                ]);
+              } catch (e) {
+                // Ignorar erros de limpeza
+              }
+              
+              return result;
+            }
+          } catch (e) {
+            // Continuar tentando
+          }
+          attempts++;
+        }
+        
+        // Limpar em caso de timeout
+        try {
+          js.context.callMethod('eval', [
+            'delete window.$tempFuncName; delete window.$resultVarName; delete window.$errorVarName;'
+          ]);
+        } catch (e) {
+          // Ignorar erros de limpeza
+        }
+        
+        throw Exception('Timeout ao executar código JavaScript assíncrono');
       } catch (e) {
-        // Continuar tentando
+        // Limpar variáveis em caso de erro
+        try {
+          js.context.callMethod('eval', [
+            'delete window.$tempFuncName; delete window.$resultVarName; delete window.$errorVarName;'
+          ]);
+        } catch (cleanupError) {
+          // Ignorar erros de limpeza
+        }
+        rethrow;
       }
-      attempts++;
+    } catch (e) {
+      print('[PasskeyService] Erro ao executar JavaScript assíncrono: $e');
+      rethrow;
     }
-    
-    // Limpar em caso de timeout
-    js.context.callMethod('eval', [
-      'delete window.$tempFuncName; delete window._tempPasskeyResult;'
-    ]);
-    
-    throw Exception('Timeout ao executar código JavaScript assíncrono');
   }
 
   // Helper: Detectar tipo de dispositivo
