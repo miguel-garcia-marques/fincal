@@ -225,12 +225,12 @@ class AuthService {
       print('[AuthService] - Email: $email');
       
       // Usar verifyOTP com o hashed_token do magic link
-      // IMPORTANTE: hashed_token deve ser usado com token_hash, não token!
+      // IMPORTANTE: Quando usamos tokenHash, NÃO devemos passar email!
+      // Apenas tokenHash e type são necessários
       // Isso cria uma sessão válida com refresh_token real do Supabase
       final response = await _supabase.auth.verifyOTP(
         type: OtpType.magiclink,
-        email: email,
-        tokenHash: hashedToken, // Usar tokenHash para hashed_token
+        tokenHash: hashedToken, // Usar tokenHash para hashed_token (sem email!)
       );
       
       if (response.session != null) {
