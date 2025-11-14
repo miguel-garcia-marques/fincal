@@ -910,6 +910,14 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         _isProcessingImage = true;
       });
 
+      // Mostrar diálogo de loading informativo
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const _ProcessingImageDialog(),
+      );
+
       // Converter imagem para base64
       final String base64Image = base64Encode(imageBytes);
       final String imageBase64 = 'data:image/jpeg;base64,$base64Image';
@@ -920,6 +928,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         imageBase64,
         walletId: widget.walletId,
       );
+
+      // Fechar diálogo de loading
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
 
       // Preparar dados para o formulário
       double? extractedAmount;
@@ -990,8 +1003,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         }
       });
     } catch (e) {
+      // Fechar diálogo de loading se ainda estiver aberto
       if (mounted) {
-        _showErrorDialog('Erro ao processar imagem: $e');
+        Navigator.of(context).pop(); // Fechar diálogo de loading
+        _showGenericErrorDialog(); // Mostrar mensagem genérica e amigável
       }
     } finally {
       if (mounted) {
@@ -1000,6 +1015,31 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         });
       }
     }
+  }
+
+  void _showGenericErrorDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.info_outline, color: AppTheme.darkGray),
+            const SizedBox(width: 8),
+            const Text('Não foi possível processar'),
+          ],
+        ),
+        content: const Text(
+          'Não foi possível processar a imagem da fatura no momento. '
+          'Por favor, tente novamente mais tarde ou adicione a transação manualmente.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _importBulkTransactions() async {
@@ -2190,6 +2230,120 @@ class _ImportBulkTransactionsSheetState
                 ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ProcessingImageDialog extends StatefulWidget {
+  const _ProcessingImageDialog();
+
+  @override
+  State<_ProcessingImageDialog> createState() => _ProcessingImageDialogState();
+}
+
+class _ProcessingImageDialogState extends State<_ProcessingImageDialog> {
+  int _currentStep = 0;
+  final List<String> _steps = [
+    'Analisando imagem...',
+    'Extraindo informações...',
+    'Processando dados...',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _animateSteps();
+  }
+
+  void _animateSteps() {
+    Future.delayed(const Duration(milliseconds: 800), () {
+      if (mounted && _currentStep < _steps.length - 1) {
+        setState(() {
+          _currentStep++;
+        });
+        _animateSteps();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Ícone animado
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: AppTheme.black.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.black),
+                  strokeWidth: 3,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Título
+            Text(
+              'Processando Fatura',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.black,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            // Mensagem atual
+            Text(
+              _steps[_currentStep],
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppTheme.darkGray,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            // Indicador de progresso
+            Container(
+              margin: const EdgeInsets.only(top: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(_steps.length, (index) {
+                  return Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: index <= _currentStep
+                          ? AppTheme.black
+                          : AppTheme.lighterGray,
+                    ),
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(height: 16),
+            // Mensagem informativa
+            Text(
+              'Isso pode levar alguns segundos...',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppTheme.darkGray.withOpacity(0.7),
+                    fontSize: 12,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }

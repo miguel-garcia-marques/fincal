@@ -61,14 +61,14 @@ Retorne APENAS um objeto JSON válido, sem markdown, sem explicações adicionai
     ]
   };
 
-  // Primeiro, tentar listar modelos disponíveis para descobrir quais funcionam
-  // Depois tentar os modelos mais recentes primeiro
+  // Modelos baseados na lista de disponíveis do usuário
+  // Ordem: tentar modelos gratuitos primeiro, com retry para "overloaded"
   const modelsToTry = [
-    { name: 'gemini-2.5-flash', version: 'v1beta' }, // Modelo mais recente mencionado na doc
-    { name: 'gemini-2.0-flash-exp', version: 'v1beta' }, // Versão experimental
-    { name: 'gemini-1.5-flash', version: 'v1beta' },
-    { name: 'gemini-1.5-flash-002', version: 'v1beta' }, // Versão específica
-    { name: 'gemini-pro-vision', version: 'v1' }, // Modelo legado gratuito com visão
+    { name: 'gemini-2.5-flash', version: 'v1beta', retryOnOverload: true }, // Disponível mas pode estar overloaded
+    { name: 'gemini-2.0-flash', version: 'v1beta' }, // Versão estável que pode estar no tier gratuito
+    { name: 'gemini-2.0-flash-001', version: 'v1beta' }, // Versão específica
+    { name: 'gemini-flash-latest', version: 'v1beta' }, // Alias para modelo mais recente
+    { name: 'gemini-2.5-flash-lite', version: 'v1beta' }, // Versão lite (mais leve, pode ser gratuita)
   ];
 
   // Função auxiliar para listar modelos disponíveis (para debug)
@@ -105,8 +105,8 @@ Retorne APENAS um objeto JSON válido, sem markdown, sem explicações adicionai
     });
   };
 
-  // Função para tentar fazer a requisição com um modelo específico
-  const tryModel = (modelConfig) => {
+  // Função para tentar fazer a requisição com um modelo específico (com retry para overload)
+  const tryModel = (modelConfig, retryCount = 0) => {
     return new Promise((resolve, reject) => {
       const options = {
         hostname: 'generativelanguage.googleapis.com',
@@ -126,8 +126,30 @@ Retorne APENAS um objeto JSON válido, sem markdown, sem explicações adicionai
 
         res.on('end', () => {
           if (res.statusCode !== 200) {
-            const errorData = JSON.parse(data);
-            reject(new Error(`Modelo ${modelConfig.name}: ${errorData.error?.message || 'Erro desconhecido'}`));
+            try {
+              const errorData = JSON.parse(data);
+              const errorMessage = errorData.error?.message || 'Erro desconhecido';
+              
+              // Se estiver overloaded e tiver retry configurado, tentar novamente após delay
+              if (errorMessage.includes('overloaded') && modelConfig.retryOnOverload && retryCount < 2) {
+                const delay = (retryCount + 1) * 2000; // 2s, 4s
+                console.log(`⏳ Modelo ${modelConfig.name} sobrecarregado, tentando novamente em ${delay}ms...`);
+                setTimeout(() => {
+                  tryModel(modelConfig, retryCount + 1).then(resolve).catch(reject);
+                }, delay);
+                return;
+              }
+              
+              // Se excedeu quota gratuita (limit: 0), não tentar novamente
+              if (errorMessage.includes('limit: 0') || errorMessage.includes('quota')) {
+                reject(new Error(`Modelo ${modelConfig.name}: Sem quota gratuita disponível - ${errorMessage}`));
+                return;
+              }
+              
+              reject(new Error(`Modelo ${modelConfig.name}: ${errorMessage}`));
+            } catch (parseError) {
+              reject(new Error(`Modelo ${modelConfig.name}: Erro ao processar resposta (${res.statusCode})`));
+            }
             return;
           }
 
