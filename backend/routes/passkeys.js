@@ -225,7 +225,10 @@ router.post('/register', authenticateUser, async (req, res) => {
       
       if (storedChallenge && storedChallenge.challengeBuffer) {
         // Usar o challenge original armazenado (decodificar de base64)
-        expectedChallenge = Buffer.from(storedChallenge.challengeBuffer, 'base64');
+        const expectedChallengeBuffer = Buffer.from(storedChallenge.challengeBuffer, 'base64');
+        // A biblioteca espera o challenge como string UTF-8 decodificada, não como Buffer ou base64url
+        // O clientDataJSON contém o challenge decodificado como UTF-8, então precisamos passar o mesmo formato
+        expectedChallenge = expectedChallengeBuffer.toString('utf8');
         console.log('[Passkey Register] Usando challenge original do MongoDB');
         
         // Deletar após uso para limpar o banco
@@ -234,14 +237,16 @@ router.post('/register', authenticateUser, async (req, res) => {
         // Fallback: decodificar o challenge recebido
         if (typeof challenge === 'string') {
           try {
-            // Tentar decodificar como base64url
-            expectedChallenge = Buffer.from(challenge, 'base64url');
+            // Tentar decodificar como base64url e depois converter para UTF-8
+            const challengeBuffer = Buffer.from(challenge, 'base64url');
+            expectedChallenge = challengeBuffer.toString('utf8');
           } catch (e) {
             // Se falhar, tentar como base64 normal
-            expectedChallenge = Buffer.from(challenge, 'base64');
+            const challengeBuffer = Buffer.from(challenge, 'base64');
+            expectedChallenge = challengeBuffer.toString('utf8');
           }
         } else if (Buffer.isBuffer(challenge)) {
-          expectedChallenge = challenge;
+          expectedChallenge = challenge.toString('utf8');
         } else {
           return res.status(400).json({ message: 'Formato de challenge inválido' });
         }
@@ -252,21 +257,23 @@ router.post('/register', authenticateUser, async (req, res) => {
       // Fallback: decodificar o challenge recebido
       if (typeof challenge === 'string') {
         try {
-          expectedChallenge = Buffer.from(challenge, 'base64url');
+          const challengeBuffer = Buffer.from(challenge, 'base64url');
+          expectedChallenge = challengeBuffer.toString('utf8');
         } catch (e) {
-          expectedChallenge = Buffer.from(challenge, 'base64');
+          const challengeBuffer = Buffer.from(challenge, 'base64');
+          expectedChallenge = challengeBuffer.toString('utf8');
         }
       } else if (Buffer.isBuffer(challenge)) {
-        expectedChallenge = challenge;
+        expectedChallenge = challenge.toString('utf8');
       } else {
         return res.status(400).json({ message: 'Formato de challenge inválido' });
       }
       console.log('[Passkey Register] Usando challenge decodificado (fallback após erro)');
     }
     
-    console.log('[Passkey Register] Challenge recebido (string):', challenge);
-    console.log('[Passkey Register] Challenge como Buffer (base64url):', expectedChallenge.toString('base64url'));
-    console.log('[Passkey Register] Challenge Buffer length:', expectedChallenge.length);
+    console.log('[Passkey Register] Challenge recebido (string base64url):', challenge);
+    console.log('[Passkey Register] Challenge como UTF-8 (esperado pela biblioteca):', expectedChallenge);
+    console.log('[Passkey Register] Challenge length:', expectedChallenge.length);
     
     // Converter credential do formato JSON (base64url strings) para formato esperado pela biblioteca
     // O frontend envia tudo como base64url strings, precisamos converter de volta para Buffers
@@ -568,7 +575,10 @@ router.post('/authenticate', async (req, res) => {
       
       if (storedChallenge && storedChallenge.challengeBuffer) {
         // Usar o challenge original armazenado (decodificar de base64)
-        expectedChallenge = Buffer.from(storedChallenge.challengeBuffer, 'base64');
+        const expectedChallengeBuffer = Buffer.from(storedChallenge.challengeBuffer, 'base64');
+        // A biblioteca espera o challenge como string UTF-8 decodificada, não como Buffer ou base64url
+        // O clientDataJSON contém o challenge decodificado como UTF-8, então precisamos passar o mesmo formato
+        expectedChallenge = expectedChallengeBuffer.toString('utf8');
         console.log('[Passkey Authenticate] Usando challenge original do MongoDB');
         
         // Deletar após uso para limpar o banco
@@ -577,12 +587,14 @@ router.post('/authenticate', async (req, res) => {
         // Fallback: decodificar o challenge recebido
         if (typeof challenge === 'string') {
           try {
-            expectedChallenge = Buffer.from(challenge, 'base64url');
+            const challengeBuffer = Buffer.from(challenge, 'base64url');
+            expectedChallenge = challengeBuffer.toString('utf8');
           } catch (e) {
-            expectedChallenge = Buffer.from(challenge, 'base64');
+            const challengeBuffer = Buffer.from(challenge, 'base64');
+            expectedChallenge = challengeBuffer.toString('utf8');
           }
         } else if (Buffer.isBuffer(challenge)) {
-          expectedChallenge = challenge;
+          expectedChallenge = challenge.toString('utf8');
         } else {
           return res.status(400).json({ message: 'Formato de challenge inválido' });
         }
@@ -593,17 +605,23 @@ router.post('/authenticate', async (req, res) => {
       // Fallback: decodificar o challenge recebido
       if (typeof challenge === 'string') {
         try {
-          expectedChallenge = Buffer.from(challenge, 'base64url');
+          const challengeBuffer = Buffer.from(challenge, 'base64url');
+          expectedChallenge = challengeBuffer.toString('utf8');
         } catch (e) {
-          expectedChallenge = Buffer.from(challenge, 'base64');
+          const challengeBuffer = Buffer.from(challenge, 'base64');
+          expectedChallenge = challengeBuffer.toString('utf8');
         }
       } else if (Buffer.isBuffer(challenge)) {
-        expectedChallenge = challenge;
+        expectedChallenge = challenge.toString('utf8');
       } else {
         return res.status(400).json({ message: 'Formato de challenge inválido' });
       }
       console.log('[Passkey Authenticate] Usando challenge decodificado (fallback após erro)');
     }
+    
+    console.log('[Passkey Authenticate] Challenge recebido (string base64url):', challenge);
+    console.log('[Passkey Authenticate] Challenge como UTF-8 (esperado pela biblioteca):', expectedChallenge);
+    console.log('[Passkey Authenticate] Challenge length:', expectedChallenge.length);
     
     // Converter credential do formato JSON (base64url strings) para formato esperado pela biblioteca
     // IMPORTANTE: verifyAuthenticationResponse espera o objeto completo, não apenas response
