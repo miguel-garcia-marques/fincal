@@ -767,14 +767,46 @@ class _LoginScreenState extends State<LoginScreen> {
       final result = await _passkeyService.authenticateWithPasskey(email);
       
       if (mounted && result['success'] == true) {
+        final accessToken = result['accessToken'] as String?;
+        final refreshToken = result['refreshToken'] as String?;
         final token = result['token'] as String?;
         final userEmail = result['email'] as String?;
         
-        // Se tivermos o token hash, usar verifyOtp para criar sessão automaticamente
+        // Tentar usar accessToken e refreshToken diretamente se disponíveis
+        if (accessToken != null && refreshToken != null) {
+          try {
+            // Criar sessão usando os tokens diretamente
+            // setSession aceita apenas o accessToken como string
+            final session = await _authService.supabase.auth.setSession(accessToken);
+            
+            if (session.session != null && mounted) {
+              // Login bem-sucedido sem precisar de senha!
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Login com passkey bem-sucedido!'),
+                  backgroundColor: AppTheme.incomeGreen,
+                ),
+              );
+              
+              // Navegar para AuthWrapper
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (context) => const AuthWrapper(),
+                ),
+                (route) => false,
+              );
+              return;
+            }
+          } catch (e) {
+            print('Erro ao criar sessão com tokens diretos: $e');
+            // Continuar para tentar verifyOTP
+          }
+        }
+        
+        // Se não tivermos tokens diretos, tentar usar verifyOTP com o token
         if (token != null && userEmail != null) {
           try {
-            // Usar verifyOTP com o token hash para criar sessão automaticamente
-            // O tipo 'magiclink' indica que é um magic link
+            // Usar verifyOTP com o token para criar sessão automaticamente
             final session = await _authService.supabase.auth.verifyOTP(
               type: OtpType.magiclink,
               email: userEmail,
@@ -801,53 +833,7 @@ class _LoginScreenState extends State<LoginScreen> {
             }
           } catch (e) {
             print('Erro ao criar sessão com token OTP: $e');
-            // Se falhar, tentar usar o magic link diretamente
-            final magicLink = result['magicLink'] as String?;
-            if (magicLink != null && kIsWeb) {
-              // Em web, podemos tentar navegar para o link
-              try {
-                // Extrair token do link e tentar novamente
-                final uri = Uri.parse(magicLink);
-                String? linkToken;
-                if (uri.queryParameters.containsKey('token')) {
-                  linkToken = uri.queryParameters['token'];
-                } else if (uri.fragment.contains('token=')) {
-                  final fragmentParts = uri.fragment.split('token=');
-                  if (fragmentParts.length > 1) {
-                    linkToken = fragmentParts[1].split('&')[0];
-                  }
-                }
-                
-                if (linkToken != null) {
-                  final session = await _authService.supabase.auth.verifyOTP(
-                    type: OtpType.magiclink,
-                    email: userEmail,
-                    token: linkToken,
-                  );
-                  
-                  if (session.session != null && mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Login com passkey bem-sucedido!'),
-                        backgroundColor: AppTheme.incomeGreen,
-                      ),
-                    );
-                    
-                    Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(
-                        builder: (context) => const AuthWrapper(),
-                      ),
-                      (route) => false,
-                    );
-                    return;
-                  }
-                }
-              } catch (e2) {
-                print('Erro ao usar magic link: $e2');
-              }
-            }
-            
-            // Se tudo falhar, mostrar erro
+            // Se falhar, mostrar erro
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
