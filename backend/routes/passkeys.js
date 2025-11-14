@@ -261,36 +261,39 @@ router.post('/register', authenticateUser, async (req, res) => {
     
     // Converter credential do formato JSON (base64url strings) para formato esperado pela biblioteca
     // O frontend envia tudo como base64url strings, precisamos converter de volta para Buffers
+    // IMPORTANTE: verifyRegistrationResponse espera o objeto completo, não apenas response
+    if (!credential.id && !credential.rawId) {
+      return res.status(400).json({ message: 'Credential ID não encontrado na resposta' });
+    }
+    
+    const rawIdBuffer = credential.rawId 
+      ? Buffer.from(credential.rawId, 'base64url')
+      : Buffer.from(credential.id, 'base64url');
+    
     const credentialForVerification = {
-      id: credential.id || credential.rawId,
-      rawId: Buffer.from(credential.rawId || credential.id, 'base64url'),
+      id: credential.id || credential.rawId, // String base64url
+      rawId: rawIdBuffer, // Buffer
+      type: credential.type || 'public-key',
       response: {
         clientDataJSON: Buffer.from(credential.response.clientDataJSON, 'base64url'),
         attestationObject: credential.response.attestationObject 
           ? Buffer.from(credential.response.attestationObject, 'base64url')
           : undefined,
-        authenticatorData: credential.response.authenticatorData
-          ? Buffer.from(credential.response.authenticatorData, 'base64url')
-          : undefined,
-        signature: credential.response.signature
-          ? Buffer.from(credential.response.signature, 'base64url')
-          : undefined,
-        userHandle: credential.response.userHandle
-          ? Buffer.from(credential.response.userHandle, 'base64url')
-          : undefined,
       },
-      type: credential.type || 'public-key',
       authenticatorAttachment: credential.authenticatorAttachment,
       clientExtensionResults: credential.clientExtensionResults || {},
     };
     
-    console.log('[Passkey Register] Credential convertido, clientDataJSON length:', credentialForVerification.response.clientDataJSON.length);
+    console.log('[Passkey Register] Credential ID:', credentialForVerification.id);
+    console.log('[Passkey Register] Credential rawId length:', credentialForVerification.rawId.length);
+    console.log('[Passkey Register] Credential clientDataJSON length:', credentialForVerification.response.clientDataJSON.length);
+    console.log('[Passkey Register] Credential attestationObject presente:', !!credentialForVerification.response.attestationObject);
     
     // Verificar a resposta de registro
     let verification;
     try {
       verification = await verifyRegistrationResponse({
-        response: credentialForVerification.response,
+        response: credentialForVerification, // Passar o objeto completo, não apenas response
         expectedChallenge: expectedChallenge,
         expectedOrigin: origin,
         expectedRPID: rpID,
@@ -540,9 +543,19 @@ router.post('/authenticate', async (req, res) => {
     }
     
     // Converter credential do formato JSON (base64url strings) para formato esperado pela biblioteca
+    // IMPORTANTE: verifyAuthenticationResponse espera o objeto completo, não apenas response
+    if (!credential.id && !credential.rawId) {
+      return res.status(400).json({ message: 'Credential ID não encontrado na resposta' });
+    }
+    
+    const rawIdBuffer = credential.rawId 
+      ? Buffer.from(credential.rawId, 'base64url')
+      : Buffer.from(credential.id, 'base64url');
+    
     const credentialForVerification = {
-      id: credential.id || credential.rawId,
-      rawId: Buffer.from(credential.rawId || credential.id, 'base64url'),
+      id: credential.id || credential.rawId, // String base64url
+      rawId: rawIdBuffer, // Buffer
+      type: credential.type || 'public-key',
       response: {
         clientDataJSON: Buffer.from(credential.response.clientDataJSON, 'base64url'),
         authenticatorData: credential.response.authenticatorData
@@ -555,16 +568,17 @@ router.post('/authenticate', async (req, res) => {
           ? Buffer.from(credential.response.userHandle, 'base64url')
           : undefined,
       },
-      type: credential.type || 'public-key',
       authenticatorAttachment: credential.authenticatorAttachment,
       clientExtensionResults: credential.clientExtensionResults || {},
     };
     
-    console.log('[Passkey Authenticate] Credential convertido, clientDataJSON length:', credentialForVerification.response.clientDataJSON.length);
+    console.log('[Passkey Authenticate] Credential ID:', credentialForVerification.id);
+    console.log('[Passkey Authenticate] Credential rawId length:', credentialForVerification.rawId.length);
+    console.log('[Passkey Authenticate] Credential clientDataJSON length:', credentialForVerification.response.clientDataJSON.length);
     
     // Verificar a resposta de autenticação
     const verification = await verifyAuthenticationResponse({
-      response: credentialForVerification.response,
+      response: credentialForVerification, // Passar o objeto completo, não apenas response
       expectedChallenge: expectedChallenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
