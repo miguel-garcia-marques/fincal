@@ -266,12 +266,27 @@ router.post('/register', authenticateUser, async (req, res) => {
       return res.status(400).json({ message: 'Credential ID não encontrado na resposta' });
     }
     
-    const rawIdBuffer = credential.rawId 
-      ? Buffer.from(credential.rawId, 'base64url')
-      : Buffer.from(credential.id, 'base64url');
+    // O rawId sempre deve estar em base64url (vindo do frontend)
+    // O id pode não estar em base64url válido, então usamos rawId como fonte confiável
+    const rawIdString = credential.rawId || credential.id;
+    if (!rawIdString) {
+      return res.status(400).json({ message: 'Credential rawId não encontrado na resposta' });
+    }
+    
+    // Converter rawId de base64url string para Buffer
+    let rawIdBuffer;
+    try {
+      rawIdBuffer = Buffer.from(rawIdString, 'base64url');
+    } catch (e) {
+      console.error('[Passkey Register] Erro ao decodificar rawId:', e);
+      return res.status(400).json({ message: 'Credential rawId não está em formato base64url válido' });
+    }
+    
+    // O id deve ser uma string base64url válida - usar rawIdString que já está em base64url
+    const credentialIdBase64Url = rawIdBuffer.toString('base64url');
     
     const credentialForVerification = {
-      id: credential.id || credential.rawId, // String base64url
+      id: credentialIdBase64Url, // String base64url válida (sempre usar rawId convertido)
       rawId: rawIdBuffer, // Buffer
       type: credential.type || 'public-key',
       response: {
@@ -548,12 +563,27 @@ router.post('/authenticate', async (req, res) => {
       return res.status(400).json({ message: 'Credential ID não encontrado na resposta' });
     }
     
-    const rawIdBuffer = credential.rawId 
-      ? Buffer.from(credential.rawId, 'base64url')
-      : Buffer.from(credential.id, 'base64url');
+    // O rawId sempre deve estar em base64url (vindo do frontend)
+    // O id pode não estar em base64url válido, então usamos rawId como fonte confiável
+    const rawIdString = credential.rawId || credential.id;
+    if (!rawIdString) {
+      return res.status(400).json({ message: 'Credential rawId não encontrado na resposta' });
+    }
+    
+    // Converter rawId de base64url string para Buffer
+    let rawIdBuffer;
+    try {
+      rawIdBuffer = Buffer.from(rawIdString, 'base64url');
+    } catch (e) {
+      console.error('[Passkey Authenticate] Erro ao decodificar rawId:', e);
+      return res.status(400).json({ message: 'Credential rawId não está em formato base64url válido' });
+    }
+    
+    // O id deve ser uma string base64url válida - usar rawIdString que já está em base64url
+    const credentialIdBase64Url = rawIdBuffer.toString('base64url');
     
     const credentialForVerification = {
-      id: credential.id || credential.rawId, // String base64url
+      id: credentialIdBase64Url, // String base64url válida (sempre usar rawId convertido)
       rawId: rawIdBuffer, // Buffer
       type: credential.type || 'public-key',
       response: {
