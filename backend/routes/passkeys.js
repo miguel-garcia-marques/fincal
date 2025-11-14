@@ -783,14 +783,15 @@ router.post('/authenticate', async (req, res) => {
     });
     
     // Verificar a resposta de autenticação
+    // A biblioteca espera 'credential', não 'authenticator'
     const verification = await verifyAuthenticationResponse({
       response: credentialForVerification, // Passar o objeto completo, não apenas response
       expectedChallenge: expectedChallenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
-      authenticator: {
-        credentialID: credentialIDBuffer,
-        credentialPublicKey: publicKeyBuffer,
+      credential: {
+        id: credentialIDBuffer,
+        publicKey: publicKeyBuffer,
         counter: counter
       },
       requireUserVerification: true
