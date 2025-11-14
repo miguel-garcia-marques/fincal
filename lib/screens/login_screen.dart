@@ -767,25 +767,22 @@ class _LoginScreenState extends State<LoginScreen> {
       final result = await _passkeyService.authenticateWithPasskey(email);
       
       if (mounted && result['success'] == true) {
-        final accessToken = result['access_token'] as String?;
-        final refreshToken = result['refresh_token'] as String?;
         final userEmail = result['email'] as String?;
         final requiresPassword = result['requiresPassword'] as bool? ?? false;
         
-        // Prioridade 1: Tentar usar tokens JWT para criar sessão automaticamente
-        if (accessToken != null && userEmail != null) {
+        // Prioridade 1: Tentar usar token do magic link para criar sessão automaticamente
+        final token = result['token'] as String?;
+        if (token != null && userEmail != null) {
           try {
-            print('[Passkey Login] Tentando criar sessão com tokens JWT...');
-            print('[Passkey Login] Access Token presente: ${accessToken.isNotEmpty}');
-            print('[Passkey Login] Refresh Token presente: ${refreshToken != null && refreshToken.isNotEmpty}');
+            print('[Passkey Login] Tentando criar sessão com token do magic link...');
+            print('[Passkey Login] Token presente: ${token.isNotEmpty}');
+            print('[Passkey Login] Email: $userEmail');
             
-            // Criar sessão usando os tokens JWT recebidos do backend
-            final session = await _authService.setSession(
-              accessToken,
-              refreshToken: refreshToken,
-            );
+            // Usar verifyOTP com o token do magic link
+            // Isso cria uma sessão válida com refresh_token real do Supabase
+            final session = await _authService.setSessionWithToken(token, userEmail);
             
-            print('[Passkey Login] Resposta do setSession:');
+            print('[Passkey Login] Resposta do setSessionWithToken:');
             print('[Passkey Login] - Session: ${session.session != null}');
             print('[Passkey Login] - User: ${session.user != null}');
             
@@ -812,19 +809,19 @@ class _LoginScreenState extends State<LoginScreen> {
               print('[Passkey Login] ❌ Sessão não foi criada. Session: ${session.session}, User: ${session.user}');
             }
           } catch (e, stackTrace) {
-            print('[Passkey Login] ❌ Erro ao criar sessão com tokens JWT: $e');
+            print('[Passkey Login] ❌ Erro ao criar sessão com token do magic link: $e');
             print('[Passkey Login] Stack trace: $stackTrace');
             // Se falhar, tentar fallback ou mostrar campo de senha
           }
         } else {
-          print('[Passkey Login] ⚠️ Tokens não disponíveis:');
-          print('[Passkey Login] - Access Token: ${accessToken != null}');
+          print('[Passkey Login] ⚠️ Token não disponível:');
+          print('[Passkey Login] - Token: ${token != null}');
           print('[Passkey Login] - User Email: ${userEmail != null}');
         }
         
-        // Fallback: Se não tivermos tokens JWT ou se falhou, tentar token OTP
-        final token = result['token'] as String?;
-        if (token != null && userEmail != null && !requiresPassword) {
+        // Fallback: Se não tivermos token ou se falhou, tentar magic link direto
+        final magicLink = result['magicLink'] as String?;
+        if (magicLink != null && userEmail != null && !requiresPassword) {
           try {
             print('[Passkey Login] Tentando usar token OTP como fallback...');
             final session = await _authService.supabase.auth.verifyOTP(

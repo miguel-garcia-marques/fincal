@@ -888,28 +888,11 @@ router.post('/authenticate', async (req, res) => {
       return res.status(404).json({ message: 'Usuário não encontrado' });
     }
 
-    // Criar tokens JWT manualmente para permitir login automático sem senha
+    // Usar Admin API para gerar magic link e extrair tokens válidos
+    // Isso cria uma sessão válida com refresh_token real do Supabase
     try {
-      const tokens = createSupabaseTokens(user);
+      console.log('[Passkey Authenticate] Gerando magic link para obter tokens válidos...');
       
-      console.log('[Passkey Authenticate] Tokens JWT criados com sucesso para usuário:', user.id);
-      
-      // Retornar tokens para o frontend criar sessão automaticamente
-      res.json({
-        success: true,
-        userId: user.id,
-        email: user.email,
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        expires_in: tokens.expires_in,
-        token_type: tokens.token_type,
-        user: tokens.user,
-        message: 'Autenticação bem-sucedida'
-      });
-    } catch (tokenError) {
-      console.error('[Passkey Authenticate] Erro ao criar tokens JWT:', tokenError);
-      
-      // Fallback: tentar usar magic link se JWT secret não estiver configurado
       const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
         type: 'magiclink',
         email: user.email,
@@ -919,23 +902,71 @@ router.post('/authenticate', async (req, res) => {
       });
 
       if (linkError || !linkData) {
-        console.error('[Passkey Authenticate] Erro ao gerar magic link (fallback):', linkError);
-        return res.status(500).json({ 
-          message: 'Erro ao criar sessão. Configure SUPABASE_JWT_SECRET ou use magic link.',
-          error: tokenError.message
-        });
+        console.error('[Passkey Authenticate] Erro ao gerar magic link:', linkError);
+        throw new Error('Erro ao gerar magic link: ' + (linkError?.message || 'Unknown error'));
       }
 
       const actionLink = linkData.properties?.action_link;
       
-      // Retornar magic link como fallback
+      if (!actionLink) {
+        throw new Error('Magic link não contém action_link');
+      }
+
+      console.log('[Passkey Authenticate] Magic link gerado, extraindo tokens...');
+      
+      // Extrair token do magic link
+      let token = null;
+      try {
+        const url = new URL(actionLink);
+        // O token pode estar na query string ou no hash
+        token = url.searchParams.get('token') || url.searchParams.get('access_token');
+        
+        if (!token && url.hash) {
+          const hashParams = new URLSearchParams(url.hash.substring(1));
+          token = hashParams.get('access_token') || hashParams.get('token');
+        }
+      } catch (e) {
+        console.error('[Passkey Authenticate] Erro ao extrair token do link:', e);
+      }
+
+      // Se conseguimos extrair o token, usar verifyOTP no backend para obter sessão válida
+      if (token) {
+        console.log('[Passkey Authenticate] Token extraído, verificando OTP...');
+        
+        // Usar Admin API para verificar o token e obter sessão válida
+        // Nota: Admin API não tem verifyOTP direto, então vamos retornar o token
+        // O frontend vai usar verifyOTP que criará uma sessão válida com refresh_token real
+        
+        res.json({
+          success: true,
+          userId: user.id,
+          email: user.email,
+          token: token, // Token do magic link para usar com verifyOTP
+          magicLink: actionLink, // Link completo como fallback
+          message: 'Autenticação bem-sucedida'
+        });
+      } else {
+        // Se não conseguimos extrair token, retornar magic link
+        console.log('[Passkey Authenticate] Token não encontrado no link, retornando magic link');
+        res.json({
+          success: true,
+          userId: user.id,
+          email: user.email,
+          magicLink: actionLink,
+          message: 'Autenticação bem-sucedida. Use magic link para completar login.',
+          requiresPassword: true
+        });
+      }
+    } catch (error) {
+      console.error('[Passkey Authenticate] Erro ao gerar sessão:', error);
+      
+      // Último fallback: retornar sucesso mas indicar que precisa de senha
       res.json({
         success: true,
         userId: user.id,
         email: user.email,
-        magicLink: actionLink,
-        message: 'Autenticação bem-sucedida. Use magic link para completar login.',
-        requiresPassword: true // Indica que precisa de senha ou magic link
+        message: 'Autenticação bem-sucedida. Por favor, insira sua senha para completar o login.',
+        requiresPassword: true
       });
     }
   } catch (error) {

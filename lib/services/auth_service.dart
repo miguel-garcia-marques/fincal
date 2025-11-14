@@ -215,64 +215,31 @@ class AuthService {
     }
   }
 
-  // Criar sessão usando tokens JWT (útil para login com passkey)
+  // Criar sessão usando token do magic link (útil para login com passkey)
   // Permite criar uma sessão automaticamente após verificação de passkey
-  Future<AuthResponse> setSession(String accessToken, {String? refreshToken}) async {
+  // Usa verifyOTP com o token do magic link para criar sessão válida com refresh_token real
+  Future<AuthResponse> setSessionWithToken(String token, String email) async {
     try {
-      print('[AuthService] setSession chamado com:');
-      print('[AuthService] - accessToken length: ${accessToken.length}');
-      print('[AuthService] - refreshToken: ${refreshToken != null}');
+      print('[AuthService] setSessionWithToken chamado com token do magic link');
+      print('[AuthService] - Token length: ${token.length}');
+      print('[AuthService] - Email: $email');
       
-      // O Supabase Flutter SDK setSession aceita refreshToken como string
-      // IMPORTANTE: setSession precisa do refreshToken, não do accessToken
-      // Se não tivermos refreshToken, precisamos criar um Session object manualmente
+      // Usar verifyOTP com o token do magic link
+      // Isso cria uma sessão válida com refresh_token real do Supabase
+      final response = await _supabase.auth.verifyOTP(
+        type: OtpType.magiclink,
+        email: email,
+        token: token,
+      );
       
-      if (refreshToken != null && refreshToken.isNotEmpty) {
-        print('[AuthService] Tentando setSession com refreshToken...');
-        // Tentar usar refreshToken primeiro (método preferido)
-        final response = await _supabase.auth.setSession(refreshToken);
-        
-        if (response.session != null) {
-          print('[AuthService] ✅ Sessão criada com refreshToken');
-          return response;
-        }
-        
-        print('[AuthService] ⚠️ setSession com refreshToken não criou sessão');
+      if (response.session != null) {
+        print('[AuthService] ✅ Sessão criada com verifyOTP');
+        return response;
       }
       
-      // Fallback: Tentar criar Session object manualmente com accessToken
-      // Isso pode não funcionar perfeitamente, mas é uma tentativa
-      print('[AuthService] Tentando criar Session manualmente com accessToken...');
-      
-      // Decodificar o accessToken para obter informações do usuário
-      try {
-        // Fazer uma requisição para obter informações do usuário usando o accessToken
-        final userResponse = await _supabase.auth.getUser(accessToken);
-        
-        if (userResponse.user != null) {
-          print('[AuthService] ✅ Usuário obtido do accessToken');
-          
-          // Tentar usar o accessToken diretamente (pode não funcionar)
-          // O Supabase pode não aceitar accessToken no setSession
-          // Mas vamos tentar
-          try {
-            final response = await _supabase.auth.setSession(accessToken);
-            if (response.session != null) {
-              print('[AuthService] ✅ Sessão criada com accessToken');
-              return response;
-            }
-          } catch (e) {
-            print('[AuthService] ⚠️ setSession com accessToken falhou: $e');
-          }
-        }
-      } catch (e) {
-        print('[AuthService] ⚠️ Erro ao obter usuário: $e');
-      }
-      
-      // Se chegou aqui, não conseguimos criar sessão
-      throw Exception('Não foi possível criar sessão com os tokens fornecidos');
+      throw Exception('verifyOTP não criou sessão');
     } catch (e) {
-      print('[AuthService] ❌ Erro em setSession: $e');
+      print('[AuthService] ❌ Erro em setSessionWithToken: $e');
       rethrow;
     }
   }
