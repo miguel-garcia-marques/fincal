@@ -215,25 +215,26 @@ class AuthService {
     }
   }
 
-  // Criar sessão usando token do magic link (útil para login com passkey)
+  // Criar sessão usando hashed_token do magic link (útil para login com passkey)
   // Permite criar uma sessão automaticamente após verificação de passkey
-  // Usa verifyOTP com o token do magic link para criar sessão válida com refresh_token real
-  Future<AuthResponse> setSessionWithToken(String token, String email) async {
+  // Usa verifyOTP com o hashed_token do magic link para criar sessão válida com refresh_token real
+  Future<AuthResponse> setSessionWithToken(String hashedToken, String email) async {
     try {
-      print('[AuthService] setSessionWithToken chamado com token do magic link');
-      print('[AuthService] - Token length: ${token.length}');
+      print('[AuthService] setSessionWithToken chamado com hashed_token do magic link');
+      print('[AuthService] - Hashed token length: ${hashedToken.length}');
       print('[AuthService] - Email: $email');
       
-      // Usar verifyOTP com o token do magic link
+      // Usar verifyOTP com o hashed_token do magic link
+      // IMPORTANTE: hashed_token deve ser usado com token_hash, não token!
       // Isso cria uma sessão válida com refresh_token real do Supabase
       final response = await _supabase.auth.verifyOTP(
         type: OtpType.magiclink,
         email: email,
-        token: token,
+        tokenHash: hashedToken, // Usar tokenHash para hashed_token
       );
       
       if (response.session != null) {
-        print('[AuthService] ✅ Sessão criada com verifyOTP');
+        print('[AuthService] ✅ Sessão criada com verifyOTP usando hashed_token');
         return response;
       }
       
