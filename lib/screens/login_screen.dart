@@ -767,56 +767,72 @@ class _LoginScreenState extends State<LoginScreen> {
       final result = await _passkeyService.authenticateWithPasskey(email);
       
       if (mounted && result['success'] == true) {
-        final magicLink = result['magicLink'] as String?;
-        final requiresPasswordLogin = result['requiresPasswordLogin'] as bool? ?? false;
+        final token = result['token'] as String?;
+        final userEmail = result['email'] as String?;
         
-        if (requiresPasswordLogin || magicLink == null) {
-          // Se precisar de login com senha ou não houver magic link
-          // Mostrar campo de senha para completar login
-          if (mounted) {
-            setState(() {
-              _emailEntered = true; // Mostrar campo de senha
-            });
-            
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Autenticação com passkey verificada! Por favor, insira sua senha para completar o login.'),
-                backgroundColor: Colors.orange,
-                duration: Duration(seconds: 4),
-              ),
+        // Se tivermos o token hash, usar verifyOtp para criar sessão automaticamente
+        if (token != null && userEmail != null) {
+          try {
+            // Usar verifyOTP com o token hash para criar sessão automaticamente
+            // O tipo 'magiclink' indica que é um magic link
+            final session = await _authService.supabase.auth.verifyOTP(
+              type: OtpType.magiclink,
+              email: userEmail,
+              token: token,
             );
-          }
-          return;
-        }
-        
-        // Tentar fazer login usando o magic link
-        try {
-          // Extrair token do magic link se possível
-          final uri = Uri.parse(magicLink);
-          final token = uri.queryParameters['token'] ?? 
-              (uri.fragment.contains('token=') ? uri.fragment.split('token=')[1].split('&')[0] : null);
-          
-          if (token != null && token.isNotEmpty) {
-            // Tentar fazer login com o token
-            // Nota: O Supabase pode não ter uma função direta para isso
-            // Vamos tentar usar signInWithOtp ou similar
             
-            // Por enquanto, vamos mostrar sucesso e pedir login normal
-            if (mounted) {
+            if (session.session != null && mounted) {
+              // Login bem-sucedido sem precisar de senha!
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Autenticação com passkey bem-sucedida! Redirecionando...'),
+                  content: Text('Login com passkey bem-sucedido!'),
                   backgroundColor: AppTheme.incomeGreen,
                 ),
               );
               
-              // Tentar fazer refresh da sessão
+              // Navegar para AuthWrapper
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (context) => const AuthWrapper(),
+                ),
+                (route) => false,
+              );
+              return;
+            }
+          } catch (e) {
+            print('Erro ao criar sessão com token OTP: $e');
+            // Se falhar, tentar usar o magic link diretamente
+            final magicLink = result['magicLink'] as String?;
+            if (magicLink != null && kIsWeb) {
+              // Em web, podemos tentar navegar para o link
               try {
-                await _authService.supabase.auth.refreshSession();
-                // Verificar se há sessão ativa
-                if (_authService.isAuthenticated) {
-                  // Navegar para AuthWrapper
-                  if (mounted) {
+                // Extrair token do link e tentar novamente
+                final uri = Uri.parse(magicLink);
+                String? linkToken;
+                if (uri.queryParameters.containsKey('token')) {
+                  linkToken = uri.queryParameters['token'];
+                } else if (uri.fragment.contains('token=')) {
+                  final fragmentParts = uri.fragment.split('token=');
+                  if (fragmentParts.length > 1) {
+                    linkToken = fragmentParts[1].split('&')[0];
+                  }
+                }
+                
+                if (linkToken != null) {
+                  final session = await _authService.supabase.auth.verifyOTP(
+                    type: OtpType.magiclink,
+                    email: userEmail,
+                    token: linkToken,
+                  );
+                  
+                  if (session.session != null && mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Login com passkey bem-sucedido!'),
+                        backgroundColor: AppTheme.incomeGreen,
+                      ),
+                    );
+                    
                     Navigator.of(context).pushAndRemoveUntil(
                       MaterialPageRoute(
                         builder: (context) => const AuthWrapper(),
@@ -826,41 +842,41 @@ class _LoginScreenState extends State<LoginScreen> {
                     return;
                   }
                 }
-              } catch (e) {
-                // Ignorar erro
-              }
-              
-              // Se não houver sessão, mostrar campo de senha
-              if (mounted) {
-                setState(() {
-                  _emailEntered = true;
-                });
-                
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Autenticação verificada! Por favor, insira sua senha para completar o login.'),
-                    backgroundColor: Colors.orange,
-                    duration: Duration(seconds: 4),
-                  ),
-                );
+              } catch (e2) {
+                print('Erro ao usar magic link: $e2');
               }
             }
-          }
-        } catch (e) {
-          // Se falhar, mostrar campo de senha
-          if (mounted) {
-            setState(() {
-              _emailEntered = true;
-            });
             
+            // Se tudo falhar, mostrar erro
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Erro ao criar sessão: ${e.toString()}'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          }
+        } else {
+          // Se não houver token, mostrar erro
+          if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Autenticação verificada! Por favor, insira sua senha para completar o login.'),
-                backgroundColor: Colors.orange,
-                duration: Duration(seconds: 4),
+                content: Text('Erro: Token de autenticação não recebido'),
+                backgroundColor: Colors.red,
               ),
             );
           }
+        }
+      } else {
+        // Se não houver sucesso, mostrar erro
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['message'] ?? 'Erro ao autenticar com passkey'),
+              backgroundColor: Colors.red,
+            ),
+          );
         }
       }
     } catch (e) {

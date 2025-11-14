@@ -292,6 +292,8 @@ class PasskeyService {
         'success': true,
         'userId': authData['userId'],
         'email': authData['email'],
+        'token': authData['token'], // Token hash para usar com verifyOtp
+        'magicLink': authData['magicLink'], // Link completo como fallback
       };
     } catch (e) {
       rethrow;

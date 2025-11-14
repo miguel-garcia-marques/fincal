@@ -813,9 +813,9 @@ router.post('/authenticate', async (req, res) => {
       return res.status(404).json({ message: 'Usuário não encontrado' });
     }
 
-    // Gerar um link de login mágico temporário usando Admin API
-    // Isso permite que o cliente faça login sem senha
-    const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+    // Gerar magic link usando Admin API para criar sessão automaticamente
+    // Isso permite que o cliente faça login sem senha após autenticação com passkey
+    const { data: otpData, error: otpError } = await supabaseAdmin.auth.admin.generateLink({
       type: 'magiclink',
       email: user.email,
       options: {
@@ -823,26 +823,32 @@ router.post('/authenticate', async (req, res) => {
       }
     });
 
-    if (linkError || !linkData) {
-      // Se falhar ao gerar link, retornar informações básicas
-      // O cliente precisará fazer login normal uma vez
-      return res.json({
-        success: true,
-        userId: user.id,
-        email: user.email,
-        requiresPasswordLogin: true,
-        message: 'Autenticação bem-sucedida. Por favor, faça login uma vez com senha para ativar sessão.'
+    if (otpError || !otpData) {
+      console.error('[Passkey Authenticate] Erro ao gerar magic link:', otpError);
+      return res.status(500).json({ 
+        message: 'Erro ao gerar link de login automático' 
       });
     }
 
-    // Extrair token do link gerado
-    const magicLink = linkData.properties?.action_link || linkData.properties?.hashed_token;
+    // Extrair o token hash do magic link
+    // O hashed_token pode ser usado com verifyOtp para criar sessão automaticamente
+    const hashedToken = otpData.properties?.hashed_token;
+    const actionLink = otpData.properties?.action_link;
     
+    if (!hashedToken) {
+      console.error('[Passkey Authenticate] Token hash não encontrado no magic link');
+      return res.status(500).json({ 
+        message: 'Erro ao extrair token de login' 
+      });
+    }
+    
+    // Retornar o token hash para o cliente usar com verifyOtp
     res.json({
       success: true,
       userId: user.id,
       email: user.email,
-      magicLink: magicLink,
+      token: hashedToken, // Token para usar com verifyOtp
+      magicLink: actionLink, // Link completo como fallback
       message: 'Autenticação bem-sucedida'
     });
   } catch (error) {
