@@ -8,6 +8,15 @@ const { getUserModel } = require('../models/User');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
+// Função auxiliar para validar e normalizar base64url
+function normalizeBase64Url(str) {
+  if (!str || typeof str !== 'string') {
+    return null;
+  }
+  // Remove qualquer padding que possa ter sido adicionado incorretamente
+  return str.replace(/=+$/, '');
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
@@ -284,7 +293,24 @@ router.post('/register', authenticateUser, async (req, res) => {
     
     // O id deve ser uma string base64url válida - garantir que seja exatamente igual ao rawId convertido
     // A biblioteca verifica se o id corresponde ao rawId, então precisamos garantir que sejam idênticos
-    const credentialIdBase64Url = rawIdBuffer.toString('base64url'); // Converter Buffer de volta para base64url para garantir consistência
+    let credentialIdBase64Url = rawIdBuffer.toString('base64url'); // Converter Buffer de volta para base64url para garantir consistência
+    
+    // Normalizar o base64url (remover padding se houver)
+    credentialIdBase64Url = normalizeBase64Url(credentialIdBase64Url);
+    
+    // Validar formato base64url usando regex (a biblioteca faz essa validação internamente)
+    const base64UrlRegex = /^[A-Za-z0-9\-_]+$/;
+    if (!credentialIdBase64Url || !base64UrlRegex.test(credentialIdBase64Url)) {
+      console.error('[Passkey Register] ID não está em formato base64url válido:', credentialIdBase64Url);
+      return res.status(400).json({ message: 'Credential ID não está em formato base64url válido' });
+    }
+    
+    // Garantir que o rawIdBuffer convertido de volta corresponde ao original
+    const verifyBuffer = Buffer.from(credentialIdBase64Url, 'base64url');
+    if (!verifyBuffer.equals(rawIdBuffer)) {
+      console.error('[Passkey Register] ID não corresponde ao rawId após conversão');
+      return res.status(400).json({ message: 'Credential ID não corresponde ao rawId' });
+    }
     
     // Validar que o rawIdString recebido corresponde ao rawIdBuffer convertido
     if (rawIdString !== credentialIdBase64Url) {
@@ -295,7 +321,7 @@ router.post('/register', authenticateUser, async (req, res) => {
     }
     
     const credentialForVerification = {
-      id: credentialIdBase64Url, // String base64url válida (garantida pela conversão do Buffer)
+      id: credentialIdBase64Url, // String base64url válida (garantida pela conversão do Buffer e validação regex)
       rawId: rawIdBuffer, // Buffer
       type: credential.type || 'public-key',
       response: {
@@ -309,12 +335,19 @@ router.post('/register', authenticateUser, async (req, res) => {
     };
     
     console.log('[Passkey Register] Credential ID:', credentialForVerification.id);
+    console.log('[Passkey Register] Credential ID type:', typeof credentialForVerification.id);
     console.log('[Passkey Register] Credential ID length:', credentialForVerification.id.length);
     console.log('[Passkey Register] Credential rawId length:', credentialForVerification.rawId.length);
     console.log('[Passkey Register] Credential rawId como base64url:', credentialForVerification.rawId.toString('base64url'));
     console.log('[Passkey Register] ID corresponde ao rawId?', credentialForVerification.id === credentialForVerification.rawId.toString('base64url'));
     console.log('[Passkey Register] Credential clientDataJSON length:', credentialForVerification.response.clientDataJSON.length);
     console.log('[Passkey Register] Credential attestationObject presente:', !!credentialForVerification.response.attestationObject);
+    console.log('[Passkey Register] Credential completo (JSON):', JSON.stringify({
+      id: credentialForVerification.id,
+      type: credentialForVerification.type,
+      rawIdLength: credentialForVerification.rawId.length,
+      hasResponse: !!credentialForVerification.response
+    }));
     
     // Verificar a resposta de registro
     let verification;
@@ -595,6 +628,13 @@ router.post('/authenticate', async (req, res) => {
     // A biblioteca verifica se o id corresponde ao rawId, então precisamos garantir que sejam idênticos
     const credentialIdBase64Url = rawIdBuffer.toString('base64url'); // Converter Buffer de volta para base64url para garantir consistência
     
+    // Validar formato base64url usando regex (a biblioteca faz essa validação internamente)
+    const base64UrlRegex = /^[A-Za-z0-9\-_]+$/;
+    if (!base64UrlRegex.test(credentialIdBase64Url)) {
+      console.error('[Passkey Authenticate] ID não está em formato base64url válido:', credentialIdBase64Url);
+      return res.status(400).json({ message: 'Credential ID não está em formato base64url válido' });
+    }
+    
     // Validar que o rawIdString recebido corresponde ao rawIdBuffer convertido
     if (rawIdString !== credentialIdBase64Url) {
       console.warn('[Passkey Authenticate] rawIdString recebido não corresponde ao rawIdBuffer convertido');
@@ -604,7 +644,7 @@ router.post('/authenticate', async (req, res) => {
     }
     
     const credentialForVerification = {
-      id: credentialIdBase64Url, // String base64url válida (garantida pela conversão do Buffer)
+      id: credentialIdBase64Url, // String base64url válida (garantida pela conversão do Buffer e validação regex)
       rawId: rawIdBuffer, // Buffer
       type: credential.type || 'public-key',
       response: {
