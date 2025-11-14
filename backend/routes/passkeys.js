@@ -371,7 +371,22 @@ router.post('/register', authenticateUser, async (req, res) => {
       return res.status(400).json({ message: 'Verificação de registro falhou' });
     }
 
+    // Verificar se registrationInfo existe e tem os dados necessários
+    if (!verification.registrationInfo) {
+      console.error('[Passkey Register] registrationInfo não disponível na verificação');
+      return res.status(500).json({ message: 'Erro ao processar informações de registro' });
+    }
+
     const { credentialID, credentialPublicKey, counter } = verification.registrationInfo;
+    
+    // Log para debug
+    console.log('[Passkey Register] registrationInfo disponível:', {
+      hasCredentialID: !!credentialID,
+      hasCredentialPublicKey: !!credentialPublicKey,
+      hasCounter: counter !== undefined,
+      credentialIDType: credentialID ? typeof credentialID : 'undefined',
+      credentialPublicKeyType: credentialPublicKey ? typeof credentialPublicKey : 'undefined'
+    });
 
     // Usar o rawIdBuffer que armazenamos anteriormente se credentialID não estiver disponível
     // O credentialID da biblioteca pode vir como Buffer, Uint8Array ou undefined
@@ -402,12 +417,27 @@ router.post('/register', authenticateUser, async (req, res) => {
 
     // Converter credentialPublicKey para Buffer se necessário
     let publicKeyBuffer;
+    if (!credentialPublicKey) {
+      console.error('[Passkey Register] credentialPublicKey não disponível no registrationInfo');
+      return res.status(500).json({ message: 'Erro ao processar public key da credencial' });
+    }
+    
     if (Buffer.isBuffer(credentialPublicKey)) {
       publicKeyBuffer = credentialPublicKey;
     } else if (credentialPublicKey instanceof Uint8Array) {
       publicKeyBuffer = Buffer.from(credentialPublicKey);
-    } else {
+    } else if (Array.isArray(credentialPublicKey)) {
       publicKeyBuffer = Buffer.from(credentialPublicKey);
+    } else {
+      // Tentar converter como ArrayBuffer ou outro formato
+      try {
+        publicKeyBuffer = Buffer.from(credentialPublicKey);
+      } catch (e) {
+        console.error('[Passkey Register] Erro ao converter credentialPublicKey:', e);
+        console.error('[Passkey Register] Tipo de credentialPublicKey:', typeof credentialPublicKey);
+        console.error('[Passkey Register] credentialPublicKey:', credentialPublicKey);
+        return res.status(500).json({ message: 'Erro ao processar public key da credencial' });
+      }
     }
 
     // Salvar a passkey no banco de dados
