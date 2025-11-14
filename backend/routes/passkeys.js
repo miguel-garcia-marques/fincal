@@ -320,9 +320,12 @@ router.post('/register', authenticateUser, async (req, res) => {
       // Usar o valor convertido do Buffer para garantir consistência
     }
     
+    // A biblioteca compara id !== rawId diretamente, então rawId também deve ser uma string base64url
+    // Mas para a verificação interna, ela precisa do rawId como Buffer/ArrayBuffer
+    // Vamos passar rawId como string base64url para passar na validação, mas manter o Buffer para uso interno
     const credentialForVerification = {
-      id: credentialIdBase64Url, // String base64url válida (garantida pela conversão do Buffer e validação regex)
-      rawId: rawIdBuffer, // Buffer
+      id: credentialIdBase64Url, // String base64url válida
+      rawId: credentialIdBase64Url, // String base64url (a biblioteca compara id === rawId como strings)
       type: credential.type || 'public-key',
       response: {
         clientDataJSON: Buffer.from(credential.response.clientDataJSON, 'base64url'),
@@ -334,12 +337,15 @@ router.post('/register', authenticateUser, async (req, res) => {
       clientExtensionResults: credential.clientExtensionResults || {},
     };
     
+    // Armazenar o rawIdBuffer separadamente para uso posterior (salvar no banco)
+    credentialForVerification._rawIdBuffer = rawIdBuffer;
+    
     console.log('[Passkey Register] Credential ID:', credentialForVerification.id);
     console.log('[Passkey Register] Credential ID type:', typeof credentialForVerification.id);
     console.log('[Passkey Register] Credential ID length:', credentialForVerification.id.length);
+    console.log('[Passkey Register] Credential rawId type:', typeof credentialForVerification.rawId);
     console.log('[Passkey Register] Credential rawId length:', credentialForVerification.rawId.length);
-    console.log('[Passkey Register] Credential rawId como base64url:', credentialForVerification.rawId.toString('base64url'));
-    console.log('[Passkey Register] ID corresponde ao rawId?', credentialForVerification.id === credentialForVerification.rawId.toString('base64url'));
+    console.log('[Passkey Register] ID corresponde ao rawId?', credentialForVerification.id === credentialForVerification.rawId);
     console.log('[Passkey Register] Credential clientDataJSON length:', credentialForVerification.response.clientDataJSON.length);
     console.log('[Passkey Register] Credential attestationObject presente:', !!credentialForVerification.response.attestationObject);
     console.log('[Passkey Register] Credential completo (JSON):', JSON.stringify({
@@ -643,9 +649,10 @@ router.post('/authenticate', async (req, res) => {
       // Usar o valor convertido do Buffer para garantir consistência
     }
     
+    // A biblioteca compara id !== rawId diretamente, então rawId também deve ser uma string base64url
     const credentialForVerification = {
-      id: credentialIdBase64Url, // String base64url válida (garantida pela conversão do Buffer e validação regex)
-      rawId: rawIdBuffer, // Buffer
+      id: credentialIdBase64Url, // String base64url válida
+      rawId: credentialIdBase64Url, // String base64url (a biblioteca compara id === rawId como strings)
       type: credential.type || 'public-key',
       response: {
         clientDataJSON: Buffer.from(credential.response.clientDataJSON, 'base64url'),
@@ -663,11 +670,15 @@ router.post('/authenticate', async (req, res) => {
       clientExtensionResults: credential.clientExtensionResults || {},
     };
     
+    // Armazenar o rawIdBuffer separadamente para uso posterior
+    credentialForVerification._rawIdBuffer = rawIdBuffer;
+    
     console.log('[Passkey Authenticate] Credential ID:', credentialForVerification.id);
+    console.log('[Passkey Authenticate] Credential ID type:', typeof credentialForVerification.id);
     console.log('[Passkey Authenticate] Credential ID length:', credentialForVerification.id.length);
+    console.log('[Passkey Authenticate] Credential rawId type:', typeof credentialForVerification.rawId);
     console.log('[Passkey Authenticate] Credential rawId length:', credentialForVerification.rawId.length);
-    console.log('[Passkey Authenticate] Credential rawId como base64url:', credentialForVerification.rawId.toString('base64url'));
-    console.log('[Passkey Authenticate] ID corresponde ao rawId?', credentialForVerification.id === credentialForVerification.rawId.toString('base64url'));
+    console.log('[Passkey Authenticate] ID corresponde ao rawId?', credentialForVerification.id === credentialForVerification.rawId);
     console.log('[Passkey Authenticate] Credential clientDataJSON length:', credentialForVerification.response.clientDataJSON.length);
     
     // Verificar a resposta de autenticação
