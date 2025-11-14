@@ -266,8 +266,8 @@ router.post('/register', authenticateUser, async (req, res) => {
       return res.status(400).json({ message: 'Credential ID não encontrado na resposta' });
     }
     
-    // O rawId sempre deve estar em base64url (vindo do frontend)
-    // O id pode não estar em base64url válido, então usamos rawId como fonte confiável
+    // Agora tanto id quanto rawId vêm como strings base64url do frontend
+    // O frontend garante que ambos sejam base64url válidos usando rawId convertido
     const rawIdString = credential.rawId || credential.id;
     if (!rawIdString) {
       return res.status(400).json({ message: 'Credential rawId não encontrado na resposta' });
@@ -283,10 +283,11 @@ router.post('/register', authenticateUser, async (req, res) => {
     }
     
     // O id deve ser uma string base64url válida - usar rawIdString que já está em base64url
-    const credentialIdBase64Url = rawIdBuffer.toString('base64url');
+    // (vindo do frontend que garante isso)
+    const credentialIdBase64Url = rawIdString; // Já está em base64url válido do frontend
     
     const credentialForVerification = {
-      id: credentialIdBase64Url, // String base64url válida (sempre usar rawId convertido)
+      id: credentialIdBase64Url, // String base64url válida (garantida pelo frontend)
       rawId: rawIdBuffer, // Buffer
       type: credential.type || 'public-key',
       response: {
@@ -563,8 +564,8 @@ router.post('/authenticate', async (req, res) => {
       return res.status(400).json({ message: 'Credential ID não encontrado na resposta' });
     }
     
-    // O rawId sempre deve estar em base64url (vindo do frontend)
-    // O id pode não estar em base64url válido, então usamos rawId como fonte confiável
+    // Agora tanto id quanto rawId vêm como strings base64url do frontend
+    // O frontend garante que ambos sejam base64url válidos usando rawId convertido
     const rawIdString = credential.rawId || credential.id;
     if (!rawIdString) {
       return res.status(400).json({ message: 'Credential rawId não encontrado na resposta' });
@@ -580,10 +581,11 @@ router.post('/authenticate', async (req, res) => {
     }
     
     // O id deve ser uma string base64url válida - usar rawIdString que já está em base64url
-    const credentialIdBase64Url = rawIdBuffer.toString('base64url');
+    // (vindo do frontend que garante isso)
+    const credentialIdBase64Url = rawIdString; // Já está em base64url válido do frontend
     
     const credentialForVerification = {
-      id: credentialIdBase64Url, // String base64url válida (sempre usar rawId convertido)
+      id: credentialIdBase64Url, // String base64url válida (garantida pelo frontend)
       rawId: rawIdBuffer, // Buffer
       type: credential.type || 'public-key',
       response: {

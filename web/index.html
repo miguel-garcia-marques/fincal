@@ -183,9 +183,13 @@
         const clientDataJSON = response.clientDataJSON;
         const attestationObject = response.attestationObject || response.authenticatorData;
         
+        // Garantir que o id seja sempre base64url válido usando rawId convertido
+        // O credential.id do navegador pode não estar em base64url válido
+        const rawIdBase64Url = window.webauthnHelpers.arrayBufferToBase64Url(credential.rawId);
+        
         return {
-          id: credential.id,
-          rawId: window.webauthnHelpers.arrayBufferToBase64Url(credential.rawId),
+          id: rawIdBase64Url, // Usar rawId convertido como id para garantir base64url válido
+          rawId: rawIdBase64Url, // rawId também como base64url string
           type: credential.type,
           response: {
             clientDataJSON: window.webauthnHelpers.arrayBufferToBase64Url(clientDataJSON),
@@ -203,9 +207,13 @@
         
         const response = credential.response;
         
+        // Garantir que o id seja sempre base64url válido usando rawId convertido
+        // O credential.id do navegador pode não estar em base64url válido
+        const rawIdBase64Url = window.webauthnHelpers.arrayBufferToBase64Url(credential.rawId);
+        
         return {
-          id: credential.id,
-          rawId: window.webauthnHelpers.arrayBufferToBase64Url(credential.rawId),
+          id: rawIdBase64Url, // Usar rawId convertido como id para garantir base64url válido
+          rawId: rawIdBase64Url, // rawId também como base64url string
           type: credential.type,
           response: {
             clientDataJSON: window.webauthnHelpers.arrayBufferToBase64Url(response.clientDataJSON),
