@@ -986,95 +986,101 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // Método para selecionar um email da lista
-  Future<void> _selectEmailFromList(String email) async {
+  void _selectEmailFromList(String email) {
     setState(() {
       _emailController.text = email;
       _showEmailList = false;
+      _emailEntered = true; // Mostrar campo de senha e opção de passkey
     });
+  }
 
-    // Verificar se passkeys são suportadas e tentar autenticar automaticamente
-    if (kIsWeb && _passkeySupported) {
-      try {
-        setState(() => _isLoading = true);
+  // Método para tentar autenticar com passkey após selecionar email
+  Future<void> _tryPasskeyLogin(String email) async {
+    if (!kIsWeb || !_passkeySupported) {
+      return;
+    }
+
+    try {
+      setState(() => _isLoading = true);
+      
+      // Tentar autenticar com passkey
+      final result = await _passkeyService.authenticateWithPasskey(email);
+      
+      if (mounted && result['success'] == true) {
+        final userEmail = result['email'] as String?;
+        final token = result['token'] as String?;
         
-        // Tentar autenticar com passkey
-        final result = await _passkeyService.authenticateWithPasskey(email);
-        
-        if (mounted && result['success'] == true) {
-          final userEmail = result['email'] as String?;
-          final token = result['token'] as String?;
-          
-          // Se tivermos token, criar sessão automaticamente
-          if (token != null && token.isNotEmpty && userEmail != null) {
-            try {
-              final session = await _authService.setSessionWithToken(token, userEmail);
-              
-              if (session.session != null && session.user != null && mounted) {
-                // Login bem-sucedido com passkey!
-                try {
-                  await _authService.supabase.auth.refreshSession();
-                  
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setBool('user_has_passkeys_${session.user!.id}', true);
-                  
-                  // Salvar email usado anteriormente
-                  await _saveEmail(userEmail);
-                } catch (e) {
-                  // Ignorar erros no refresh
-                }
+        // Se tivermos token, criar sessão automaticamente
+        if (token != null && token.isNotEmpty && userEmail != null) {
+          try {
+            final session = await _authService.setSessionWithToken(token, userEmail);
+            
+            if (session.session != null && session.user != null && mounted) {
+              // Login bem-sucedido com passkey!
+              try {
+                await _authService.supabase.auth.refreshSession();
                 
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Login com passkey bem-sucedido!'),
-                      backgroundColor: AppTheme.incomeGreen,
-                    ),
-                  );
-                  
-                  // Navegar para AuthWrapper
-                  Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(
-                      builder: (context) => const AuthWrapper(),
-                    ),
-                    (route) => false,
-                  );
-                }
-                return; // Sair se login foi bem-sucedido
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('user_has_passkeys_${session.user!.id}', true);
+                
+                // Salvar email usado anteriormente
+                await _saveEmail(userEmail);
+              } catch (e) {
+                // Ignorar erros no refresh
               }
-            } catch (e) {
-              print('[Login] Erro ao criar sessão com passkey: ${e.runtimeType}');
-              // Continuar para mostrar campo de senha
+              
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Login com passkey bem-sucedido!'),
+                    backgroundColor: AppTheme.incomeGreen,
+                  ),
+                );
+                
+                // Navegar para AuthWrapper
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(
+                    builder: (context) => const AuthWrapper(),
+                  ),
+                  (route) => false,
+                );
+              }
+              return; // Sair se login foi bem-sucedido
             }
+          } catch (e) {
+            print('[Login] Erro ao criar sessão com passkey: ${e.runtimeType}');
+            // Continuar para mostrar campo de senha
           }
         }
-      } catch (e) {
-        // Se não houver passkey ou falhar, mostrar campo de senha
-        final errorStr = e.toString().toLowerCase();
-        if (!errorStr.contains('nenhuma passkey encontrada') && 
-            !errorStr.contains('cancelado') &&
-            mounted) {
-          // Mostrar mensagem apenas se não for erro esperado (sem passkey)
+      }
+    } catch (e) {
+      // Se não houver passkey ou falhar, mostrar mensagem e continuar com senha
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('nenhuma passkey encontrada')) {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Não foi possível autenticar com passkey. Use sua senha.'),
+            const SnackBar(
+              content: Text('Nenhuma passkey encontrada. Use sua senha.'),
               backgroundColor: Colors.orange,
-              duration: const Duration(seconds: 2),
+              duration: Duration(seconds: 2),
             ),
           );
         }
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _emailEntered = true; // Mostrar campo de senha
-          });
-        }
+      } else if (!errorStr.contains('cancelado') && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Não foi possível autenticar com passkey. Use sua senha.'),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 2),
+          ),
+        );
       }
-    } else {
-      // Se passkeys não são suportadas, mostrar campo de senha diretamente
-      setState(() {
-        _emailEntered = true;
-      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -1152,9 +1158,8 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             itemBuilder: (context, index) {
               final email = _previousEmails[index];
-              final isSelectedEmail = _emailController.text == email && _isLoading;
               return InkWell(
-                onTap: _isLoading ? null : () => _selectEmailFromList(email),
+                onTap: () => _selectEmailFromList(email),
                 hoverColor: AppTheme.black.withOpacity(0.05),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
@@ -1170,22 +1175,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           shape: BoxShape.circle,
                           color: AppTheme.black.withOpacity(0.1),
                         ),
-                        child: isSelectedEmail
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    AppTheme.black,
-                                  ),
-                                ),
-                              )
-                            : Icon(
-                                Icons.email_outlined,
-                                color: AppTheme.black.withOpacity(0.6),
-                                size: 20,
-                              ),
+                        child: Icon(
+                          Icons.email_outlined,
+                          color: AppTheme.black.withOpacity(0.6),
+                          size: 20,
+                        ),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
@@ -1194,19 +1188,15 @@ class _LoginScreenState extends State<LoginScreen> {
                           children: [
                             Text(
                               email,
-                              style: TextStyle(
+                              style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w500,
-                                color: isSelectedEmail 
-                                    ? Colors.grey[600]
-                                    : AppTheme.black,
+                                color: AppTheme.black,
                               ),
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              isSelectedEmail
-                                  ? 'Autenticando...'
-                                  : 'Conta existente',
+                              'Conta existente',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: Colors.grey[600],
@@ -1215,11 +1205,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           ],
                         ),
                       ),
-                      if (!isSelectedEmail)
-                        Icon(
-                          Icons.chevron_right,
-                          color: Colors.grey[400],
-                        ),
+                      Icon(
+                        Icons.chevron_right,
+                        color: Colors.grey[400],
+                      ),
                     ],
                   ),
                 ),
@@ -1456,6 +1445,34 @@ class _LoginScreenState extends State<LoginScreen> {
                       },
                     ),
                     const SizedBox(height: 16),
+                    
+                    // Botão de passkey (se suportado e email foi selecionado da lista)
+                    if (_isLoginMode && _emailEntered && kIsWeb && _passkeySupported) ...[
+                      OutlinedButton.icon(
+                        onPressed: _isLoading ? null : () => _tryPasskeyLogin(_emailController.text.trim()),
+                        icon: const Icon(Icons.fingerprint, size: 20),
+                        label: const Text('Entrar com Passkey'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          side: const BorderSide(color: AppTheme.black),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Row(
+                        children: [
+                          Expanded(child: Divider()),
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12),
+                            child: Text('ou'),
+                          ),
+                          Expanded(child: Divider()),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     
                     // Password field (apenas se email foi inserido no modo login, ou sempre no signup)
                     if (_isLoginMode && _emailEntered || !_isLoginMode) ...[
