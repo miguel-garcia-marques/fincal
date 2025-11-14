@@ -21,9 +21,27 @@
   <meta name="description" content="FinCal - A modern finance management web app">
   
   <!-- Security Headers -->
-  <!-- Nota: CSP removido temporariamente pois estava bloqueando recursos do Flutter Web -->
-  <!-- Os headers de segurança principais estão configurados no firebase.json -->
-  <!-- Para adicionar CSP no futuro, use uma política muito permissiva para Flutter Web -->
+  <!-- Content Security Policy (CSP) - Política permissiva para Flutter Web -->
+  <!-- Permite recursos necessários do Flutter mas bloqueia inline scripts perigosos -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.supabase.co https://*.googleapis.com;
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data: https: blob:;
+    font-src 'self' data:;
+    connect-src 'self' https://*.supabase.co https://*.googleapis.com wss://*.supabase.co;
+    frame-src 'self';
+    object-src 'none';
+    base-uri 'self';
+    form-action 'self';
+    upgrade-insecure-requests;
+  ">
+  
+  <!-- Headers adicionais de segurança -->
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="X-Frame-Options" content="DENY">
+  <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+  <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">

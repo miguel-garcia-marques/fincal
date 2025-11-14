@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const slowDown = require('express-slow-down');
 const connectDB = require('./config/database');
+const { securityMonitor, authSecurityMonitor } = require('./middleware/securityMonitor');
 require('dotenv').config();
 
 const app = express();
@@ -128,6 +129,41 @@ const strictLimiter = rateLimit({
   },
 });
 
+// Rate limiter específico para autenticação (login, signup, passkeys)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: isDevelopment ? 50 : 5, // Máximo 5 tentativas de login por 15 minutos em produção
+  message: 'Muitas tentativas de login. Tente novamente em 15 minutos.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    if (req.method === 'OPTIONS') {
+      return true;
+    }
+    // Em desenvolvimento, pular rate limiting para localhost
+    if (isDevelopment && (req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1')) {
+      return true;
+    }
+    return false;
+  },
+  // Handler customizado para incluir informações de segurança
+  handler: (req, res) => {
+    const identifier = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+    console.warn(`[SECURITY] Rate limit excedido para autenticação:`, {
+      identifier,
+      path: req.path,
+      method: req.method,
+      timestamp: new Date().toISOString()
+    });
+    
+    res.status(429).json({
+      message: 'Muitas tentativas de login. Tente novamente em 15 minutos.',
+      code: 'RATE_LIMIT_EXCEEDED',
+      retryAfter: 900 // 15 minutos em segundos
+    });
+  }
+});
+
 // Slow down - desabilitado em desenvolvimento para melhor performance
 const speedLimiter = slowDown({
   windowMs: 15 * 60 * 1000, // 15 minutos
@@ -155,16 +191,48 @@ app.use(generalLimiter);
 app.use(speedLimiter);
 
 // ============================================
+// SEGURANÇA: Monitoramento de segurança
+// ============================================
+// Aplicar monitoramento de segurança em todas as rotas
+app.use(securityMonitor);
+
+// ============================================
 // SEGURANÇA: Limitar tamanho de payload
 // ============================================
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ============================================
+// SEGURANÇA: HTTPS Enforcement (em produção)
+// ============================================
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    // Verificar se a requisição já é HTTPS
+    const isSecure = req.secure || 
+                     req.headers['x-forwarded-proto'] === 'https' ||
+                     req.headers['x-forwarded-ssl'] === 'on';
+    
+    if (!isSecure) {
+      // Redirecionar para HTTPS
+      return res.redirect(301, `https://${req.headers.host}${req.url}`);
+    }
+    
+    // Adicionar header Strict-Transport-Security (HSTS)
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+    
+    next();
+  });
+}
+
+// ============================================
 // Rotas
 // ============================================
 // Aplicar rate limiter mais restritivo para endpoints de bulk (antes das rotas)
 app.use('/api/transactions/bulk', strictLimiter);
+
+// Aplicar rate limiter específico para autenticação
+app.use('/api/passkeys/authenticate', authLimiter);
+app.use('/api/passkeys/authenticate/options', authLimiter);
 
 app.use('/api/transactions', require('./routes/transactions'));
 app.use('/api/users', require('./routes/users'));

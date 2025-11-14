@@ -235,23 +235,74 @@ echo -e "${YELLOW}📝 Verificando mudanças no Git...${NC}"
 
 # Verificar se há mudanças para commitar
 if [ -n "$(git status --porcelain)" ]; then
-    echo -e "${YELLOW}📦 Adicionando mudanças ao Git...${NC}"
-    git add .
+    # Mostrar mudanças detectadas
+    echo -e "${YELLOW}📋 Mudanças detectadas:${NC}"
+    git status --short
     
-    # Gerar mensagem de commit baseada nas mudanças
-    echo -e "${YELLOW}🤖 Gerando mensagem de commit baseada nas mudanças...${NC}"
-    COMMIT_MSG=$(generate_commit_message)
-    echo -e "${YELLOW}💾 Fazendo commit: ${COMMIT_MSG}${NC}"
-    git commit -m "$COMMIT_MSG"
+    # Perguntar se deseja fazer commit
+    echo ""
+    echo -e "${YELLOW}💾 Deseja fazer commit das mudanças?${NC}"
+    echo -e "${YELLOW}   (s/n) [padrão: s]: ${NC}"
+    read -r -t 30 COMMIT_CHOICE || COMMIT_CHOICE="s"
     
-    echo -e "${YELLOW}🚀 Fazendo push para o repositório...${NC}"
-    git push
+    # Normalizar resposta (aceitar S, s, sim, y, yes, etc.)
+    COMMIT_CHOICE=$(echo "$COMMIT_CHOICE" | tr '[:upper:]' '[:lower:]')
     
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ Mudanças enviadas para o Git com sucesso!${NC}"
+    if [[ "$COMMIT_CHOICE" == "s" ]] || [[ "$COMMIT_CHOICE" == "sim" ]] || [[ "$COMMIT_CHOICE" == "y" ]] || [[ "$COMMIT_CHOICE" == "yes" ]] || [[ -z "$COMMIT_CHOICE" ]]; then
+        echo -e "${YELLOW}📦 Adicionando mudanças ao Git...${NC}"
+        git add .
+        
+        # Gerar mensagem de commit baseada nas mudanças
+        echo -e "${YELLOW}🤖 Gerando mensagem de commit baseada nas mudanças...${NC}"
+        COMMIT_MSG=$(generate_commit_message)
+        echo -e "${YELLOW}💾 Mensagem gerada: ${COMMIT_MSG}${NC}"
+        
+        # Perguntar se deseja usar a mensagem gerada ou editar
+        echo ""
+        echo -e "${YELLOW}✏️  Deseja editar a mensagem de commit?${NC}"
+        echo -e "${YELLOW}   (s/n) [padrão: n]: ${NC}"
+        read -r -t 30 EDIT_CHOICE || EDIT_CHOICE="n"
+        EDIT_CHOICE=$(echo "$EDIT_CHOICE" | tr '[:upper:]' '[:lower:]')
+        
+        if [[ "$EDIT_CHOICE" == "s" ]] || [[ "$EDIT_CHOICE" == "sim" ]] || [[ "$EDIT_CHOICE" == "y" ]] || [[ "$EDIT_CHOICE" == "yes" ]]; then
+            echo -e "${YELLOW}📝 Digite a nova mensagem de commit:${NC}"
+            read -r COMMIT_MSG
+        fi
+        
+        echo -e "${YELLOW}💾 Fazendo commit...${NC}"
+        git commit -m "$COMMIT_MSG"
+        
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✅ Commit realizado com sucesso!${NC}"
+            
+            # Perguntar se deseja fazer push
+            echo ""
+            echo -e "${YELLOW}🚀 Deseja fazer push para o repositório remoto?${NC}"
+            echo -e "${YELLOW}   (s/n) [padrão: s]: ${NC}"
+            read -r -t 30 PUSH_CHOICE || PUSH_CHOICE="s"
+            
+            # Normalizar resposta
+            PUSH_CHOICE=$(echo "$PUSH_CHOICE" | tr '[:upper:]' '[:lower:]')
+            
+            if [[ "$PUSH_CHOICE" == "s" ]] || [[ "$PUSH_CHOICE" == "sim" ]] || [[ "$PUSH_CHOICE" == "y" ]] || [[ "$PUSH_CHOICE" == "yes" ]] || [[ -z "$PUSH_CHOICE" ]]; then
+                echo -e "${YELLOW}🚀 Fazendo push para o repositório...${NC}"
+                git push
+                
+                if [ $? -eq 0 ]; then
+                    echo -e "${GREEN}✅ Mudanças enviadas para o Git com sucesso!${NC}"
+                else
+                    echo -e "${RED}❌ Erro ao fazer push para o Git${NC}"
+                    echo -e "${YELLOW}⚠️  Continuando com o deploy mesmo assim...${NC}"
+                fi
+            else
+                echo -e "${YELLOW}⏭️  Push pulado. Mudanças commitadas localmente.${NC}"
+            fi
+        else
+            echo -e "${RED}❌ Erro ao fazer commit${NC}"
+            echo -e "${YELLOW}⚠️  Continuando com o deploy mesmo assim...${NC}"
+        fi
     else
-        echo -e "${RED}❌ Erro ao fazer push para o Git${NC}"
-        exit 1
+        echo -e "${YELLOW}⏭️  Commit pulado. Continuando com o deploy...${NC}"
     fi
 else
     echo -e "${GREEN}✓ Nenhuma mudança para commitar${NC}"

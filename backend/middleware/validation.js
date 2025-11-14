@@ -1,4 +1,5 @@
 const { body, query, param, validationResult } = require('express-validator');
+const { sanitizeEmail, isSafeEmail } = require('../utils/emailValidator');
 
 // Middleware para processar resultados da validação
 const handleValidationErrors = (req, res, next) => {

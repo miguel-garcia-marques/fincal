@@ -9,6 +9,7 @@ import '../services/wallet_service.dart';
 import '../services/storage_service.dart';
 import '../services/passkey_service.dart';
 import '../utils/responsive_fonts.dart';
+import '../utils/email_sanitizer.dart';
 import '../theme/app_theme.dart';
 import '../main.dart';
 import 'email_verification_screen.dart';
@@ -75,42 +76,72 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final emailsJson = prefs.getStringList('previous_emails') ?? [];
+      
+      // Sanitizar emails ao carregar (proteção contra XSS em dados já armazenados)
+      final sanitizedEmails = emailsJson
+          .map((e) => EmailSanitizer.sanitize(e))
+          .where((e) => e != null)
+          .cast<String>()
+          .toList();
+      
+      // Se houver emails removidos por serem inválidos, salvar lista limpa
+      if (sanitizedEmails.length != emailsJson.length) {
+        await prefs.setStringList('previous_emails', sanitizedEmails);
+      }
+      
       if (mounted) {
         setState(() {
-          _previousEmails = emailsJson;
+          _previousEmails = sanitizedEmails;
         });
       }
     } catch (e) {
       // Ignorar erros ao carregar emails anteriores
+      print('[Login] Erro ao carregar emails anteriores: $e');
     }
   }
 
   // Salvar email usado anteriormente
   Future<void> _saveEmail(String email) async {
     try {
+      // Sanitizar email antes de salvar (proteção contra XSS)
+      final sanitizedEmail = EmailSanitizer.sanitize(email);
+      if (sanitizedEmail == null) {
+        // Email inválido ou perigoso - não salvar
+        print('[Login] Email inválido ou contém caracteres perigosos, não será salvo: $email');
+        return;
+      }
+      
       final prefs = await SharedPreferences.getInstance();
       final emails = prefs.getStringList('previous_emails') ?? [];
       
+      // Sanitizar emails existentes também (limpeza de dados antigos)
+      final sanitizedEmails = emails
+          .map((e) => EmailSanitizer.sanitize(e))
+          .where((e) => e != null)
+          .cast<String>()
+          .toList();
+      
       // Remover email se já existir (para mover para o topo)
-      emails.remove(email);
+      sanitizedEmails.remove(sanitizedEmail);
       
       // Adicionar no início da lista
-      emails.insert(0, email);
+      sanitizedEmails.insert(0, sanitizedEmail);
       
       // Limitar a 10 emails mais recentes
-      if (emails.length > 10) {
-        emails.removeRange(10, emails.length);
+      if (sanitizedEmails.length > 10) {
+        sanitizedEmails.removeRange(10, sanitizedEmails.length);
       }
       
-      await prefs.setStringList('previous_emails', emails);
+      await prefs.setStringList('previous_emails', sanitizedEmails);
       
       if (mounted) {
         setState(() {
-          _previousEmails = emails;
+          _previousEmails = sanitizedEmails;
         });
       }
     } catch (e) {
       // Ignorar erros ao salvar email
+      print('[Login] Erro ao salvar email: $e');
     }
   }
 
@@ -1605,34 +1636,6 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             ),
                     ),
-                      
-                      // Botão de passkey (se suportado e no modo login)
-                      if (kIsWeb && _passkeySupported && _isLoginMode && _emailEntered) ...[
-                        const SizedBox(height: 12),
-                        const Row(
-                          children: [
-                            Expanded(child: Divider()),
-                            Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 12),
-                              child: Text('ou'),
-                            ),
-                            Expanded(child: Divider()),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        OutlinedButton.icon(
-                          onPressed: _isLoading ? null : _handlePasskeyLogin,
-                          icon: const Icon(Icons.fingerprint, size: 20),
-                          label: const Text('Entrar com Passkey'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            side: const BorderSide(color: AppTheme.black),
-                          ),
-                        ),
-                      ],
                     const SizedBox(height: 16),
                     ],
                     

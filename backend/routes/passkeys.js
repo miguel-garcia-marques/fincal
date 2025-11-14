@@ -559,11 +559,19 @@ router.post('/register', authenticateUser, async (req, res) => {
 router.post('/authenticate/options', async (req, res) => {
   try {
     const Passkey = getPasskeyModel();
-    const { email } = req.body;
+    const { sanitizeEmail } = require('../utils/emailValidator');
+    let { email } = req.body;
     
     if (!email) {
       return res.status(400).json({ message: 'Email é obrigatório' });
     }
+    
+    // Sanitizar e validar email
+    const sanitized = sanitizeEmail(email);
+    if (sanitized === null) {
+      return res.status(400).json({ message: 'Formato de email inválido' });
+    }
+    email = sanitized;
 
     // Buscar usuário pelo email no Supabase usando Admin API
     const { data: { users }, error: userError } = await supabaseAdmin.auth.admin.listUsers();
