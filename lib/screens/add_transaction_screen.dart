@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -774,7 +775,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                           child: Text(
                             _isProcessingImage
                                 ? 'Processando imagem...'
-                                : 'Tirar Foto da Fatura (IA)',
+                                : kIsWeb
+                                    ? 'Escolher Imagem da Fatura (IA)'
+                                    : 'Tirar Foto da Fatura (IA)',
                             style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
@@ -850,46 +853,64 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     if (_isProcessingImage) return;
 
     try {
-      // Mostrar diálogo para escolher entre câmera e galeria
-      final ImageSource? source = await showDialog<ImageSource>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Selecionar Imagem'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.camera_alt),
-                title: const Text('Tirar Foto'),
-                onTap: () => Navigator.of(context).pop(ImageSource.camera),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_library),
-                title: const Text('Escolher da Galeria'),
-                onTap: () => Navigator.of(context).pop(ImageSource.gallery),
-              ),
-            ],
+      Uint8List? imageBytes;
+
+      if (kIsWeb) {
+        // Para web, usar file_picker
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.image,
+          allowMultiple: false,
+        );
+
+        if (result == null || result.files.single.bytes == null) return;
+
+        imageBytes = result.files.single.bytes;
+      } else {
+        // Para mobile, usar image_picker
+        // Mostrar diálogo para escolher entre câmera e galeria
+        final ImageSource? source = await showDialog<ImageSource>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Selecionar Imagem'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.camera_alt),
+                  title: const Text('Tirar Foto'),
+                  onTap: () => Navigator.of(context).pop(ImageSource.camera),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_library),
+                  title: const Text('Escolher da Galeria'),
+                  onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+                ),
+              ],
+            ),
           ),
-        ),
-      );
+        );
 
-      if (source == null) return;
+        if (source == null) return;
 
-      // Solicitar permissão e capturar/selecionar imagem
-      final XFile? image = await _imagePicker.pickImage(
-        source: source,
-        imageQuality: 85,
-        preferredCameraDevice: CameraDevice.rear,
-      );
+        // Solicitar permissão e capturar/selecionar imagem
+        final XFile? image = await _imagePicker.pickImage(
+          source: source,
+          imageQuality: 85,
+          preferredCameraDevice: CameraDevice.rear,
+        );
 
-      if (image == null) return;
+        if (image == null) return;
+
+        imageBytes = await image.readAsBytes();
+      }
+
+      if (imageBytes == null) return;
 
       setState(() {
         _isProcessingImage = true;
       });
 
       // Converter imagem para base64
-      final Uint8List imageBytes = await image.readAsBytes();
       final String base64Image = base64Encode(imageBytes);
       final String imageBase64 = 'data:image/jpeg;base64,$base64Image';
 

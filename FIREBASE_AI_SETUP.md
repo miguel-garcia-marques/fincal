@@ -64,11 +64,22 @@ A IA mapeia automaticamente para as seguintes categorias:
 - `comunicacoes` - Telefone, internet
 - `miscelaneos` - Outros
 
+## Modelos Utilizados (GRATUITOS)
+
+**IMPORTANTE:** Esta implementação usa APENAS modelos do tier gratuito:
+
+- `gemini-1.5-flash` - Modelo gratuito rápido e eficiente com suporte a análise de imagens
+- `gemini-pro-vision` - Modelo legado gratuito com suporte a visão computacional
+
+**Nenhum modelo "Pro" pago é usado.** Todos os modelos na lista são gratuitos e suportam análise de imagens.
+
 ## Limites e Custos
 
-- A API Gemini tem limites de uso gratuitos generosos
-- Consulte a [documentação oficial](https://ai.google.dev/pricing) para informações sobre limites e custos
-- O modelo usado é `gemini-1.5-flash`, que é rápido e econômico
+- ✅ **100% GRATUITO** - A implementação usa apenas modelos do tier gratuito
+- A API Gemini tem limites de uso gratuitos generosos (15 RPM, 1M TPM)
+- Não é necessário cartão de crédito para usar os modelos gratuitos
+- Consulte a [documentação oficial](https://ai.google.dev/pricing) para informações sobre limites
+- O modelo principal usado é `gemini-1.5-flash`, que é rápido, gratuito e suporta análise de imagens
 
 ## Troubleshooting
 
