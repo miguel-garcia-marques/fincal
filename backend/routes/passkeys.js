@@ -912,30 +912,67 @@ router.post('/authenticate', async (req, res) => {
         throw new Error('Magic link não contém action_link');
       }
 
-      console.log('[Passkey Authenticate] Magic link gerado, extraindo tokens...');
+      console.log('[Passkey Authenticate] Magic link gerado:', actionLink.substring(0, 100) + '...');
+      console.log('[Passkey Authenticate] Extraindo token do magic link...');
       
       // Extrair token do magic link
+      // O Supabase magic link pode ter o token em diferentes formatos
       let token = null;
       try {
         const url = new URL(actionLink);
-        // O token pode estar na query string ou no hash
-        token = url.searchParams.get('token') || url.searchParams.get('access_token');
         
+        // Log para debug
+        console.log('[Passkey Authenticate] URL parsed:');
+        console.log('[Passkey Authenticate] - Search:', url.search);
+        console.log('[Passkey Authenticate] - Hash:', url.hash ? url.hash.substring(0, 50) + '...' : 'none');
+        
+        // Tentar extrair de diferentes lugares na query string
+        token = url.searchParams.get('token') 
+             || url.searchParams.get('access_token')
+             || url.searchParams.get('hash')
+             || url.searchParams.get('code');
+        
+        // Se não encontrou na query string, tentar no hash
         if (!token && url.hash) {
-          const hashParams = new URLSearchParams(url.hash.substring(1));
-          token = hashParams.get('access_token') || hashParams.get('token');
+          const hashStr = url.hash.substring(1); // Remove o #
+          console.log('[Passkey Authenticate] Tentando extrair do hash:', hashStr.substring(0, 50));
+          
+          // Tentar como URLSearchParams primeiro
+          try {
+            const hashParams = new URLSearchParams(hashStr);
+            token = hashParams.get('access_token') 
+                 || hashParams.get('token')
+                 || hashParams.get('hash')
+                 || hashParams.get('code');
+          } catch (e) {
+            // Se falhar, tentar regex
+            console.log('[Passkey Authenticate] Hash não é URLSearchParams, tentando regex...');
+          }
+          
+          // Se ainda não encontrou, tentar regex no hash
+          if (!token) {
+            const tokenMatch = hashStr.match(/(?:token|access_token|hash|code)=([^&]+)/);
+            if (tokenMatch && tokenMatch[1]) {
+              token = decodeURIComponent(tokenMatch[1]);
+            }
+          }
+        }
+        
+        // Log resultado
+        if (token) {
+          console.log('[Passkey Authenticate] ✅ Token extraído com sucesso! Length:', token.length);
+        } else {
+          console.log('[Passkey Authenticate] ⚠️ Token não encontrado no link');
+          console.log('[Passkey Authenticate] Link completo:', actionLink);
         }
       } catch (e) {
         console.error('[Passkey Authenticate] Erro ao extrair token do link:', e);
+        console.error('[Passkey Authenticate] Link:', actionLink);
       }
 
-      // Se conseguimos extrair o token, usar verifyOTP no backend para obter sessão válida
+      // Se conseguimos extrair o token, retornar para o frontend usar verifyOTP
       if (token) {
-        console.log('[Passkey Authenticate] Token extraído, verificando OTP...');
-        
-        // Usar Admin API para verificar o token e obter sessão válida
-        // Nota: Admin API não tem verifyOTP direto, então vamos retornar o token
-        // O frontend vai usar verifyOTP que criará uma sessão válida com refresh_token real
+        console.log('[Passkey Authenticate] ✅ Retornando token para frontend');
         
         res.json({
           success: true,
@@ -947,7 +984,9 @@ router.post('/authenticate', async (req, res) => {
         });
       } else {
         // Se não conseguimos extrair token, retornar magic link
-        console.log('[Passkey Authenticate] Token não encontrado no link, retornando magic link');
+        // O frontend pode tentar usar o link diretamente ou pedir senha
+        console.log('[Passkey Authenticate] ⚠️ Retornando magic link (token não extraído)');
+        
         res.json({
           success: true,
           userId: user.id,

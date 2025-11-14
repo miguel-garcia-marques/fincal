@@ -772,7 +772,7 @@ class _LoginScreenState extends State<LoginScreen> {
         
         // Prioridade 1: Tentar usar token do magic link para criar sessão automaticamente
         final token = result['token'] as String?;
-        if (token != null && userEmail != null) {
+        if (token != null && token.isNotEmpty && userEmail != null) {
           try {
             print('[Passkey Login] Tentando criar sessão com token do magic link...');
             print('[Passkey Login] Token presente: ${token.isNotEmpty}');
@@ -815,8 +815,9 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         } else {
           print('[Passkey Login] ⚠️ Token não disponível:');
-          print('[Passkey Login] - Token: ${token != null}');
+          print('[Passkey Login] - Token: ${token != null && token.isNotEmpty}');
           print('[Passkey Login] - User Email: ${userEmail != null}');
+          print('[Passkey Login] - Result keys: ${result.keys.toList()}');
         }
         
         // Fallback: Se não tivermos token ou se falhou, tentar magic link direto

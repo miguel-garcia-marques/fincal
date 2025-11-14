@@ -292,19 +292,23 @@ class PasskeyService {
       // Debug: verificar o que foi recebido do backend
       print('[PasskeyService] Resposta do backend:');
       print('[PasskeyService] - success: ${authData['success']}');
+      print('[PasskeyService] - token: ${authData['token'] != null}');
       print('[PasskeyService] - access_token: ${authData['access_token'] != null}');
       print('[PasskeyService] - refresh_token: ${authData['refresh_token'] != null}');
+      print('[PasskeyService] - magicLink: ${authData['magicLink'] != null}');
       print('[PasskeyService] - requiresPassword: ${authData['requiresPassword']}');
       
       return {
         'success': true,
         'userId': authData['userId'],
         'email': authData['email'],
-        'access_token': authData['access_token'], // Token JWT para criar sessão
-        'refresh_token': authData['refresh_token'], // Refresh token para renovar sessão
+        // Priorizar token do magic link (novo formato)
+        'token': authData['token'], // Token do magic link para usar com verifyOTP
+        // Manter compatibilidade com formato antigo (access_token/refresh_token)
+        'access_token': authData['access_token'], // Token JWT (formato antigo)
+        'refresh_token': authData['refresh_token'], // Refresh token (formato antigo)
         'expires_in': authData['expires_in'], // Tempo de expiração em segundos
         'token_type': authData['token_type'], // Tipo de token (bearer)
-        'token': authData['token'], // Token hash para usar com verifyOtp (fallback)
         'magicLink': authData['magicLink'], // Link completo como fallback
         'requiresPassword': authData['requiresPassword'], // Indica se precisa de senha
       };
