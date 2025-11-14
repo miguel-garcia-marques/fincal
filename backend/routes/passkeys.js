@@ -373,18 +373,49 @@ router.post('/register', authenticateUser, async (req, res) => {
 
     const { credentialID, credentialPublicKey, counter } = verification.registrationInfo;
 
+    // Usar o rawIdBuffer que armazenamos anteriormente se credentialID não estiver disponível
+    // O credentialID da biblioteca pode vir como Buffer, Uint8Array ou undefined
+    let credentialIDBuffer;
+    if (credentialID) {
+      if (Buffer.isBuffer(credentialID)) {
+        credentialIDBuffer = credentialID;
+      } else if (credentialID instanceof Uint8Array) {
+        credentialIDBuffer = Buffer.from(credentialID);
+      } else {
+        credentialIDBuffer = Buffer.from(credentialID);
+      }
+    } else if (credentialForVerification._rawIdBuffer) {
+      // Fallback: usar o rawIdBuffer que armazenamos
+      credentialIDBuffer = credentialForVerification._rawIdBuffer;
+    } else {
+      console.error('[Passkey Register] credentialID não disponível e _rawIdBuffer não encontrado');
+      return res.status(500).json({ message: 'Erro ao processar credential ID' });
+    }
+
+    const credentialIDBase64Url = credentialIDBuffer.toString('base64url');
+
     // Verificar se a credencial já existe
-    const existingPasskey = await Passkey.findOne({ credentialID: Buffer.from(credentialID).toString('base64url') });
+    const existingPasskey = await Passkey.findOne({ credentialID: credentialIDBase64Url });
     if (existingPasskey) {
       return res.status(400).json({ message: 'Esta passkey já está registrada' });
+    }
+
+    // Converter credentialPublicKey para Buffer se necessário
+    let publicKeyBuffer;
+    if (Buffer.isBuffer(credentialPublicKey)) {
+      publicKeyBuffer = credentialPublicKey;
+    } else if (credentialPublicKey instanceof Uint8Array) {
+      publicKeyBuffer = Buffer.from(credentialPublicKey);
+    } else {
+      publicKeyBuffer = Buffer.from(credentialPublicKey);
     }
 
     // Salvar a passkey no banco de dados
     const passkey = new Passkey({
       userId,
-      credentialID: Buffer.from(credentialID).toString('base64url'),
-      publicKey: Buffer.from(credentialPublicKey).toString('base64url'),
-      counter,
+      credentialID: credentialIDBase64Url,
+      publicKey: publicKeyBuffer.toString('base64url'),
+      counter: counter || 0,
       deviceType: deviceType || 'unknown',
       lastUsedAt: new Date()
     });
