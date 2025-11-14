@@ -518,12 +518,33 @@ router.post('/authenticate/options', async (req, res) => {
       return res.status(404).json({ message: 'Nenhuma passkey encontrada para este usuário' });
     }
 
-    // Converter credentialID de base64url string para Buffer
-    const allowCredentials = passkeys.map(passkey => ({
-      id: Buffer.from(passkey.credentialID, 'base64url'),
-      type: 'public-key',
-      transports: ['internal', 'hybrid']
-    }));
+    // Converter credentialID para string base64url
+    // A biblioteca espera strings base64url em allowCredentials, não Buffers
+    const allowCredentials = passkeys.map(passkey => {
+      let credentialIDString;
+      
+      if (!passkey.credentialID) {
+        console.error('[Passkey Authenticate Options] credentialID não encontrado para passkey:', passkey._id);
+        return null;
+      }
+      
+      // Se já for string, usar diretamente (assumindo que é base64url)
+      if (typeof passkey.credentialID === 'string') {
+        credentialIDString = passkey.credentialID;
+      } else if (Buffer.isBuffer(passkey.credentialID)) {
+        // Se for Buffer, converter para string base64url
+        credentialIDString = passkey.credentialID.toString('base64url');
+      } else {
+        console.error('[Passkey Authenticate Options] Tipo de credentialID inválido:', typeof passkey.credentialID);
+        return null;
+      }
+      
+      return {
+        id: credentialIDString, // String base64url
+        type: 'public-key',
+        transports: ['internal', 'hybrid']
+      };
+    }).filter(cred => cred !== null); // Remover credenciais inválidas
 
     const options = await generateAuthenticationOptions({
       rpID,
