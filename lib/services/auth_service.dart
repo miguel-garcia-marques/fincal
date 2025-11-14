@@ -220,10 +220,6 @@ class AuthService {
   // Usa verifyOTP com o hashed_token do magic link para criar sessão válida com refresh_token real
   Future<AuthResponse> setSessionWithToken(String hashedToken, String email) async {
     try {
-      print('[AuthService] setSessionWithToken chamado com hashed_token do magic link');
-      print('[AuthService] - Hashed token length: ${hashedToken.length}');
-      print('[AuthService] - Email: $email');
-      
       // Usar verifyOTP com o hashed_token do magic link
       // IMPORTANTE: Quando usamos tokenHash, NÃO devemos passar email!
       // Apenas tokenHash e type são necessários
@@ -234,13 +230,13 @@ class AuthService {
       );
       
       if (response.session != null) {
-        print('[AuthService] ✅ Sessão criada com verifyOTP usando hashed_token');
         return response;
       }
       
       throw Exception('verifyOTP não criou sessão');
     } catch (e) {
-      print('[AuthService] ❌ Erro em setSessionWithToken: $e');
+      // Log apenas do tipo de erro, sem informações sensíveis
+      print('[AuthService] Erro ao criar sessão: ${e.runtimeType}');
       rethrow;
     }
   }

@@ -774,21 +774,24 @@ class _LoginScreenState extends State<LoginScreen> {
         final token = result['token'] as String?;
         if (token != null && token.isNotEmpty && userEmail != null) {
           try {
-            print('[Passkey Login] Tentando criar sessão com token do magic link...');
-            print('[Passkey Login] Token presente: ${token.isNotEmpty}');
-            print('[Passkey Login] Email: $userEmail');
-            
             // Usar verifyOTP com o token do magic link
             // Isso cria uma sessão válida com refresh_token real do Supabase
             final session = await _authService.setSessionWithToken(token, userEmail);
             
-            print('[Passkey Login] Resposta do setSessionWithToken:');
-            print('[Passkey Login] - Session: ${session.session != null}');
-            print('[Passkey Login] - User: ${session.user != null}');
-            
-            if (session.session != null && mounted) {
+            if (session.session != null && session.user != null && mounted) {
               // Login bem-sucedido sem precisar de senha! 🎉
-              print('[Passkey Login] ✅ Sessão criada com sucesso!');
+              // IMPORTANTE: Após login com passkey, garantir que o email seja considerado verificado
+              // A passkey já valida a identidade do usuário, então não precisamos de verificação de email adicional
+              try {
+                // Fazer refresh da sessão para garantir que os dados estão atualizados
+                await _authService.supabase.auth.refreshSession();
+                
+                // Marcar que o usuário tem passkeys (para evitar tela de verificação de email)
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('user_has_passkeys_${session.user!.id}', true);
+              } catch (e) {
+                // Ignorar erros no refresh - não crítico
+              }
               
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
@@ -805,26 +808,18 @@ class _LoginScreenState extends State<LoginScreen> {
                 (route) => false,
               );
               return;
-            } else {
-              print('[Passkey Login] ❌ Sessão não foi criada. Session: ${session.session}, User: ${session.user}');
             }
-          } catch (e, stackTrace) {
-            print('[Passkey Login] ❌ Erro ao criar sessão com token do magic link: $e');
-            print('[Passkey Login] Stack trace: $stackTrace');
+          } catch (e) {
+            // Log apenas do tipo de erro, sem informações sensíveis
+            print('[Passkey Login] Erro ao criar sessão: ${e.runtimeType}');
             // Se falhar, tentar fallback ou mostrar campo de senha
           }
-        } else {
-          print('[Passkey Login] ⚠️ Token não disponível:');
-          print('[Passkey Login] - Token: ${token != null && token.isNotEmpty}');
-          print('[Passkey Login] - User Email: ${userEmail != null}');
-          print('[Passkey Login] - Result keys: ${result.keys.toList()}');
         }
         
         // Fallback: Se não tivermos token ou se falhou, tentar magic link direto
         final magicLink = result['magicLink'] as String?;
         if (magicLink != null && userEmail != null && !requiresPassword) {
           try {
-            print('[Passkey Login] Tentando usar token OTP como fallback...');
             final session = await _authService.supabase.auth.verifyOTP(
               type: OtpType.magiclink,
               email: userEmail,
@@ -832,6 +827,13 @@ class _LoginScreenState extends State<LoginScreen> {
             );
             
             if (session.session != null && mounted) {
+              // Fazer refresh da sessão após login bem-sucedido
+              try {
+                await _authService.supabase.auth.refreshSession();
+              } catch (e) {
+                // Ignorar erros no refresh
+              }
+              
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('Login com passkey bem-sucedido!'),
@@ -848,7 +850,8 @@ class _LoginScreenState extends State<LoginScreen> {
               return;
             }
           } catch (e) {
-            print('[Passkey Login] Erro ao usar token OTP: $e');
+            // Log apenas do tipo de erro
+            print('[Passkey Login] Erro ao usar fallback: ${e.runtimeType}');
           }
         }
         

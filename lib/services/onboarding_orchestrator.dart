@@ -53,9 +53,31 @@ class OnboardingOrchestrator {
     }
     
     // 2. Verificar se email foi confirmado
+    // NOTA: Para login com passkey, o email é considerado verificado automaticamente
+    // porque a passkey já valida a identidade do usuário
     final emailConfirmed = currentUser.emailConfirmedAt != null;
+    
+    // Se o email não foi confirmado, verificar se o usuário tem passkeys registradas
+    // Se tiver, considerar o email como verificado (passkey já valida identidade)
     if (!emailConfirmed) {
-      return OnboardingState.emailNotVerified;
+      try {
+        // Verificar se há passkeys registradas para este usuário
+        // Se houver, assumir que o email está verificado (passkey já valida identidade)
+        // Isso evita loops de verificação de email após login com passkey
+        final prefs = await SharedPreferences.getInstance();
+        final hasPasskeys = prefs.getBool('user_has_passkeys_${currentUser.id}') ?? false;
+        
+        if (hasPasskeys) {
+          // Usuário tem passkeys - email considerado verificado
+          // Continuar para próxima etapa do onboarding
+        } else {
+          // Usuário não tem passkeys - precisa verificar email
+          return OnboardingState.emailNotVerified;
+        }
+      } catch (e) {
+        // Em caso de erro, seguir com verificação normal de email
+        return OnboardingState.emailNotVerified;
+      }
     }
     
     // 3. Verificar se usuário existe no MongoDB
