@@ -5,6 +5,7 @@ import '../utils/date_utils.dart';
 import '../utils/zeller_formula.dart';
 import '../theme/app_theme.dart';
 import '../screens/add_transaction_screen.dart';
+import '../screens/transaction_details_screen.dart';
 import '../services/database.dart';
 
 class DayDetailsDialog extends StatefulWidget {
@@ -75,10 +76,10 @@ class _DayDetailsDialogState extends State<DayDetailsDialog> {
     return Dialog(
       child: Container(
         constraints: BoxConstraints(
-          maxWidth: 400,
+          maxWidth: 600,
           maxHeight: MediaQuery.of(context).size.height * 0.9,
         ),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -285,94 +286,175 @@ class _DayDetailsDialogState extends State<DayDetailsDialog> {
                         fontWeight: FontWeight.w600,
                       ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 ...dayTransactions.map((transaction) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
+                  final isGanho = transaction.type == TransactionType.ganho;
+                  final color = isGanho ? AppTheme.incomeGreen : AppTheme.expenseRed;
+                  
+                  return InkWell(
+                    onTap: widget.walletId != null && widget.userId != null
+                        ? () {
+                            Navigator.of(context).pop();
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => TransactionDetailsScreen(
+                                  transaction: transaction,
+                                  walletId: widget.walletId!,
+                                  userId: widget.userId!,
+                                  walletPermission: 'write',
+                                ),
+                              ),
+                            ).then((result) {
+                              if (result == true && widget.onTransactionDeleted != null) {
+                                widget.onTransactionDeleted!();
+                              }
+                            });
+                          }
+                        : null,
+                    borderRadius: BorderRadius.circular(8),
                     child: Container(
-                      padding: const EdgeInsets.all(8),
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       decoration: BoxDecoration(
-                        color: AppTheme.lighterGray.withOpacity(0.1),
+                        color: AppTheme.offWhite,
                         borderRadius: BorderRadius.circular(8),
+                        border: Border(
+                          left: BorderSide(
+                            color: color,
+                            width: 3,
+                          ),
+                        ),
                       ),
                       child: Row(
                         children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: transaction.type == TransactionType.ganho
-                                  ? AppTheme.incomeGreen.withOpacity(0.2)
-                                  : AppTheme.expenseRed.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              transaction.type == TransactionType.ganho
-                                  ? 'Ganho'
-                                  : 'Despesa',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    color: transaction.type ==
-                                            TransactionType.ganho
-                                        ? AppTheme.incomeGreen
-                                        : AppTheme.expenseRed,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
+                          // Informações principais
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            child: Row(
                               children: [
-                                Text(
-                                  transaction.category.displayName,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.w500,
-                                      ),
+                                // Ícone pequeno
+                                Icon(
+                                  isGanho ? Icons.arrow_downward : Icons.arrow_upward,
+                                  color: color,
+                                  size: 18,
                                 ),
-                                if (transaction.description != null &&
-                                    transaction.description!.isNotEmpty)
-                                  Text(
-                                    transaction.description!,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                          color: AppTheme.darkGray,
-                                        ),
+                                const SizedBox(width: 12),
+                                // Descrição e categoria
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        transaction.description != null &&
+                                                transaction.description!.isNotEmpty
+                                            ? transaction.description!
+                                            : transaction.category.displayName,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w500,
+                                              color: AppTheme.black,
+                                            ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Row(
+                                        children: [
+                                          Text(
+                                            transaction.category.displayName,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                  color: AppTheme.darkGray,
+                                                  fontSize: 12,
+                                                ),
+                                          ),
+                                          if (transaction.frequency != TransactionFrequency.unique) ...[
+                                            Text(
+                                              ' • ',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                    color: AppTheme.darkGray,
+                                                  ),
+                                            ),
+                                            Text(
+                                              transaction.frequency == TransactionFrequency.weekly
+                                                  ? 'Semanal'
+                                                  : 'Mensal',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                    color: AppTheme.darkGray,
+                                                    fontSize: 12,
+                                                  ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ],
                                   ),
+                                ),
                               ],
                             ),
                           ),
+                          // Valor
                           Text(
                             formatCurrency(transaction.amount),
                             style: Theme.of(context)
                                 .textTheme
-                                .bodyMedium
+                                .bodyLarge
                                 ?.copyWith(
                                   fontWeight: FontWeight.w600,
-                                  color:
-                                      transaction.type == TransactionType.ganho
-                                          ? AppTheme.incomeGreen
-                                          : AppTheme.expenseRed,
+                                  color: color,
                                 ),
                           ),
+                          // Ações
                           if (widget.walletId != null) ...[
                             const SizedBox(width: 8),
                             IconButton(
+                              icon: const Icon(Icons.edit_outlined),
+                              iconSize: 18,
+                              color: AppTheme.darkGray,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 28,
+                                minHeight: 28,
+                              ),
+                              onPressed: () async {
+                                Navigator.of(context).pop();
+                                final result = await Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => AddTransactionScreen(
+                                      transactionToEdit: transaction.id.contains('_') &&
+                                              (transaction.frequency == TransactionFrequency.weekly ||
+                                                  transaction.frequency == TransactionFrequency.monthly)
+                                          ? null
+                                          : transaction,
+                                      walletId: widget.walletId!,
+                                      userId: widget.userId!,
+                                    ),
+                                    fullscreenDialog: true,
+                                  ),
+                                );
+                                if (result == true && widget.onTransactionAdded != null) {
+                                  widget.onTransactionAdded!();
+                                }
+                              },
+                            ),
+                            IconButton(
                               icon: const Icon(Icons.delete_outline),
-                              iconSize: 20,
+                              iconSize: 18,
                               color: AppTheme.expenseRed,
                               padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
+                              constraints: const BoxConstraints(
+                                minWidth: 28,
+                                minHeight: 28,
+                              ),
                               onPressed: () async {
                                 String transactionIdToDelete = transaction.id;
                                 final originalId = transaction.id;
@@ -412,10 +494,8 @@ class _DayDetailsDialogState extends State<DayDetailsDialog> {
                                 );
 
                                 if (confirmed == true) {
-                                  // Remover imediatamente da UI (otimista)
                                   setState(() {
                                     if (isPeriodic) {
-                                      // Se for periódica, remover todas as ocorrências
                                       _localTransactions.removeWhere((t) {
                                         String tId = t.id;
                                         if (t.id.contains('_')) {
@@ -427,7 +507,6 @@ class _DayDetailsDialogState extends State<DayDetailsDialog> {
                                         return tId == transactionIdToDelete;
                                       });
                                     } else {
-                                      // Se for única, remover apenas esta
                                       _localTransactions.removeWhere((t) => t.id == originalId);
                                     }
                                   });
@@ -448,7 +527,6 @@ class _DayDetailsDialogState extends State<DayDetailsDialog> {
                                       }
                                     }
                                   } catch (e) {
-                                    // Reverter a mudança em caso de erro
                                     if (context.mounted) {
                                       setState(() {
                                         _localTransactions = List.from(widget.transactions);
