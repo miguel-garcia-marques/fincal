@@ -17,6 +17,7 @@ class Transaction {
   final TransactionFrequency frequency;
   final int? dayOfWeek; // 0=Dom, 1=Seg, ..., 6=Sáb (apenas para semanais)
   final int? dayOfMonth; // 1-31 (apenas para mensais)
+  final List<DateTime>? excludedDates; // Datas excluídas para transações periódicas
 
   // Campo para pessoa (string, opcional, padrão "geral")
   final String? person;
@@ -38,6 +39,7 @@ class Transaction {
     this.frequency = TransactionFrequency.unique,
     this.dayOfWeek,
     this.dayOfMonth,
+    this.excludedDates,
     this.person,
     this.walletId,
     this.createdBy,
@@ -64,6 +66,9 @@ class Transaction {
       'frequency': frequency.name,
       'dayOfWeek': dayOfWeek,
       'dayOfMonth': dayOfMonth,
+      'excludedDates': excludedDates?.map((d) => '${d.year.toString().padLeft(4, '0')}-'
+          '${d.month.toString().padLeft(2, '0')}-'
+          '${d.day.toString().padLeft(2, '0')}').toList(),
       'person': person,
       'walletId': walletId,
       'createdBy': createdBy,
@@ -137,6 +142,19 @@ class Transaction {
       ),
       dayOfWeek: json['dayOfWeek'] as int?,
       dayOfMonth: json['dayOfMonth'] as int?,
+      excludedDates: json['excludedDates'] != null
+          ? (json['excludedDates'] as List).map((d) {
+              if (d is String) {
+                final parts = d.split('-');
+                return DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+              } else if (d is Map && d['\$date'] != null) {
+                final dateStr = d['\$date'] as String;
+                final parts = dateStr.split('T')[0].split('-');
+                return DateTime(int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+              }
+              return parseDate(d);
+            }).toList()
+          : null,
       person: json['person'] as String?,
       walletId: json['walletId']?.toString(),
       createdBy: json['createdBy'] as String?,

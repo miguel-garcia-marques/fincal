@@ -174,6 +174,27 @@ class ApiService {
     }
   }
 
+  Future<void> excludePeriodicTransactionDate(String transactionId, DateTime date, {required String walletId}) async {
+    try {
+      final dateStr = _formatDateForApi(date);
+      final response = await http.post(
+        Uri.parse('$baseUrl/transactions/$transactionId/exclude-date?walletId=$walletId'),
+        headers: _getHeaders(),
+        body: json.encode({'date': dateStr}),
+      );
+
+      // Verificar se é erro 401 e redirecionar para login
+      await ApiErrorHandler.handleResponse(response);
+
+      if (response.statusCode != 200) {
+        final errorBody = json.decode(response.body);
+        throw Exception(errorBody['message'] ?? 'Failed to exclude date');
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<List<Transaction>> getTransactionsInRange(
     DateTime startDate,
     DateTime endDate, {

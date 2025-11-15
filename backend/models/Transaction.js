@@ -53,6 +53,10 @@ const TransactionSchema = new mongoose.Schema({
   dayOfWeek: { type: Number }, // 0=Sáb, 1=Dom, 2=Seg, etc.
   dayOfMonth: { type: Number }, // 1-31
   person: { type: String }, // Campo para pessoa (opcional, padrão "geral" quando não especificado)
+  excludedDates: { 
+    type: [Date], 
+    default: [] 
+  }, // Datas excluídas para transações periódicas (quando uma ocorrência específica foi editada)
 }, {
   timestamps: true
 });

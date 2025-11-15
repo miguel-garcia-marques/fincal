@@ -143,6 +143,20 @@ router.get('/range', validateTransactionRange, requireWalletId, async (req, res)
         const endDateOnly = new Date(end.getFullYear(), end.getMonth(), end.getDate());
         endDateOnly.setHours(0, 0, 0, 0);
         
+        // Normalizar excludedDates para comparação (apenas data, sem hora)
+        const excludedDatesNormalized = (transaction.excludedDates || []).map(d => {
+          const date = new Date(d);
+          return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        });
+        
+        // Função auxiliar para verificar se uma data está excluída
+        const isDateExcluded = (date) => {
+          const dateNormalized = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+          return excludedDatesNormalized.some(excluded => 
+            excluded.getTime() === dateNormalized.getTime()
+          );
+        };
+        
         while (currentDate <= end) {
           const zellerDay = getDayOfWeek(
             currentDate.getDate(),
@@ -153,7 +167,7 @@ router.get('/range', validateTransactionRange, requireWalletId, async (req, res)
           // Formulário usa: 0=Sáb, 1=Dom, 2=Seg... (mesmo formato)
           const formDayOfWeek = zellerDay;
           
-          if (formDayOfWeek === transaction.dayOfWeek) {
+          if (formDayOfWeek === transaction.dayOfWeek && !isDateExcluded(currentDate)) {
             const generatedTransaction = transaction.toObject();
             generatedTransaction._id = `${transaction._id}_${currentDate.getTime()}`;
             generatedTransaction.id = `${transaction.id}_${currentDate.getTime()}`;
@@ -178,6 +192,20 @@ router.get('/range', validateTransactionRange, requireWalletId, async (req, res)
         
         const targetDay = transaction.dayOfMonth;
         
+        // Normalizar excludedDates para comparação (apenas data, sem hora)
+        const excludedDatesNormalized = (transaction.excludedDates || []).map(d => {
+          const date = new Date(d);
+          return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        });
+        
+        // Função auxiliar para verificar se uma data está excluída
+        const isDateExcluded = (date) => {
+          const dateNormalized = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+          return excludedDatesNormalized.some(excluded => 
+            excluded.getTime() === dateNormalized.getTime()
+          );
+        };
+        
         // Iterar pelos meses no período, não pelos dias
         let currentMonth = new Date(start.getFullYear(), start.getMonth(), 1);
         const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
@@ -193,8 +221,8 @@ router.get('/range', validateTransactionRange, requireWalletId, async (req, res)
           const transactionDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), actualDay);
           transactionDate.setHours(0, 0, 0, 0);
           
-          // Verificar se a data da transação está dentro do período solicitado
-          if (transactionDate >= start && transactionDate <= end) {
+          // Verificar se a data da transação está dentro do período solicitado e não está excluída
+          if (transactionDate >= start && transactionDate <= end && !isDateExcluded(transactionDate)) {
             const generatedTransaction = transaction.toObject();
             generatedTransaction._id = `${transaction._id}_${transactionDate.getTime()}`;
             generatedTransaction.id = `${transaction.id}_${transactionDate.getTime()}`;
@@ -330,6 +358,75 @@ router.put('/:id', validateTransactionId, validateTransaction, requireWalletId, 
     );
     
     res.json(transaction);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// POST criar exceção de transação periódica (editar ocorrência específica)
+router.post('/:id/exclude-date', requireWalletId, checkWritePermission, async (req, res) => {
+  try {
+    const Transaction = getTransactionModel(req.walletId);
+    const { date } = req.body;
+    
+    if (!date) {
+      return res.status(400).json({ message: 'Data é obrigatória' });
+    }
+
+    const existingTransaction = await Transaction.findOne({ 
+      id: req.params.id
+    });
+    
+    if (!existingTransaction) {
+      return res.status(404).json({ message: 'Transação não encontrada' });
+    }
+
+    // Verificar se é uma transação periódica
+    if (existingTransaction.frequency === 'unique') {
+      return res.status(400).json({ message: 'Apenas transações periódicas podem ter datas excluídas' });
+    }
+
+    // Verificar se é o criador ou tem permissão de owner
+    if (existingTransaction.createdBy !== req.userId && req.walletPermission !== 'owner') {
+      return res.status(403).json({ message: 'Você só pode modificar transações que você criou' });
+    }
+
+    // Parse da data
+    const dateParts = date.split('-');
+    const excludeDate = new Date(
+      parseInt(dateParts[0]),
+      parseInt(dateParts[1]) - 1,
+      parseInt(dateParts[2])
+    );
+    excludeDate.setHours(0, 0, 0, 0);
+
+    // Normalizar excludedDates existentes
+    const excludedDates = (existingTransaction.excludedDates || []).map(d => {
+      const date = new Date(d);
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    });
+
+    // Verificar se a data já está excluída
+    const excludeDateNormalized = new Date(excludeDate.getFullYear(), excludeDate.getMonth(), excludeDate.getDate());
+    const alreadyExcluded = excludedDates.some(excluded => 
+      excluded.getTime() === excludeDateNormalized.getTime()
+    );
+
+    if (alreadyExcluded) {
+      return res.status(400).json({ message: 'Esta data já está excluída' });
+    }
+
+    // Adicionar a data à lista de excluídas
+    excludedDates.push(excludeDateNormalized);
+
+    // Atualizar a transação
+    const updatedTransaction = await Transaction.findOneAndUpdate(
+      { id: req.params.id },
+      { excludedDates: excludedDates },
+      { new: true, runValidators: true }
+    );
+    
+    res.json(updatedTransaction);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

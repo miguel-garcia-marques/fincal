@@ -111,12 +111,27 @@ class DatabaseService {
         } else if (transaction.frequency == TransactionFrequency.weekly) {
           if (transaction.dayOfWeek == null) continue;
           
+          // Normalizar excludedDates para comparação (apenas data, sem hora)
+          final excludedDatesNormalized = (transaction.excludedDates ?? []).map((d) => 
+            DateTime.utc(d.year, d.month, d.day)
+          ).toList();
+          
+          // Função auxiliar para verificar se uma data está excluída
+          bool isDateExcluded(DateTime date) {
+            final dateNormalized = DateTime.utc(date.year, date.month, date.day);
+            return excludedDatesNormalized.any((excluded) => 
+              excluded.year == dateNormalized.year &&
+              excluded.month == dateNormalized.month &&
+              excluded.day == dateNormalized.day
+            );
+          }
+          
           DateTime currentDate = start;
           while (currentDate.isBefore(end) || currentDate.isAtSameMomentAs(end)) {
             final zellerDayOfWeek = getDayOfWeek(currentDate);
             final formDayOfWeek = (zellerDayOfWeek == 0) ? 0 : zellerDayOfWeek;
             
-            if (formDayOfWeek == transaction.dayOfWeek) {
+            if (formDayOfWeek == transaction.dayOfWeek && !isDateExcluded(currentDate)) {
               result.add(Transaction(
                 id: '${transaction.id}_${currentDate.millisecondsSinceEpoch}',
                 type: transaction.type,
@@ -130,6 +145,7 @@ class DatabaseService {
                 frequency: TransactionFrequency.weekly, // Manter informação de periodicidade
                 dayOfWeek: transaction.dayOfWeek, // Manter informação do dia
                 dayOfMonth: null,
+                excludedDates: transaction.excludedDates,
                 person: transaction.person,
               ));
             }
@@ -139,6 +155,21 @@ class DatabaseService {
           if (transaction.dayOfMonth == null) continue;
           
           final targetDay = transaction.dayOfMonth!;
+          
+          // Normalizar excludedDates para comparação (apenas data, sem hora)
+          final excludedDatesNormalized = (transaction.excludedDates ?? []).map((d) => 
+            DateTime.utc(d.year, d.month, d.day)
+          ).toList();
+          
+          // Função auxiliar para verificar se uma data está excluída
+          bool isDateExcluded(DateTime date) {
+            final dateNormalized = DateTime.utc(date.year, date.month, date.day);
+            return excludedDatesNormalized.any((excluded) => 
+              excluded.year == dateNormalized.year &&
+              excluded.month == dateNormalized.month &&
+              excluded.day == dateNormalized.day
+            );
+          }
           
           // Iterar pelos meses no período, não pelos dias
           DateTime currentMonth = DateTime(start.year, start.month, 1);
@@ -155,9 +186,10 @@ class DatabaseService {
             // Criar a data da transação para este mês
             final transactionDate = DateTime(currentMonth.year, currentMonth.month, actualDay);
             
-            // Verificar se a data da transação está dentro do período solicitado
+            // Verificar se a data da transação está dentro do período solicitado e não está excluída
             if ((transactionDate.isAfter(start) || transactionDate.isAtSameMomentAs(start)) &&
-                (transactionDate.isBefore(end) || transactionDate.isAtSameMomentAs(end))) {
+                (transactionDate.isBefore(end) || transactionDate.isAtSameMomentAs(end)) &&
+                !isDateExcluded(transactionDate)) {
               result.add(Transaction(
                 id: '${transaction.id}_${transactionDate.millisecondsSinceEpoch}',
                 type: transaction.type,
@@ -171,6 +203,7 @@ class DatabaseService {
                 frequency: TransactionFrequency.monthly, // Manter informação de periodicidade
                 dayOfWeek: null,
                 dayOfMonth: transaction.dayOfMonth, // Manter informação do dia original
+                excludedDates: transaction.excludedDates,
                 person: transaction.person,
               ));
             }

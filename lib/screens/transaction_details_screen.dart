@@ -4,6 +4,7 @@ import '../utils/date_utils.dart';
 import '../utils/zeller_formula.dart';
 import '../theme/app_theme.dart';
 import '../services/database.dart';
+import '../services/api_service.dart';
 import 'add_transaction_screen.dart';
 
 class TransactionDetailsScreen extends StatelessWidget {
@@ -116,34 +117,175 @@ class TransactionDetailsScreen extends StatelessWidget {
                 return;
               }
 
-              Transaction? transactionToEdit = transaction;
-
-              if (transaction.id.contains('_') &&
+              final isPeriodicOccurrence = transaction.id.contains('_') &&
                   (transaction.frequency == TransactionFrequency.weekly ||
-                      transaction.frequency ==
-                          TransactionFrequency.monthly)) {
-                try {
-                  final dbService = DatabaseService();
-                  final parts = transaction.id.split('_');
-                  if (parts.length >= 2) {
-                    final originalId =
-                        parts.sublist(0, parts.length - 1).join('_');
-                    final allTransactions =
-                        await dbService.getAllTransactions(walletId: walletId);
-                    transactionToEdit = allTransactions.firstWhere(
-                      (t) => t.id == originalId,
-                      orElse: () => transaction,
-                    );
+                      transaction.frequency == TransactionFrequency.monthly);
+
+              if (isPeriodicOccurrence) {
+                // Perguntar se quer editar apenas esta ocorrência ou toda a transação periódica
+                final editChoice = await showDialog<String>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Editar Transação Periódica'),
+                    content: const Text(
+                      'Esta é uma ocorrência de uma transação periódica. '
+                      'Como deseja proceder?\n\n'
+                      '• Editar apenas esta ocorrência: Criará uma transação única para esta data específica\n'
+                      '• Editar toda a transação periódica: Alterará todas as ocorrências futuras',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop('this_only'),
+                        child: const Text('Apenas esta'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop('all'),
+                        child: const Text('Todas'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Cancelar'),
+                      ),
+                    ],
+                  ),
+                );
+
+                if (editChoice == null) return;
+
+                if (editChoice == 'this_only') {
+                  // Editar apenas esta ocorrência: criar transação única e excluir data da periódica
+                  try {
+                    final dbService = DatabaseService();
+                    final apiService = ApiService();
+                    final parts = transaction.id.split('_');
+                    
+                    if (parts.length >= 2) {
+                      final originalId = parts.sublist(0, parts.length - 1).join('_');
+
+                      // Criar transação única com os dados atuais (será editada pelo usuário)
+                      final uniqueTransaction = Transaction(
+                        id: 'exception_${DateTime.now().millisecondsSinceEpoch}_${transaction.date.millisecondsSinceEpoch}',
+                        type: transaction.type,
+                        date: transaction.date,
+                        description: transaction.description,
+                        amount: transaction.amount,
+                        category: transaction.category,
+                        isSalary: transaction.isSalary,
+                        salaryAllocation: transaction.salaryAllocation,
+                        expenseBudgetCategory: transaction.expenseBudgetCategory,
+                        frequency: TransactionFrequency.unique,
+                        person: transaction.person,
+                        walletId: transaction.walletId,
+                        createdBy: transaction.createdBy,
+                      );
+
+                      // Salvar a transação única primeiro
+                      await dbService.saveTransaction(uniqueTransaction, walletId: walletId);
+
+                      // Abrir tela de edição com a transação única já salva
+                      final result = await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => AddTransactionScreen(
+                            transactionToEdit: uniqueTransaction,
+                            walletId: walletId,
+                            userId: userId,
+                          ),
+                          fullscreenDialog: true,
+                        ),
+                      );
+
+                      if (result == true && context.mounted) {
+                        // A transação única foi atualizada pela AddTransactionScreen
+                        // Agora excluir a data da transação periódica original
+                        try {
+                          await apiService.excludePeriodicTransactionDate(
+                            originalId,
+                            transaction.date,
+                            walletId: walletId,
+                          );
+
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Ocorrência editada com sucesso. A transação periódica continuará normalmente para outras datas.'),
+                                duration: Duration(seconds: 3),
+                              ),
+                            );
+                            
+                            Navigator.of(context).pop(true);
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Transação única criada, mas houve erro ao excluir data da periódica: $e'),
+                                duration: const Duration(seconds: 5),
+                              ),
+                            );
+                            Navigator.of(context).pop(true);
+                          }
+                        }
+                      } else {
+                        // Usuário cancelou a edição, remover a transação única criada
+                        try {
+                          await dbService.deleteTransaction(uniqueTransaction.id, walletId: walletId);
+                        } catch (e) {
+                          // Ignorar erro ao deletar transação cancelada
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Erro ao editar ocorrência: $e')),
+                      );
+                    }
                   }
-                } catch (e) {
-                  transactionToEdit = transaction;
+                  return;
+                } else {
+                  // Editar toda a transação periódica
+                  try {
+                    final dbService = DatabaseService();
+                    final parts = transaction.id.split('_');
+                    if (parts.length >= 2) {
+                      final originalId = parts.sublist(0, parts.length - 1).join('_');
+                      final allTransactions = await dbService.getAllTransactions(walletId: walletId);
+                      final transactionToEdit = allTransactions.firstWhere(
+                        (t) => t.id == originalId,
+                        orElse: () => transaction,
+                      );
+
+                      final result = await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => AddTransactionScreen(
+                            transactionToEdit: transactionToEdit,
+                            walletId: walletId,
+                            userId: userId,
+                          ),
+                          fullscreenDialog: true,
+                        ),
+                      );
+
+                      if (result == true && context.mounted) {
+                        Navigator.of(context).pop(true);
+                      }
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Erro ao editar transação: $e')),
+                      );
+                    }
+                  }
+                  return;
                 }
               }
 
+              // Transação única ou periódica original: editar normalmente
               final result = await Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (context) => AddTransactionScreen(
-                    transactionToEdit: transactionToEdit,
+                    transactionToEdit: transaction,
                     walletId: walletId,
                     userId: userId,
                   ),
