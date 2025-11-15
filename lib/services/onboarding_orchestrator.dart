@@ -253,9 +253,16 @@ class OnboardingOrchestrator {
         return OnboardingState.notAuthenticated;
       }
       
-      // Se autenticado mas erro, assumir que precisa verificar email como fallback seguro
-      // Mas primeiro verificar se usuário existe no MongoDB
+      // Se autenticado mas erro, verificar se email está realmente verificado
+      // Se não conseguir verificar, ir para login para evitar loops
       try {
+        final emailConfirmed = currentUser.emailConfirmedAt != null;
+        if (emailConfirmed) {
+          // Email confirmado - tentar continuar para completed
+          return OnboardingState.completed;
+        }
+        
+        // Verificar se usuário existe no MongoDB como alternativa
         final mongoUser = await _userService.getCurrentUser(forceRefresh: false).timeout(
           const Duration(seconds: 1),
           onTimeout: () => null,
@@ -265,12 +272,17 @@ class OnboardingOrchestrator {
           // Usuário existe - tentar continuar para completed
           return OnboardingState.completed;
         }
+        
+        // Se email não confirmado e usuário não existe, só então mostrar tela de verificação
+        // currentUser já foi verificado acima, então está garantido que não é null
+        return OnboardingState.emailNotVerified;
       } catch (e2) {
-        // Ignorar erro na verificação de fallback
+        // Se houver erro ao verificar, ir para login para evitar loops
+        print('[OnboardingOrchestrator] Erro ao verificar fallback: $e2');
       }
       
-      // Fallback: retornar emailNotVerified se autenticado mas com erro
-      return OnboardingState.emailNotVerified;
+      // Em caso de erro, sempre ir para login
+      return OnboardingState.notAuthenticated;
     }
   }
   

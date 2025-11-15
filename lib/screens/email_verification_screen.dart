@@ -86,8 +86,20 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
           return;
         }
       } catch (e) {
-        // Se houver erro ao verificar, continuar para login
+        // Se houver erro ao verificar, redirecionar para login
         print('[EmailVerification] Erro ao verificar estado: $e');
+        if (!_isDisposed && mounted) {
+          setState(() {
+            _isChecking = false;
+          });
+          
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => LoginScreen(inviteToken: widget.inviteToken),
+            ),
+          );
+        }
+        return;
       }
       
       // Se não houver sessão ativa ou email não confirmado, redirecionar para login

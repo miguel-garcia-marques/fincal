@@ -257,4 +257,46 @@ class AuthService {
       rethrow;
     }
   }
+
+  // Verificar se a sessão ainda é válida
+  // Tenta fazer refresh da sessão e retorna true se válida, false se expirada
+  Future<bool> isSessionValid() async {
+    try {
+      // Se não há sessão, não é válida
+      if (_supabase.auth.currentSession == null) {
+        return false;
+      }
+
+      // Tentar fazer refresh da sessão para verificar se ainda é válida
+      // Se o refresh_token expirou, isso vai lançar uma exceção
+      AuthResponse? response;
+      try {
+        response = await _supabase.auth.refreshSession().timeout(
+          const Duration(seconds: 5),
+        );
+      } catch (e) {
+        // Timeout ou erro significa que não conseguiu renovar - sessão provavelmente expirada
+        print('[AuthService] Erro ao fazer refresh da sessão: $e');
+        return false;
+      }
+
+      // Se não conseguiu renovar ou não há sessão após refresh, não é válida
+      if (response.session == null) {
+        return false;
+      }
+
+      // Verificar se há usuário associado à sessão
+      final user = response.session?.user;
+      if (user == null) {
+        return false;
+      }
+
+      // Sessão válida
+      return true;
+    } catch (e) {
+      // Qualquer erro significa que a sessão não é válida
+      print('[AuthService] Erro ao verificar sessão: $e');
+      return false;
+    }
+  }
 }

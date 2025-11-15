@@ -5,8 +5,9 @@ import '../utils/date_utils.dart';
 import '../utils/zeller_formula.dart';
 import '../theme/app_theme.dart';
 import '../screens/add_transaction_screen.dart';
+import '../services/database.dart';
 
-class DayDetailsDialog extends StatelessWidget {
+class DayDetailsDialog extends StatefulWidget {
   final DateTime date;
   final List<Transaction> transactions;
   final double availableBalance;
@@ -17,6 +18,7 @@ class DayDetailsDialog extends StatelessWidget {
   final String? walletId;
   final String? userId;
   final VoidCallback? onTransactionAdded;
+  final VoidCallback? onTransactionDeleted;
 
   const DayDetailsDialog({
     super.key,
@@ -30,13 +32,27 @@ class DayDetailsDialog extends StatelessWidget {
     this.walletId,
     this.userId,
     this.onTransactionAdded,
+    this.onTransactionDeleted,
   });
 
   @override
+  State<DayDetailsDialog> createState() => _DayDetailsDialogState();
+}
+
+class _DayDetailsDialogState extends State<DayDetailsDialog> {
+  late List<Transaction> _localTransactions;
+
+  @override
+  void initState() {
+    super.initState();
+    _localTransactions = List.from(widget.transactions);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final dayTransactions = transactions.where((t) {
+    final dayTransactions = _localTransactions.where((t) {
       final transactionDate = DateTime(t.date.year, t.date.month, t.date.day);
-      return isSameDay(transactionDate, date);
+      return isSameDay(transactionDate, widget.date);
     }).toList();
 
     final expenses = dayTransactions
@@ -54,7 +70,7 @@ class DayDetailsDialog extends StatelessWidget {
       (sum, t) => sum + t.amount,
     );
 
-    final dayOfWeek = getDayOfWeek(date);
+    final dayOfWeek = getDayOfWeek(widget.date);
 
     return Dialog(
       child: Container(
@@ -76,7 +92,7 @@ class DayDetailsDialog extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          formatDate(date),
+                          formatDate(widget.date),
                           style: Theme.of(context).textTheme.displaySmall,
                         ),
                         const SizedBox(height: 4),
@@ -118,11 +134,11 @@ class DayDetailsDialog extends StatelessWidget {
                           style: Theme.of(context).textTheme.bodyLarge,
                         ),
                         Text(
-                          formatCurrency(availableBalance),
+                          formatCurrency(widget.availableBalance),
                           style:
                               Theme.of(context).textTheme.bodyLarge?.copyWith(
                                     fontWeight: FontWeight.w600,
-                                    color: availableBalance >= 0
+                                    color: widget.availableBalance >= 0
                                         ? AppTheme.incomeGreen
                                         : AppTheme.expenseRed,
                                   ),
@@ -155,10 +171,10 @@ class DayDetailsDialog extends StatelessWidget {
               const SizedBox(height: 8),
 
               // Valores separados por categoria (se existirem) - Seção expansível
-              if (budgetBalances != null &&
-                  (budgetBalances!.gastos != 0 ||
-                      budgetBalances!.lazer != 0 ||
-                      budgetBalances!.poupanca != 0))
+              if (widget.budgetBalances != null &&
+                  (widget.budgetBalances!.gastos != 0 ||
+                      widget.budgetBalances!.lazer != 0 ||
+                      widget.budgetBalances!.poupanca != 0))
                 ExpansionTile(
                   initiallyExpanded: false,
                   tilePadding: EdgeInsets.zero,
@@ -172,14 +188,14 @@ class DayDetailsDialog extends StatelessWidget {
                   children: [
                     _ClickableInfoCard(
                       title: 'Gastos',
-                      value: formatCurrency(budgetBalances!.gastos),
-                      color: budgetBalances!.gastos >= 0
+                      value: formatCurrency(widget.budgetBalances!.gastos),
+                      color: widget.budgetBalances!.gastos >= 0
                           ? AppTheme.incomeGreen
                           : AppTheme.expenseRed,
                       categoryColor: AppTheme.expensesRed,
-                      onTap: allPeriodTransactions != null &&
-                              periodStartDate != null &&
-                              periodEndDate != null
+                      onTap: widget.allPeriodTransactions != null &&
+                              widget.periodStartDate != null &&
+                              widget.periodEndDate != null
                           ? () {
                               Navigator.of(context).pop();
                               showDialog(
@@ -187,9 +203,9 @@ class DayDetailsDialog extends StatelessWidget {
                                 builder: (context) =>
                                     CategoryTransactionsDialog(
                                   category: ExpenseBudgetCategory.gastos,
-                                  transactions: allPeriodTransactions!,
-                                  startDate: periodStartDate!,
-                                  endDate: periodEndDate!,
+                                  transactions: widget.allPeriodTransactions!,
+                                  startDate: widget.periodStartDate!,
+                                  endDate: widget.periodEndDate!,
                                 ),
                               );
                             }
@@ -198,14 +214,14 @@ class DayDetailsDialog extends StatelessWidget {
                     const SizedBox(height: 4),
                     _ClickableInfoCard(
                       title: 'Lazer',
-                      value: formatCurrency(budgetBalances!.lazer),
-                      color: budgetBalances!.lazer >= 0
+                      value: formatCurrency(widget.budgetBalances!.lazer),
+                      color: widget.budgetBalances!.lazer >= 0
                           ? AppTheme.incomeGreen
                           : AppTheme.expenseRed,
                       categoryColor: AppTheme.leisureBlue,
-                      onTap: allPeriodTransactions != null &&
-                              periodStartDate != null &&
-                              periodEndDate != null
+                      onTap: widget.allPeriodTransactions != null &&
+                              widget.periodStartDate != null &&
+                              widget.periodEndDate != null
                           ? () {
                               Navigator.of(context).pop();
                               showDialog(
@@ -213,9 +229,9 @@ class DayDetailsDialog extends StatelessWidget {
                                 builder: (context) =>
                                     CategoryTransactionsDialog(
                                   category: ExpenseBudgetCategory.lazer,
-                                  transactions: allPeriodTransactions!,
-                                  startDate: periodStartDate!,
-                                  endDate: periodEndDate!,
+                                  transactions: widget.allPeriodTransactions!,
+                                  startDate: widget.periodStartDate!,
+                                  endDate: widget.periodEndDate!,
                                 ),
                               );
                             }
@@ -224,14 +240,14 @@ class DayDetailsDialog extends StatelessWidget {
                     const SizedBox(height: 4),
                     _ClickableInfoCard(
                       title: 'Poupança',
-                      value: formatCurrency(budgetBalances!.poupanca),
-                      color: budgetBalances!.poupanca >= 0
+                      value: formatCurrency(widget.budgetBalances!.poupanca),
+                      color: widget.budgetBalances!.poupanca >= 0
                           ? AppTheme.incomeGreen
                           : AppTheme.expenseRed,
                       categoryColor: AppTheme.savingsYellow,
-                      onTap: allPeriodTransactions != null &&
-                              periodStartDate != null &&
-                              periodEndDate != null
+                      onTap: widget.allPeriodTransactions != null &&
+                              widget.periodStartDate != null &&
+                              widget.periodEndDate != null
                           ? () {
                               Navigator.of(context).pop();
                               showDialog(
@@ -239,9 +255,9 @@ class DayDetailsDialog extends StatelessWidget {
                                 builder: (context) =>
                                     CategoryTransactionsDialog(
                                   category: ExpenseBudgetCategory.poupanca,
-                                  transactions: allPeriodTransactions!,
-                                  startDate: periodStartDate!,
-                                  endDate: periodEndDate!,
+                                  transactions: widget.allPeriodTransactions!,
+                                  startDate: widget.periodStartDate!,
+                                  endDate: widget.periodEndDate!,
                                 ),
                               );
                             }
@@ -349,6 +365,105 @@ class DayDetailsDialog extends StatelessWidget {
                                           : AppTheme.expenseRed,
                                 ),
                           ),
+                          if (widget.walletId != null) ...[
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline),
+                              iconSize: 20,
+                              color: AppTheme.expenseRed,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () async {
+                                String transactionIdToDelete = transaction.id;
+                                final originalId = transaction.id;
+                                if (transaction.id.contains('_')) {
+                                  final parts = transaction.id.split('_');
+                                  if (parts.length >= 2) {
+                                    transactionIdToDelete =
+                                        parts.sublist(0, parts.length - 1).join('_');
+                                  }
+                                }
+
+                                final isPeriodic =
+                                    transaction.frequency != TransactionFrequency.unique;
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Confirmar exclusão'),
+                                    content: Text(
+                                      isPeriodic
+                                          ? 'Esta é uma transação periódica. Ao excluir, todas as ocorrências serão removidas. Tem certeza?'
+                                          : 'Tem certeza que deseja excluir esta transação?',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.of(context).pop(false),
+                                        child: const Text('Cancelar'),
+                                      ),
+                                      ElevatedButton(
+                                        onPressed: () => Navigator.of(context).pop(true),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: AppTheme.expenseRed,
+                                        ),
+                                        child: const Text('Excluir'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+
+                                if (confirmed == true) {
+                                  // Remover imediatamente da UI (otimista)
+                                  setState(() {
+                                    if (isPeriodic) {
+                                      // Se for periódica, remover todas as ocorrências
+                                      _localTransactions.removeWhere((t) {
+                                        String tId = t.id;
+                                        if (t.id.contains('_')) {
+                                          final parts = t.id.split('_');
+                                          if (parts.length >= 2) {
+                                            tId = parts.sublist(0, parts.length - 1).join('_');
+                                          }
+                                        }
+                                        return tId == transactionIdToDelete;
+                                      });
+                                    } else {
+                                      // Se for única, remover apenas esta
+                                      _localTransactions.removeWhere((t) => t.id == originalId);
+                                    }
+                                  });
+
+                                  try {
+                                    await DatabaseService().deleteTransaction(
+                                      transactionIdToDelete,
+                                      walletId: widget.walletId!,
+                                    );
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Transação excluída com sucesso'),
+                                        ),
+                                      );
+                                      if (widget.onTransactionDeleted != null) {
+                                        widget.onTransactionDeleted!();
+                                      }
+                                    }
+                                  } catch (e) {
+                                    // Reverter a mudança em caso de erro
+                                    if (context.mounted) {
+                                      setState(() {
+                                        _localTransactions = List.from(widget.transactions);
+                                      });
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('Erro ao excluir: $e'),
+                                        ),
+                                      );
+                                    }
+                                  }
+                                }
+                              },
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -357,7 +472,7 @@ class DayDetailsDialog extends StatelessWidget {
               ],
 
               const SizedBox(height: 12),
-              if (walletId != null && userId != null) ...[
+              if (widget.walletId != null && widget.userId != null) ...[
                 ElevatedButton.icon(
                   onPressed: () {
                     Navigator.of(context).pop();
@@ -369,14 +484,14 @@ class DayDetailsDialog extends StatelessWidget {
                       isDismissible: true,
                       enableDrag: true,
                       builder: (context) => AddTransactionScreen(
-                        walletId: walletId!,
-                        userId: userId!,
-                        initialDate: date,
+                        walletId: widget.walletId!,
+                        userId: widget.userId!,
+                        initialDate: widget.date,
                         skipImportOption: true,
                       ),
                     ).then((result) {
-                      if (result == true && onTransactionAdded != null) {
-                        onTransactionAdded!();
+                      if (result == true && widget.onTransactionAdded != null) {
+                        widget.onTransactionAdded!();
                       }
                     });
                   },

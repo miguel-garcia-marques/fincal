@@ -1104,6 +1104,9 @@ class _HomeScreenState extends State<HomeScreen> {
           onTransactionAdded: () async {
             await _loadTransactions(savePeriod: false, useCache: false);
           },
+          onTransactionDeleted: () async {
+            await _loadTransactions(savePeriod: false, useCache: false);
+          },
         ),
       );
     }

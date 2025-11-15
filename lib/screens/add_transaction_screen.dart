@@ -73,10 +73,26 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   int? _selectedDayOfMonth;
   bool _isProcessingImage = false;
   final ImagePicker _imagePicker = ImagePicker();
+  bool _hasPreFilledData = false; // Flag para rastrear dados pré-preenchidos
 
   @override
   void initState() {
     super.initState();
+    
+    // Verificar se há dados pré-preenchidos (vindos de extração de fatura)
+    _hasPreFilledData = widget.initialAmount != null || 
+                        widget.initialDescription != null ||
+                        widget.initialCategory != null ||
+                        widget.initialDate != null;
+    
+    // Debug: imprimir se há dados pré-preenchidos
+    if (_hasPreFilledData) {
+      print('[AddTransactionScreen] Dados pré-preenchidos detectados:');
+      print('  - initialAmount: ${widget.initialAmount}');
+      print('  - initialDescription: ${widget.initialDescription}');
+      print('  - initialCategory: ${widget.initialCategory}');
+      print('  - initialDate: ${widget.initialDate}');
+    }
     // Inicializar keys para os campos
     _fieldKeys['amount'] = GlobalKey();
     _fieldKeys['name'] = GlobalKey();
@@ -250,21 +266,27 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   bool _validateStep(int step) {
     switch (step) {
-      case 0: // Tipo e categoria
-        return true;
-      case 1: // Data e periodicidade
+      case 0: // Nome
+        if (_formKey.currentState != null) {
+          return _nameController.text.trim().isNotEmpty;
+        }
+        return false;
+      case 1: // Valor
+        if (_formKey.currentState != null) {
+          final amount = double.tryParse(_amountController.text.replaceAll(',', '.'));
+          return amount != null && amount > 0;
+        }
+        return false;
+      case 2: // Periodicidade e data
         if (_frequency == TransactionFrequency.weekly) {
           return _selectedDayOfWeek != null;
         } else if (_frequency == TransactionFrequency.monthly) {
           return _selectedDayOfMonth != null;
         }
         return true;
-      case 2: // Valor e nome
-        if (_formKey.currentState != null) {
-          return _formKey.currentState!.validate();
-        }
-        return false;
-      case 3: // Orçamento
+      case 3: // Categorias
+        return true; // Sempre válido, já tem valor padrão
+      case 4: // Tipos e configurações
         if (_selectedType == TransactionType.ganho && _isSalary) {
           final gastos = double.tryParse(_gastosPercentController.text) ?? 0;
           final lazer = double.tryParse(_lazerPercentController.text) ?? 0;
@@ -276,6 +298,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           return _expenseBudgetCategory != null;
         }
         return true;
+      case 5: // Revisão - sempre válido
+        return true;
       default:
         return true;
     }
@@ -284,9 +308,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   Future<void> _saveTransaction() async {
     if (_isSaving) return; // Prevenir múltiplos cliques
 
-    if (!_validateStep(3)) {
+    if (!_validateStep(4)) {
       setState(() {
-        _currentStep = 3;
+        _currentStep = 4;
       });
       // Mostrar mensagem de erro visível
       String errorMessage = '';
@@ -428,6 +452,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
     final screenHeight = MediaQuery.of(context).size.height;
     
+    // Sempre mostrar vista de fatura fullscreen (tanto para dados pré-preenchidos quanto manual)
+    if (!_showImportOption) {
+      return _buildInvoiceFullscreenView();
+    }
+    
     return Container(
       constraints: BoxConstraints(
         maxHeight: _showImportOption
@@ -503,14 +532,14 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 24, vertical: 12),
                       child: Row(
-                        children: List.generate(4, (index) {
+                            children: List.generate(6, (index) {
                           return Expanded(
                             child: Container(
-                              margin: EdgeInsets.only(right: index < 3 ? 6 : 0),
+                                  margin: EdgeInsets.only(right: index < 5 ? 6 : 0),
                               height: 3,
                               decoration: BoxDecoration(
                                 color: index <= _currentStep
-                                    ? (_currentStep < 3
+                                        ? (_currentStep < 5
                                         ? AppTheme.black
                                         : (_selectedType ==
                                                 TransactionType.ganho
@@ -591,7 +620,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                                 onPressed: _isSaving
                                     ? null
                                     : () {
-                                        if (_currentStep < 3) {
+                                            if (_currentStep < 5) {
                                           if (_validateStep(_currentStep)) {
                                             setState(() {
                                               _currentStep++;
@@ -619,7 +648,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                                         ),
                                       )
                                     : Text(
-                                        _currentStep < 3 ? 'Próximo' : 'Salvar',
+                                            _currentStep < 5 ? 'Próximo' : 'Salvar',
                                         style: const TextStyle(
                                           fontWeight: FontWeight.w600,
                                           fontSize: 16,
@@ -1060,15 +1089,21 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   }
 
   Widget _buildStepContent() {
+    // Quando há dados pré-preenchidos, não usar steps - a vista única já é mostrada no build
+    // Este método só é chamado quando não há dados pré-preenchidos
     switch (_currentStep) {
       case 0:
-        return _buildStep1();
+        return _buildStep1(); // Nome
       case 1:
-        return _buildStep2();
+        return _buildStep2(); // Valor
       case 2:
-        return _buildStep3();
+        return _buildStep3(); // Periodicidade e data
       case 3:
-        return _buildStep4();
+        return _buildStep4(); // Categorias
+      case 4:
+        return _buildStep5(); // Tipos e configurações
+      case 5:
+        return _buildStep6(); // Revisão final
       default:
         return const SizedBox();
     }
@@ -1079,62 +1114,22 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Tipo de Transação',
+          'Nome da Transação',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w600,
                 fontSize: 20,
               ),
         ),
         const SizedBox(height: 20),
-        Row(
-          children: [
-            Expanded(
-              child: _TypeButton(
-                label: 'Ganho',
-                type: TransactionType.ganho,
-                isSelected: _selectedType == TransactionType.ganho,
-                onTap: () => setState(() {
-                  _selectedType = TransactionType.ganho;
-                  _expenseBudgetCategory = null;
-                  if (!_getGainCategories().contains(_selectedCategory)) {
-                    _selectedCategory = TransactionCategory.salario;
-                  }
-                }),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _TypeButton(
-                label: 'Despesa',
-                type: TransactionType.despesa,
-                isSelected: _selectedType == TransactionType.despesa,
-                onTap: () => setState(() {
-                  _selectedType = TransactionType.despesa;
-                  _isSalary = false;
-                  if (_getGainCategories().contains(_selectedCategory)) {
-                    _selectedCategory = TransactionCategory.miscelaneos;
-                  }
-                }),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 28),
-        Text(
-          'Categoria',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                fontSize: 16,
-              ),
-        ),
-        const SizedBox(height: 10),
-        DropdownButtonFormField<TransactionCategory>(
-          value: _getAvailableCategories().contains(_selectedCategory)
-              ? _selectedCategory
-              : _getAvailableCategories().first,
+        TextFormField(
+          key: _fieldKeys['name'],
+          controller: _nameController,
+          onTap: () => _scrollToField('name'),
+          autofocus: true,
           decoration: InputDecoration(
+            hintText: 'Ex: Compra no supermercado',
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(color: AppTheme.lighterGray),
@@ -1146,138 +1141,57 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(
-                color: _selectedType == TransactionType.ganho
-                    ? AppTheme.incomeGreen
-                    : AppTheme.expenseRed,
+                color: AppTheme.black,
                 width: 2,
               ),
             ),
           ),
-          items: _getAvailableCategories().map((category) {
-            return DropdownMenuItem(
-              value: category,
-              child: Text(category.displayName),
-            );
-          }).toList(),
-          onChanged: (value) {
-            if (value != null) {
-              setState(() => _selectedCategory = value);
-            }
+          validator: (value) {
+            if (value == null || value.trim().isEmpty) {
+              return 'Por favor, insira um nome';
+                  }
+            return null;
           },
+        ),
+        const SizedBox(height: 28),
+        Text(
+          'Pessoa (opcional)',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+              ),
+        ),
+        const SizedBox(height: 10),
+        TextFormField(
+          key: _fieldKeys['person'],
+          controller: _personController,
+          onTap: () => _scrollToField('person'),
+          decoration: InputDecoration(
+            hintText: 'Deixe vazio para "geral"',
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.lighterGray),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.lighterGray),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: AppTheme.black,
+                width: 2,
+              ),
+            ),
+          ),
         ),
       ],
     );
   }
 
   Widget _buildStep2() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          'Periodicidade',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-        ),
-        const SizedBox(height: 24),
-        DropdownButtonFormField<TransactionFrequency>(
-          value: _frequency,
-          decoration: const InputDecoration(),
-          items: TransactionFrequency.values.map((frequency) {
-            return DropdownMenuItem(
-              value: frequency,
-              child: Text(frequency.displayName),
-            );
-          }).toList(),
-          onChanged: (value) {
-            setState(() {
-              _frequency = value ?? TransactionFrequency.unique;
-              _selectedDayOfWeek = null;
-              _selectedDayOfMonth = null;
-              // Se houver data selecionada, configurar recorrência automaticamente
-              _configureRecurrenceFromDate(_selectedDate);
-            });
-          },
-        ),
-        const SizedBox(height: 24),
-        if (_frequency == TransactionFrequency.weekly) ...[
-          Text(
-            'Dia da Semana',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-          const SizedBox(height: 16),
-          // Botões para os 5 dias úteis (segunda a sexta) - apenas inicial
-          Row(
-            children: [
-              Expanded(child: _buildDayButton(1)),
-              const SizedBox(width: 6),
-              Expanded(child: _buildDayButton(2)),
-              const SizedBox(width: 6),
-              Expanded(child: _buildDayButton(3)),
-              const SizedBox(width: 6),
-              Expanded(child: _buildDayButton(4)),
-              const SizedBox(width: 6),
-              Expanded(child: _buildDayButton(5)),
-              const SizedBox(width: 6),
-              Expanded(child: _buildDayButton(6)),
-              const SizedBox(width: 6),
-              Expanded(child: _buildDayButton(7)),
-            ],
-          ),
-        ] else if (_frequency == TransactionFrequency.monthly) ...[
-          Text(
-            'Dia do Mês',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-          const SizedBox(height: 16),
-          // Grid simples de dias 1-31
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.offWhite,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: _buildMonthDayPicker(),
-          ),
-        ] else ...[
-          Text(
-            'Data',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-          const SizedBox(height: 12),
-          InkWell(
-            onTap: () => _selectDate(context),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-              decoration: BoxDecoration(
-                color: AppTheme.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.lighterGray),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    formatDate(_selectedDate),
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                  const Icon(Icons.calendar_today, size: 20),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildStep3() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1295,6 +1209,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           style: const TextStyle(fontSize: 18),
           onTap: () => _scrollToField('amount'),
+          autofocus: true,
           inputFormatters: [
             TextInputFormatter.withFunction((oldValue, newValue) {
               // Converter vírgula para ponto enquanto digita
@@ -1348,9 +1263,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(
-                color: _selectedType == TransactionType.ganho
-                    ? AppTheme.incomeGreen
-                    : AppTheme.expenseRed,
+                color: AppTheme.black,
                 width: 2,
               ),
             ),
@@ -1366,23 +1279,27 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             return null;
           },
         ),
-        const SizedBox(height: 28),
+      ],
+    );
+  }
+
+  Widget _buildStep3() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
         Text(
-          'Nome',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+          'Periodicidade',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w600,
-                fontSize: 16,
+                fontSize: 20,
               ),
         ),
-        const SizedBox(height: 10),
-        TextFormField(
-          key: _fieldKeys['name'],
-          controller: _nameController,
-          onTap: () => _scrollToField('name'),
+        const SizedBox(height: 20),
+        DropdownButtonFormField<TransactionFrequency>(
+          value: _frequency,
           decoration: InputDecoration(
-            hintText: 'Nome da transação',
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(color: AppTheme.lighterGray),
@@ -1394,56 +1311,104 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(
-                color: _selectedType == TransactionType.ganho
-                    ? AppTheme.incomeGreen
-                    : AppTheme.expenseRed,
+                color: AppTheme.black,
                 width: 2,
               ),
             ),
           ),
-          validator: (value) {
-            if (value == null || value.trim().isEmpty) {
-              return 'Por favor, insira um nome';
-            }
-            return null;
+          items: TransactionFrequency.values.map((frequency) {
+            return DropdownMenuItem(
+              value: frequency,
+              child: Text(frequency.displayName),
+            );
+          }).toList(),
+          onChanged: (value) {
+            setState(() {
+              _frequency = value ?? TransactionFrequency.unique;
+              _selectedDayOfWeek = null;
+              _selectedDayOfMonth = null;
+              // Se houver data selecionada, configurar recorrência automaticamente
+              _configureRecurrenceFromDate(_selectedDate);
+            });
           },
         ),
-        const SizedBox(height: 28),
-        Text(
-          'Pessoa (opcional)',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                fontSize: 16,
+        const SizedBox(height: 24),
+        if (_frequency == TransactionFrequency.weekly) ...[
+          Text(
+            'Dia da Semana',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                ),
+          ),
+          const SizedBox(height: 16),
+          // Botões para os 7 dias da semana
+          Row(
+            children: [
+              Expanded(child: _buildDayButton(1)),
+              const SizedBox(width: 6),
+              Expanded(child: _buildDayButton(2)),
+              const SizedBox(width: 6),
+              Expanded(child: _buildDayButton(3)),
+              const SizedBox(width: 6),
+              Expanded(child: _buildDayButton(4)),
+              const SizedBox(width: 6),
+              Expanded(child: _buildDayButton(5)),
+              const SizedBox(width: 6),
+              Expanded(child: _buildDayButton(6)),
+              const SizedBox(width: 6),
+              Expanded(child: _buildDayButton(7)),
+            ],
+          ),
+        ] else if (_frequency == TransactionFrequency.monthly) ...[
+          Text(
+            'Dia do Mês',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                ),
+          ),
+          const SizedBox(height: 16),
+          // Grid simples de dias 1-31
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.offWhite,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: _buildMonthDayPicker(),
+          ),
+        ] else ...[
+          Text(
+            'Data',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                ),
+          ),
+          const SizedBox(height: 12),
+          InkWell(
+            onTap: () => _selectDate(context),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+              decoration: BoxDecoration(
+                color: AppTheme.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.lighterGray),
               ),
-        ),
-        const SizedBox(height: 10),
-        TextFormField(
-          key: _fieldKeys['person'],
-          controller: _personController,
-          onTap: () => _scrollToField('person'),
-          decoration: InputDecoration(
-            hintText: 'Deixe vazio para "geral"',
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: AppTheme.lighterGray),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: AppTheme.lighterGray),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: _selectedType == TransactionType.ganho
-                    ? AppTheme.incomeGreen
-                    : AppTheme.expenseRed,
-                width: 2,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    formatDate(_selectedDate),
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                  const Icon(Icons.calendar_today, size: 20),
+                ],
               ),
             ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -1452,14 +1417,110 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_selectedType == TransactionType.ganho) ...[
-          Text(
-            'Configuração de Salário',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+        Text(
+          'Categoria',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+                fontSize: 20,
+              ),
+        ),
+        const SizedBox(height: 20),
+        DropdownButtonFormField<TransactionCategory>(
+          value: _getAvailableCategories().contains(_selectedCategory)
+              ? _selectedCategory
+              : _getAvailableCategories().first,
+          decoration: InputDecoration(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.lighterGray),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.lighterGray),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: _selectedType == TransactionType.ganho
+                    ? AppTheme.incomeGreen
+                    : AppTheme.expenseRed,
+                width: 2,
+              ),
+            ),
           ),
-          const SizedBox(height: 24),
+          items: _getAvailableCategories().map((category) {
+            return DropdownMenuItem(
+              value: category,
+              child: Text(category.displayName),
+            );
+          }).toList(),
+          onChanged: (value) {
+            if (value != null) {
+              setState(() => _selectedCategory = value);
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStep5() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Tipo de Transação',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+                fontSize: 20,
+              ),
+        ),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Expanded(
+              child: _TypeButton(
+                label: 'Ganho',
+                type: TransactionType.ganho,
+                isSelected: _selectedType == TransactionType.ganho,
+                onTap: () => setState(() {
+                  _selectedType = TransactionType.ganho;
+                  _expenseBudgetCategory = null;
+                  if (!_getGainCategories().contains(_selectedCategory)) {
+                    _selectedCategory = TransactionCategory.salario;
+                  }
+                }),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _TypeButton(
+                label: 'Despesa',
+                type: TransactionType.despesa,
+                isSelected: _selectedType == TransactionType.despesa,
+                onTap: () => setState(() {
+                  _selectedType = TransactionType.despesa;
+                  _isSalary = false;
+                  if (_getGainCategories().contains(_selectedCategory)) {
+                    _selectedCategory = TransactionCategory.miscelaneos;
+            }
+                }),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 28),
+        if (_selectedType == TransactionType.ganho) ...[
+        Text(
+            'Configuração de Salário',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+              ),
+        ),
+          const SizedBox(height: 12),
           CheckboxListTile(
             title: const Text('É salário?'),
             value: _isSalary,
@@ -1485,6 +1546,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               'Distribuição do Salário (%)',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
+                    fontSize: 16,
                   ),
             ),
             const SizedBox(height: 12),
@@ -1534,14 +1596,32 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         ] else ...[
           Text(
             'Categoria de Orçamento',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w600,
+                  fontSize: 16,
                 ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 12),
           DropdownButtonFormField<ExpenseBudgetCategory>(
             value: _expenseBudgetCategory,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: AppTheme.lighterGray),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: AppTheme.lighterGray),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: AppTheme.expenseRed,
+                  width: 2,
+                ),
+              ),
               hintText: 'Selecione uma categoria',
             ),
             items: ExpenseBudgetCategory.values.map((category) {
@@ -1562,6 +1642,787 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildStep6() {
+    final amount = double.tryParse(_amountController.text.replaceAll(',', '.')) ?? 0.0;
+    
+    String frequencyText = '';
+    if (_frequency == TransactionFrequency.weekly && _selectedDayOfWeek != null) {
+      final dateFormat = DateFormat('EEEE', Localizations.localeOf(context).toString());
+      final dayOfWeek = _selectedDayOfWeek!;
+      final referenceDate = DateTime(2024, 1, dayOfWeek == 7 ? 0 : dayOfWeek - 1);
+      frequencyText = dateFormat.format(referenceDate);
+    } else if (_frequency == TransactionFrequency.monthly && _selectedDayOfMonth != null) {
+      frequencyText = 'Dia $_selectedDayOfMonth';
+    } else if (_frequency == TransactionFrequency.unique) {
+      frequencyText = formatDate(_selectedDate);
+    }
+
+    // Se houver dados pré-preenchidos, mostrar formato de fatura física
+    if (_hasPreFilledData) {
+      print('[AddTransactionScreen] Mostrando formato de fatura física no step 6');
+      return _buildInvoiceTicketView(amount, frequencyText);
+    }
+    
+    print('[AddTransactionScreen] Mostrando revisão normal no step 6 (sem dados pré-preenchidos)');
+
+    // Caso contrário, mostrar revisão normal
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Revisão',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 20,
+                ),
+          ),
+          const SizedBox(height: 24),
+          _buildReviewCard(
+            'Nome',
+            _nameController.text.isEmpty ? 'Não especificado' : _nameController.text,
+            Icons.label_outline,
+            () => setState(() => _currentStep = 0),
+          ),
+          const SizedBox(height: 12),
+          _buildReviewCard(
+            'Valor',
+            '€ ${amount.toStringAsFixed(2)}',
+            Icons.euro_outlined,
+            () => setState(() => _currentStep = 1),
+          ),
+          const SizedBox(height: 12),
+          _buildReviewCard(
+            'Periodicidade',
+            '${_frequency.displayName}${frequencyText.isNotEmpty ? ' - $frequencyText' : ''}',
+            Icons.calendar_today_outlined,
+            () => setState(() => _currentStep = 2),
+          ),
+          const SizedBox(height: 12),
+          _buildReviewCard(
+            'Categoria',
+            _selectedCategory.displayName,
+            Icons.category_outlined,
+            () => setState(() => _currentStep = 3),
+          ),
+          const SizedBox(height: 12),
+          _buildReviewCard(
+            'Tipo',
+            _selectedType == TransactionType.ganho ? 'Ganho' : 'Despesa',
+            _selectedType == TransactionType.ganho
+                ? Icons.trending_up
+                : Icons.trending_down,
+            () => setState(() => _currentStep = 4),
+            color: _selectedType == TransactionType.ganho
+                ? AppTheme.incomeGreen
+                : AppTheme.expenseRed,
+          ),
+          if (_personController.text.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _buildReviewCard(
+              'Pessoa',
+              _personController.text,
+              Icons.person_outline,
+              () => setState(() => _currentStep = 0),
+            ),
+          ],
+          if (_selectedType == TransactionType.ganho && _isSalary) ...[
+            const SizedBox(height: 12),
+            _buildReviewCard(
+              'Distribuição do Salário',
+              'Gastos: ${_gastosPercentController.text}% | Lazer: ${_lazerPercentController.text}% | Poupança: ${_poupancaPercentController.text}%',
+              Icons.account_balance_wallet_outlined,
+              () => setState(() => _currentStep = 4),
+            ),
+          ] else if (_selectedType == TransactionType.despesa && _expenseBudgetCategory != null) ...[
+            const SizedBox(height: 12),
+            _buildReviewCard(
+              'Categoria de Orçamento',
+              _expenseBudgetCategory!.displayName,
+              Icons.pie_chart_outline,
+              () => setState(() => _currentStep = 4),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInvoiceFullscreenView() {
+    // Vista fullscreen de fatura com backdrop blur
+    final amount = double.tryParse(_amountController.text.replaceAll(',', '.')) ?? 0.0;
+    
+    String frequencyText = '';
+    if (_frequency == TransactionFrequency.weekly && _selectedDayOfWeek != null) {
+      final dateFormat = DateFormat('EEEE', Localizations.localeOf(context).toString());
+      final dayOfWeek = _selectedDayOfWeek!;
+      final referenceDate = DateTime(2024, 1, dayOfWeek == 7 ? 0 : dayOfWeek - 1);
+      frequencyText = dateFormat.format(referenceDate);
+    } else if (_frequency == TransactionFrequency.monthly && _selectedDayOfMonth != null) {
+      frequencyText = 'Dia $_selectedDayOfMonth';
+    } else {
+      frequencyText = formatDate(_selectedDate);
+    }
+    
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Stack(
+        children: [
+          // Backdrop blur do home screen
+          BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              color: Colors.black.withOpacity(0.3),
+            ),
+          ),
+          // Conteúdo da fatura centralizado
+          SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                padding: EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 20,
+                ),
+                child: Form(
+                  key: _formKey,
+                  child: _buildInvoiceTicketView(amount, frequencyText),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInvoiceTicketView(double amount, String frequencyText) {
+    print('[AddTransactionScreen] Construindo visualização de fatura física');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Card de fatura física
+        Container(
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            decoration: BoxDecoration(
+              color: AppTheme.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Cabeçalho da fatura
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppTheme.black,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(16),
+                      topRight: Radius.circular(16),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'FATURA',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: AppTheme.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                              letterSpacing: 2,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _selectedCategory.displayName.toUpperCase(),
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: AppTheme.white.withOpacity(0.8),
+                              fontSize: 12,
+                              letterSpacing: 1,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // Corpo da fatura
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Descrição/Nome
+                      _buildInvoiceField(
+                        label: 'Descrição',
+                        value: _nameController.text,
+                        onTap: () {},
+                        fieldType: 'name',
+                      ),
+                      
+                      const SizedBox(height: 20),
+                      
+                      // Grid de informações principais
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildInvoiceField(
+                              label: 'Valor',
+                              value: amount > 0 ? amount.toStringAsFixed(2) : '',
+                              onTap: () {},
+                              isHighlight: true,
+                              fieldType: 'amount',
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _buildInvoiceField(
+                              label: 'Data',
+                              value: frequencyText.isNotEmpty 
+                                  ? frequencyText 
+                                  : formatDate(_selectedDate),
+                              onTap: () {},
+                              fieldType: 'date',
+                            ),
+                          ),
+                        ],
+                      ),
+                      
+                      const SizedBox(height: 20),
+                      
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildInvoiceField(
+                              label: 'Categoria',
+                              value: _selectedCategory.displayName,
+                              onTap: () {},
+                              fieldType: 'category',
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _buildInvoiceField(
+                              label: 'Tipo',
+                              value: _selectedType == TransactionType.ganho ? 'Ganho' : 'Despesa',
+                              onTap: () {},
+                              valueColor: _selectedType == TransactionType.ganho
+                                  ? AppTheme.incomeGreen
+                                  : AppTheme.expenseRed,
+                              fieldType: 'type',
+                            ),
+                          ),
+                        ],
+                      ),
+                      
+                      const SizedBox(height: 20),
+                      _buildInvoiceField(
+                        label: 'Pessoa',
+                        value: _personController.text,
+                        onTap: () {},
+                        fieldType: 'person',
+                      ),
+                      
+                      if (_selectedType == TransactionType.despesa) ...[
+                        const SizedBox(height: 20),
+                        _buildInvoiceField(
+                          label: 'Orçamento',
+                          value: _expenseBudgetCategory?.displayName ?? 'Não selecionado',
+                          onTap: () {
+                            // Mostrar diálogo para selecionar categoria de orçamento
+                            showDialog(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('Categoria de Orçamento'),
+                                content: DropdownButtonFormField<ExpenseBudgetCategory>(
+                                  value: _expenseBudgetCategory,
+                                  decoration: const InputDecoration(
+                                    hintText: 'Selecione uma categoria',
+                                  ),
+                                  items: ExpenseBudgetCategory.values.map((category) {
+                                    return DropdownMenuItem(
+                                      value: category,
+                                      child: Text(category.displayName),
+                                    );
+                                  }).toList(),
+                                  onChanged: (value) {
+                                    if (value != null) {
+                                      setState(() => _expenseBudgetCategory = value);
+                                      Navigator.of(context).pop();
+                                    }
+                                  },
+                                ),
+                              ),
+                            );
+                          },
+                          fieldType: 'budget',
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                
+                // Linha perfurada
+                _buildPerforatedLine(),
+                
+                // Botões Cancelar/Guardar
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(context).pop(false),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            side: BorderSide(color: AppTheme.lighterGray),
+                            foregroundColor: AppTheme.black,
+                          ),
+                          child: const Text(
+                            'Cancelar',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: _isSaving ? null : _saveTransaction,
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            backgroundColor: AppTheme.black,
+                            foregroundColor: AppTheme.white,
+                          ),
+                          child: _isSaving
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(AppTheme.white),
+                                  ),
+                                )
+                              : const Text(
+                                  'Guardar',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildInvoiceField({
+    required String label,
+    required String value,
+    required VoidCallback onTap,
+    bool isHighlight = false,
+    Color? valueColor,
+    String? fieldType, // 'name', 'amount', 'date', 'category', 'type', 'person', 'budget'
+  }) {
+    // Sempre tornar campos editáveis diretamente (tanto para dados pré-preenchidos quanto manual)
+    return _buildEditableInvoiceField(
+      label: label,
+      value: value,
+      fieldType: fieldType,
+      isHighlight: isHighlight,
+      valueColor: valueColor,
+    );
+  }
+
+  Widget _buildEditableInvoiceField({
+    required String label,
+    required String value,
+    String? fieldType,
+    bool isHighlight = false,
+    Color? valueColor,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label.toUpperCase(),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppTheme.darkGray,
+                fontSize: 10,
+                letterSpacing: 0.5,
+                fontWeight: FontWeight.w500,
+              ),
+        ),
+        const SizedBox(height: 4),
+        _buildEditableFieldContent(fieldType, value, isHighlight, valueColor),
+        // Linha apenas embaixo (não mostrar para o campo de tipo)
+        if (fieldType != 'type')
+          Container(
+            height: 1,
+            margin: const EdgeInsets.only(top: 8),
+            decoration: BoxDecoration(
+              color: AppTheme.lighterGray.withOpacity(0.5),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildEditableFieldContent(String? fieldType, String value, bool isHighlight, Color? valueColor) {
+    switch (fieldType) {
+      case 'name':
+        return TextFormField(
+          controller: _nameController,
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+                fontSize: isHighlight ? 18 : 16,
+                color: valueColor ?? AppTheme.black,
+              ),
+          decoration: const InputDecoration(
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            errorBorder: InputBorder.none,
+            focusedErrorBorder: InputBorder.none,
+            contentPadding: EdgeInsets.zero,
+            isDense: true,
+          ),
+        );
+      case 'amount':
+        return TextFormField(
+          controller: _amountController,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+                fontSize: isHighlight ? 18 : 16,
+                color: valueColor ?? AppTheme.black,
+              ),
+          decoration: InputDecoration(
+            prefixText: '€ ',
+            prefixStyle: TextStyle(
+              fontSize: isHighlight ? 18 : 16,
+              fontWeight: FontWeight.w600,
+              color: valueColor ?? AppTheme.black,
+            ),
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            errorBorder: InputBorder.none,
+            focusedErrorBorder: InputBorder.none,
+            contentPadding: EdgeInsets.zero,
+            isDense: true,
+          ),
+          inputFormatters: [
+            TextInputFormatter.withFunction((oldValue, newValue) {
+              String text = newValue.text.replaceAll(',', '.');
+              final parts = text.split('.');
+              if (parts.length > 2) return oldValue;
+              if (!RegExp(r'^\d*\.?\d{0,2}$').hasMatch(text) && text.isNotEmpty) {
+                return oldValue;
+              }
+              return TextEditingValue(
+                text: text,
+                selection: newValue.selection,
+              );
+            }),
+          ],
+        );
+      case 'person':
+        return TextFormField(
+          controller: _personController,
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+                fontSize: isHighlight ? 18 : 16,
+                color: valueColor ?? AppTheme.black,
+              ),
+          decoration: const InputDecoration(
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            errorBorder: InputBorder.none,
+            focusedErrorBorder: InputBorder.none,
+            contentPadding: EdgeInsets.zero,
+            isDense: true,
+            hintText: 'Deixe vazio para "geral"',
+          ),
+        );
+      case 'category':
+        return DropdownButtonFormField<TransactionCategory>(
+          value: _selectedCategory,
+          decoration: const InputDecoration(
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            errorBorder: InputBorder.none,
+            focusedErrorBorder: InputBorder.none,
+            contentPadding: EdgeInsets.zero,
+            isDense: true,
+          ),
+          items: _getAvailableCategories().map((category) {
+            return DropdownMenuItem(
+              value: category,
+              child: Text(
+                category.displayName,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      fontSize: isHighlight ? 18 : 16,
+                    ),
+              ),
+            );
+          }).toList(),
+          onChanged: (value) {
+            if (value != null) {
+              setState(() => _selectedCategory = value);
+            }
+          },
+        );
+      case 'type':
+        return Column(
+          children: [
+            InkWell(
+              onTap: () => setState(() {
+                _selectedType = TransactionType.ganho;
+                _expenseBudgetCategory = null;
+                if (!_getGainCategories().contains(_selectedCategory)) {
+                  _selectedCategory = TransactionCategory.salario;
+                }
+              }),
+              child: Row(
+                children: [
+                  Checkbox(
+                    value: _selectedType == TransactionType.ganho,
+                    onChanged: (value) => setState(() {
+                      _selectedType = TransactionType.ganho;
+                      _expenseBudgetCategory = null;
+                      if (!_getGainCategories().contains(_selectedCategory)) {
+                        _selectedCategory = TransactionCategory.salario;
+                      }
+                    }),
+                    activeColor: AppTheme.incomeGreen,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Ganho',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                          color: _selectedType == TransactionType.ganho
+                              ? AppTheme.incomeGreen
+                              : AppTheme.black,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            InkWell(
+              onTap: () => setState(() {
+                _selectedType = TransactionType.despesa;
+                _isSalary = false;
+                if (_getGainCategories().contains(_selectedCategory)) {
+                  _selectedCategory = TransactionCategory.miscelaneos;
+                }
+              }),
+              child: Row(
+                children: [
+                  Checkbox(
+                    value: _selectedType == TransactionType.despesa,
+                    onChanged: (value) => setState(() {
+                      _selectedType = TransactionType.despesa;
+                      _isSalary = false;
+                      if (_getGainCategories().contains(_selectedCategory)) {
+                        _selectedCategory = TransactionCategory.miscelaneos;
+                      }
+                    }),
+                    activeColor: AppTheme.expenseRed,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Despesa',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                          color: _selectedType == TransactionType.despesa
+                              ? AppTheme.expenseRed
+                              : AppTheme.black,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      case 'date':
+        return InkWell(
+          onTap: () => _selectDate(context),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  value,
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        fontSize: isHighlight ? 18 : 16,
+                        color: valueColor ?? AppTheme.black,
+                      ),
+                ),
+              ),
+              Icon(
+                Icons.calendar_today_outlined,
+                size: 16,
+                color: AppTheme.darkGray.withOpacity(0.5),
+              ),
+            ],
+          ),
+        );
+      case 'budget':
+        return InkWell(
+          onTap: () {
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Categoria de Orçamento'),
+                content: DropdownButtonFormField<ExpenseBudgetCategory>(
+                  value: _expenseBudgetCategory,
+                  decoration: const InputDecoration(
+                    hintText: 'Selecione uma categoria',
+                  ),
+                  items: ExpenseBudgetCategory.values.map((category) {
+                    return DropdownMenuItem(
+                      value: category,
+                      child: Text(category.displayName),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => _expenseBudgetCategory = value);
+                      Navigator.of(context).pop();
+                    }
+                  },
+                ),
+              ),
+            );
+          },
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  value,
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        fontSize: isHighlight ? 18 : 16,
+                        color: valueColor ?? AppTheme.black,
+                      ),
+                ),
+              ),
+              Icon(
+                Icons.arrow_drop_down,
+                size: 20,
+                color: AppTheme.darkGray.withOpacity(0.5),
+              ),
+            ],
+          ),
+        );
+      default:
+        return Text(
+          value,
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+                fontSize: isHighlight ? 18 : 16,
+                color: valueColor ?? AppTheme.black,
+              ),
+        );
+    }
+  }
+
+  Widget _buildPerforatedLine() {
+    return Container(
+      height: 20,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: CustomPaint(
+        painter: PerforatedLinePainter(),
+        child: Container(),
+      ),
+    );
+  }
+
+
+  Widget _buildReviewCard(String label, String value, IconData icon, VoidCallback onTap, {Color? color}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.offWhite,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: AppTheme.lighterGray.withOpacity(0.5),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: (color ?? AppTheme.black).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                icon,
+                color: color ?? AppTheme.black,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.darkGray,
+                          fontSize: 12,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    value,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: color ?? AppTheme.black,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.edit_outlined,
+              color: AppTheme.darkGray,
+              size: 18,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1652,6 +2513,52 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       },
     );
   }
+}
+
+// Custom painter para linha perfurada
+class PerforatedLinePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = AppTheme.lighterGray
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+
+    // Desenhar linha tracejada com círculos (perfurações)
+    const dashWidth = 8.0;
+    const dashSpace = 4.0;
+    const circleRadius = 3.0;
+    const circleSpacing = 12.0;
+
+    double startX = 0;
+    while (startX < size.width) {
+      // Desenhar pequeno segmento de linha
+      canvas.drawLine(
+        Offset(startX, size.height / 2),
+        Offset(startX + dashWidth, size.height / 2),
+        paint,
+      );
+      
+      // Desenhar círculo (perfuração)
+      canvas.drawCircle(
+        Offset(startX + dashWidth + circleRadius, size.height / 2),
+        circleRadius,
+        Paint()
+          ..color = AppTheme.white
+          ..style = PaintingStyle.fill,
+      );
+      canvas.drawCircle(
+        Offset(startX + dashWidth + circleRadius, size.height / 2),
+        circleRadius,
+        paint,
+      );
+      
+      startX += dashWidth + dashSpace + circleRadius * 2 + circleSpacing;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _TypeButton extends StatelessWidget {

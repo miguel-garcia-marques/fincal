@@ -7,7 +7,7 @@ import '../services/auth_service.dart';
 import '../services/passkey_service.dart';
 import '../services/onboarding_orchestrator.dart';
 import '../theme/app_theme.dart';
-import 'email_verification_screen.dart';
+import 'login_screen.dart';
 import '../main.dart';
 
 class ProfilePictureSelectionScreen extends StatefulWidget {
@@ -488,7 +488,7 @@ class _ProfilePictureSelectionScreenState extends State<ProfilePictureSelectionS
       }
     } catch (e) {
       print('[ProfilePictureScreen] Erro ao verificar estado: $e');
-      // Em caso de erro, fazer logout e ir para verificação de email
+      // Em caso de erro, fazer logout e ir para login
       try {
         await _authService.signOut();
       } catch (_) {}
@@ -496,10 +496,7 @@ class _ProfilePictureSelectionScreenState extends State<ProfilePictureSelectionS
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (context) => EmailVerificationScreen(
-              email: widget.email,
-              inviteToken: widget.inviteToken,
-            ),
+            builder: (context) => LoginScreen(inviteToken: widget.inviteToken),
           ),
         );
       }

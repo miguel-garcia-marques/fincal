@@ -169,7 +169,7 @@ class AuthWrapper extends StatefulWidget {
   State<AuthWrapper> createState() => _AuthWrapperState();
 }
 
-class _AuthWrapperState extends State<AuthWrapper> {
+class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   final _authService = AuthService();
   final _onboardingOrchestrator = OnboardingOrchestrator();
   
@@ -184,6 +184,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
   @override
   void initState() {
     super.initState();
+    // Registrar observer para detectar quando app volta ao foreground
+    WidgetsBinding.instance.addObserver(this);
     // Inicializar app_links para deep linking (não-web apenas)
     if (!kIsWeb) {
       _appLinks = AppLinks();
@@ -280,9 +282,77 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _authSubscription?.cancel();
     _linkSubscription?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    // Quando o app volta ao foreground (resumed), verificar se a sessão ainda é válida
+    if (state == AppLifecycleState.resumed) {
+      print('[AuthWrapper] App voltou ao foreground - verificando sessão...');
+      _verifySessionOnResume();
+    }
+  }
+
+  /// Verifica se a sessão ainda é válida quando o app volta ao foreground
+  /// Se a sessão expirou, redireciona imediatamente para login
+  Future<void> _verifySessionOnResume() async {
+    // Prevenir chamadas simultâneas
+    if (_isCheckingAuth) {
+      return;
+    }
+
+    // Só verificar se o usuário estava autenticado antes
+    if (_onboardingState == OnboardingState.notAuthenticated) {
+      return;
+    }
+
+    try {
+      // Verificar se a sessão ainda é válida
+      final isSessionValid = await _authService.isSessionValid().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          // Timeout significa que não conseguiu verificar - assumir inválida
+          return false;
+        },
+      );
+
+      if (!isSessionValid) {
+        print('[AuthWrapper] Sessão expirada - redirecionando para login');
+        
+        // Sessão expirada - fazer logout e redirecionar para login
+        if (mounted) {
+          // Fazer logout silencioso (sem mostrar erros)
+          try {
+            await _authService.signOut();
+          } catch (e) {
+            // Ignorar erros no logout - o importante é redirecionar
+            print('[AuthWrapper] Erro ao fazer logout: $e');
+          }
+
+          // Atualizar estado para forçar redirecionamento para login
+          if (mounted) {
+            setState(() {
+              _onboardingState = OnboardingState.notAuthenticated;
+              _isLoading = false;
+            });
+          }
+        }
+      } else {
+        print('[AuthWrapper] Sessão ainda válida');
+        // Sessão válida - fazer refresh do estado de autenticação para garantir sincronização
+        _checkAuth();
+      }
+    } catch (e) {
+      print('[AuthWrapper] Erro ao verificar sessão no resume: $e');
+      // Em caso de erro, assumir que sessão pode estar inválida e verificar novamente
+      _checkAuth();
+    }
   }
 
   Future<void> _checkAuthAndInvite() async {
@@ -342,16 +412,56 @@ class _AuthWrapperState extends State<AuthWrapper> {
     
     _isCheckingAuth = true;
     try {
+      // PRIMEIRO: Verificar se há uma sessão e se ela ainda é válida
+      // Isso previne que o usuário use a app com sessão expirada
+      if (_authService.isAuthenticated) {
+        final isSessionValid = await _authService.isSessionValid().timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => false,
+        );
+        
+        if (!isSessionValid) {
+          print('[AuthWrapper] Sessão expirada na verificação inicial - redirecionando para login');
+          // Sessão expirada - fazer logout e redirecionar para login
+          try {
+            await _authService.signOut();
+          } catch (e) {
+            // Ignorar erros no logout
+            print('[AuthWrapper] Erro ao fazer logout: $e');
+          }
+          
+          if (mounted) {
+            setState(() {
+              _onboardingState = OnboardingState.notAuthenticated;
+              _isLoading = false;
+            });
+          }
+          return;
+        }
+      }
+      
       print('[AuthWrapper] Verificando estado do onboarding...');
       final state = await _onboardingOrchestrator.getCurrentState().timeout(
         const Duration(seconds: 5),
         onTimeout: () {
           print('[AuthWrapper] Timeout ao verificar estado do onboarding');
-          // Em caso de timeout, verificar se está autenticado
+          // Em caso de timeout, verificar se está autenticado e email confirmado
           final isAuthenticated = _authService.isAuthenticated;
-          return isAuthenticated 
-              ? OnboardingState.emailNotVerified // Fallback seguro
-              : OnboardingState.notAuthenticated;
+          final currentUser = _authService.currentUser;
+          
+          if (isAuthenticated && currentUser != null) {
+            final emailConfirmed = currentUser.emailConfirmedAt != null;
+            if (emailConfirmed) {
+              // Email confirmado - tentar continuar
+              return OnboardingState.completed;
+            } else {
+              // Email não confirmado - mostrar tela de verificação
+              return OnboardingState.emailNotVerified;
+            }
+          }
+          
+          // Não autenticado - ir para login
+          return OnboardingState.notAuthenticated;
         },
       );
       print('[AuthWrapper] Estado atual: $state');
@@ -372,11 +482,22 @@ class _AuthWrapperState extends State<AuthWrapper> {
       
       if (mounted) {
         setState(() {
-          // Se autenticado mas erro, assumir emailNotVerified como fallback seguro
-          // Isso evita loops infinitos
-          _onboardingState = (isAuthenticated && currentUser != null)
-              ? OnboardingState.emailNotVerified
-              : OnboardingState.notAuthenticated;
+          // Se houver erro, sempre ir para login para evitar loops
+          // Só mostrar tela de verificação se realmente conseguir verificar que email não está verificado
+          if (isAuthenticated && currentUser != null) {
+            // Tentar verificar se email está confirmado
+            final emailConfirmed = currentUser.emailConfirmedAt != null;
+            if (emailConfirmed) {
+              // Email confirmado - tentar continuar
+              _onboardingState = OnboardingState.completed;
+            } else {
+              // Email não confirmado - mostrar tela de verificação
+              _onboardingState = OnboardingState.emailNotVerified;
+            }
+          } else {
+            // Não autenticado - ir para login
+            _onboardingState = OnboardingState.notAuthenticated;
+          }
           _isLoading = false;
         });
       }
@@ -402,19 +523,42 @@ class _AuthWrapperState extends State<AuthWrapper> {
           return const LoginScreen();
           
         case OnboardingState.emailNotVerified:
-          // Se não autenticado mas tem sessão, mostrar tela de verificação
+          // Só mostrar tela de verificação se realmente houver usuário autenticado
+          // e o email não estiver verificado
           try {
+            final isAuthenticated = _authService.isAuthenticated;
             final user = _authService.currentUser;
-            if (user != null) {
+            
+            // Verificar se realmente está autenticado e tem usuário
+            if (!isAuthenticated || user == null) {
+              print('[AuthWrapper] Não autenticado - redirecionando para login');
+              return const LoginScreen();
+            }
+            
+            // Verificar se o email realmente não está verificado
+            final emailConfirmed = user.emailConfirmedAt != null;
+            if (emailConfirmed) {
+              // Email já está verificado - recarregar estado
+              print('[AuthWrapper] Email já verificado - recarregando estado');
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  _checkAuth();
+                }
+              });
+              return const LoginScreen();
+            }
+            
+            // Só mostrar tela de verificação se email realmente não estiver verificado
+            print('[AuthWrapper] Mostrando tela de verificação para ${user.email}');
               return EmailVerificationScreen(
                 email: user.email ?? '',
                 inviteToken: null,
               );
-            }
           } catch (e) {
-            print('[AuthWrapper] Erro ao obter usuário: $e');
+            print('[AuthWrapper] Erro ao verificar estado de verificação: $e');
+            // Em caso de erro, sempre ir para login
+            return const LoginScreen();
           }
-          return const LoginScreen();
           
         case OnboardingState.passkeyNotVerified:
           // Usuário tem passkeys mas precisa autenticar com passkey
