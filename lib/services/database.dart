@@ -146,33 +146,33 @@ class DatabaseService {
           
           while (currentMonth.isBefore(endMonth) || 
                  (currentMonth.year == endMonth.year && currentMonth.month == endMonth.month)) {
-            // Verificar se o dia existe neste mês
+            // Verificar quantos dias tem este mês
             final daysInMonth = DateTime(currentMonth.year, currentMonth.month + 1, 0).day;
             
-            // Se o dia do mês da transação existe neste mês
-            if (targetDay <= daysInMonth) {
-              // Criar a data da transação para este mês
-              final transactionDate = DateTime(currentMonth.year, currentMonth.month, targetDay);
-              
-              // Verificar se a data da transação está dentro do período solicitado
-              if ((transactionDate.isAfter(start) || transactionDate.isAtSameMomentAs(start)) &&
-                  (transactionDate.isBefore(end) || transactionDate.isAtSameMomentAs(end))) {
-                result.add(Transaction(
-                  id: '${transaction.id}_${transactionDate.millisecondsSinceEpoch}',
-                  type: transaction.type,
-                  date: transactionDate,
-                  description: transaction.description,
-                  amount: transaction.amount,
-                  category: transaction.category,
-                  isSalary: transaction.isSalary,
-                  salaryAllocation: transaction.salaryAllocation,
-                  expenseBudgetCategory: transaction.expenseBudgetCategory,
-                  frequency: TransactionFrequency.monthly, // Manter informação de periodicidade
-                  dayOfWeek: null,
-                  dayOfMonth: transaction.dayOfMonth, // Manter informação do dia
-                  person: transaction.person,
-                ));
-              }
+            // Se o dia especificado não existe no mês, usar o último dia do mês
+            final actualDay = targetDay <= daysInMonth ? targetDay : daysInMonth;
+            
+            // Criar a data da transação para este mês
+            final transactionDate = DateTime(currentMonth.year, currentMonth.month, actualDay);
+            
+            // Verificar se a data da transação está dentro do período solicitado
+            if ((transactionDate.isAfter(start) || transactionDate.isAtSameMomentAs(start)) &&
+                (transactionDate.isBefore(end) || transactionDate.isAtSameMomentAs(end))) {
+              result.add(Transaction(
+                id: '${transaction.id}_${transactionDate.millisecondsSinceEpoch}',
+                type: transaction.type,
+                date: transactionDate,
+                description: transaction.description,
+                amount: transaction.amount,
+                category: transaction.category,
+                isSalary: transaction.isSalary,
+                salaryAllocation: transaction.salaryAllocation,
+                expenseBudgetCategory: transaction.expenseBudgetCategory,
+                frequency: TransactionFrequency.monthly, // Manter informação de periodicidade
+                dayOfWeek: null,
+                dayOfMonth: transaction.dayOfMonth, // Manter informação do dia original
+                person: transaction.person,
+              ));
             }
             
             // Avançar para o próximo mês
