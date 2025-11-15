@@ -192,15 +192,51 @@ router.put('/:id', validatePeriodId, async (req, res) => {
 });
 
 // DELETE deletar história de período
+// Aceita parâmetro opcional ownerId para deletar período do dono de uma wallet compartilhada
 router.delete('/:id', validatePeriodId, async (req, res) => {
   try {
-    const PeriodHistory = getPeriodHistoryModel(req.userId);
+    const { ownerId } = req.query;
+    let targetUserId = req.userId;
+    
+    // Se ownerId foi fornecido e é diferente do usuário logado, verificar permissão
+    if (ownerId && ownerId !== req.userId) {
+      const { getWalletModel } = require('../models/Wallet');
+      const { getWalletMemberModel } = require('../models/WalletMember');
+      const Wallet = getWalletModel();
+      const WalletMember = getWalletMemberModel();
+      
+      // Verificar se o usuário tem acesso a uma wallet desse owner
+      const wallet = await Wallet.findOne({ ownerId: ownerId });
+      if (wallet) {
+        // Verificar se o usuário é membro dessa wallet com permissão de escrita
+        const membership = await WalletMember.findOne({
+          walletId: wallet._id,
+          userId: req.userId
+        });
+        
+        // Se não for membro com permissão de escrita e não for o owner, retornar erro
+        if (!membership || (membership.permission !== 'write' && membership.permission !== 'owner')) {
+          return res.status(403).json({ 
+            message: 'Você não tem permissão para deletar períodos nesta wallet' 
+          });
+        }
+        
+        // Usar ownerId como targetUserId
+        targetUserId = ownerId;
+      } else {
+        return res.status(404).json({ 
+          message: 'Wallet não encontrada para este owner' 
+        });
+      }
+    }
+    
+    const PeriodHistory = getPeriodHistoryModel(targetUserId);
     const { getTransactionModel } = require('../models/Transaction');
-    const Transaction = getTransactionModel(req.userId);
+    const Transaction = getTransactionModel(targetUserId);
     
     const period = await PeriodHistory.findOne({ 
       id: req.params.id,
-      userId: req.userId 
+      userId: targetUserId 
     });
     
     if (!period) {
@@ -215,7 +251,7 @@ router.delete('/:id', validatePeriodId, async (req, res) => {
 
     // Buscar todas as transações únicas no período
     const uniqueTransactions = await Transaction.find({
-      userId: req.userId,
+      userId: targetUserId,
       frequency: 'unique',
       date: {
         $gte: startDate,
@@ -227,7 +263,7 @@ router.delete('/:id', validatePeriodId, async (req, res) => {
     if (uniqueTransactions.length > 0) {
       const transactionIds = uniqueTransactions.map(t => t.id);
       await Transaction.deleteMany({
-        userId: req.userId,
+        userId: targetUserId,
         id: { $in: transactionIds }
       });
     }
@@ -235,7 +271,7 @@ router.delete('/:id', validatePeriodId, async (req, res) => {
     // Eliminar o período
     await PeriodHistory.findOneAndDelete({ 
       id: req.params.id,
-      userId: req.userId 
+      userId: targetUserId 
     });
     
     res.json({ 

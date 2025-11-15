@@ -258,40 +258,84 @@ class AuthService {
     }
   }
 
-  // Verificar se a sessão ainda é válida
-  // Tenta fazer refresh da sessão e retorna true se válida, false se expirada
-  Future<bool> isSessionValid() async {
+  // Verificar se a sessão ainda é válida SEM fazer refresh desnecessário
+  // Apenas verifica se há uma sessão válida, sem tentar renovar
+  // Isso previne interrupções durante operações do usuário
+  Future<bool> isSessionValid({bool forceRefresh = false}) async {
     try {
+      final session = _supabase.auth.currentSession;
+      
       // Se não há sessão, não é válida
-      if (_supabase.auth.currentSession == null) {
-        return false;
-      }
-
-      // Tentar fazer refresh da sessão para verificar se ainda é válida
-      // Se o refresh_token expirou, isso vai lançar uma exceção
-      AuthResponse? response;
-      try {
-        response = await _supabase.auth.refreshSession().timeout(
-          const Duration(seconds: 5),
-        );
-      } catch (e) {
-        // Timeout ou erro significa que não conseguiu renovar - sessão provavelmente expirada
-        print('[AuthService] Erro ao fazer refresh da sessão: $e');
-        return false;
-      }
-
-      // Se não conseguiu renovar ou não há sessão após refresh, não é válida
-      if (response.session == null) {
+      if (session == null) {
         return false;
       }
 
       // Verificar se há usuário associado à sessão
-      final user = response.session?.user;
-      if (user == null) {
+      // O Supabase garante que session.user não é null se session não é null
+      // Verificar se o ID do usuário é válido
+      if (session.user.id.isEmpty) {
         return false;
       }
 
-      // Sessão válida
+      // Verificar se o access token ainda não expirou
+      // O Supabase armazena o expiresAt na sessão
+      final expiresAt = session.expiresAt;
+      if (expiresAt != null) {
+        final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        final expiresIn = expiresAt - now;
+        
+        // Se o token ainda tem mais de 5 minutos de vida, considerar válido sem refresh
+        // Isso evita refresh desnecessário que pode falhar por motivos transitórios
+        if (expiresIn > 300 && !forceRefresh) {
+          return true;
+        }
+        
+        // Se o token expirou completamente, não é válido
+        if (expiresIn <= 0) {
+          // Tentar refresh apenas se forceRefresh for true ou se o token acabou de expirar
+          if (!forceRefresh) {
+            return false;
+          }
+        }
+      }
+
+      // Se chegou aqui e forceRefresh é true, ou se o token está próximo de expirar,
+      // tentar fazer refresh APENAS se necessário
+      if (forceRefresh || (expiresAt != null && expiresAt - (DateTime.now().millisecondsSinceEpoch ~/ 1000) < 300)) {
+        try {
+          final response = await _supabase.auth.refreshSession().timeout(
+            const Duration(seconds: 5),
+          );
+          
+          // Verificar se conseguiu renovar
+          if (response.session == null || response.session?.user == null) {
+            return false;
+          }
+          
+          return true;
+        } catch (e) {
+          // Se o refresh falhar, verificar se ainda temos uma sessão válida
+          // Não assumir imediatamente que está inválida - pode ser erro de rede transitório
+          final currentSession = _supabase.auth.currentSession;
+          if (currentSession != null) {
+            // Se ainda temos sessão, verificar se o token não expirou completamente
+            final currentExpiresAt = currentSession.expiresAt;
+            if (currentExpiresAt != null) {
+              final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+              // Se ainda não expirou completamente, considerar válida (pode ser erro de rede)
+              if (currentExpiresAt > now) {
+                print('[AuthService] Refresh falhou mas sessão ainda válida (possível erro de rede)');
+                return true;
+              }
+            }
+          }
+          
+          print('[AuthService] Erro ao fazer refresh da sessão: $e');
+          return false;
+        }
+      }
+
+      // Se chegou aqui, a sessão existe e tem usuário
       return true;
     } catch (e) {
       // Qualquer erro significa que a sessão não é válida

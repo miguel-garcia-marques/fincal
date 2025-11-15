@@ -36,6 +36,67 @@ abstract class CalendarWidgetState extends State<CalendarWidget> {
 }
 
 class _CalendarWidgetState extends CalendarWidgetState {
+  late ScrollController _scrollController;
+  int _loadedPages = 1; // Número de páginas carregadas (começa com 1 = primeiros 31 dias)
+  static const int _daysPerPage = 31;
+  bool _isLoadingMore = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void didUpdateWidget(CalendarWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Resetar páginas carregadas quando o período muda
+    if (oldWidget.startDate != widget.startDate || 
+        oldWidget.endDate != widget.endDate) {
+      _loadedPages = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    // Detectar quando o usuário está próximo do final (scroll para baixo)
+    if (!_isLoadingMore && _scrollController.hasClients) {
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      final currentScroll = _scrollController.position.pixels;
+      // Carregar mais quando estiver a 200 pixels do final
+      if (currentScroll >= maxScroll - 200) {
+        // Verificar se há mais dias para carregar
+        final allDays = getDaysInRange(widget.startDate, widget.endDate);
+        final totalDays = allDays.length;
+        final currentlyLoadedDays = _loadedPages * _daysPerPage;
+        
+        if (currentlyLoadedDays < totalDays) {
+          // Carregar próxima página (próximos 31 dias)
+          setState(() {
+            _isLoadingMore = true;
+            _loadedPages++;
+          });
+          
+          // Aguardar um pouco para garantir que o estado foi atualizado
+          Future.delayed(const Duration(milliseconds: 50), () {
+            if (mounted) {
+              setState(() {
+                _isLoadingMore = false;
+              });
+            }
+          });
+        }
+      }
+    }
+  }
+
   void toggleView() {
     // Weekly view removed - no longer needed
   }
@@ -59,18 +120,28 @@ class _CalendarWidgetState extends CalendarWidgetState {
 
   @override
   Widget build(BuildContext context) {
-    final days = getDaysInRange(widget.startDate, widget.endDate);
+    final allDays = getDaysInRange(widget.startDate, widget.endDate);
     final weekDays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
-    // Organizar dias por semanas
-    final weeks = _organizeDaysIntoWeeks(days);
+    // Se houver mais de 31 dias, mostrar apenas os dias carregados até agora
+    List<DateTime> days;
+    if (allDays.length > _daysPerPage) {
+      final endIndex = (_loadedPages * _daysPerPage).clamp(0, allDays.length);
+      days = allDays.sublist(0, endIndex);
+    } else {
+      days = allDays;
+    }
 
-    // Calcular saldo disponível para cada dia
-    final Map<DateTime, double> dailyBalances = _calculateDailyBalances(days);
+    // Calcular saldos para TODOS os dias do período (não apenas os visíveis)
+    // Isso garante que os saldos acumulados estejam corretos
+    final Map<DateTime, double> dailyBalances = _calculateDailyBalances(allDays);
     final Map<DateTime, BudgetBalances> dailyBudgetBalances =
-        _calculateDailyBudgetBalances(days);
+        _calculateDailyBudgetBalances(allDays);
     final Map<DateTime, List<Transaction>> dailyTransactions =
-        _groupTransactionsByDay(days);
+        _groupTransactionsByDay(allDays);
+
+    // Organizar dias por semanas apenas para os dias visíveis
+    final weeks = _organizeDaysIntoWeeks(days);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -100,7 +171,7 @@ class _CalendarWidgetState extends CalendarWidgetState {
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: allDays.length > _daysPerPage ? MainAxisSize.max : MainAxisSize.min,
             children: [
               // Cabeçalho com dias da semana
               Padding(
@@ -124,11 +195,24 @@ class _CalendarWidgetState extends CalendarWidgetState {
               ),
               const SizedBox(height: 8),
               // Grid do calendário (apenas vista mensal)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: _buildCalendarGrid(days, dailyBalances,
-                    dailyBudgetBalances, dailyTransactions, context, dayHeight),
-              ),
+              // Se houver mais de 31 dias, usar SingleChildScrollView para scroll infinito
+              if (allDays.length > _daysPerPage)
+                Expanded(
+                  child: SingleChildScrollView(
+                    controller: _scrollController,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: _buildCalendarGrid(days, dailyBalances,
+                          dailyBudgetBalances, dailyTransactions, context, dayHeight),
+                    ),
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: _buildCalendarGrid(days, dailyBalances,
+                      dailyBudgetBalances, dailyTransactions, context, dayHeight),
+                ),
             ],
           ),
         );

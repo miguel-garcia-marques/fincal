@@ -19,7 +19,7 @@ import '../widgets/transaction_list.dart';
 import '../widgets/loading_screen.dart';
 import 'add_transaction_screen.dart';
 import 'settings_menu_screen.dart';
-import '../widgets/day_details_dialog.dart';
+import 'day_details_screen.dart';
 import '../widgets/period_selector_dialog.dart';
 import '../widgets/period_history_dialog.dart';
 import '../widgets/period_selection_dialog.dart';
@@ -58,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Transaction> _transactions = [];
   bool _isLoading = true;
   bool _isInitialLoading = true; // Novo estado para loading inicial
+  String? _initializationError; // Erro durante inicialização
   List<PeriodHistory> _periodHistories = [];
   bool _periodSelected = false;
   bool _periodDialogShown = false; // Flag para evitar diálogo duplicado
@@ -74,11 +75,15 @@ class _HomeScreenState extends State<HomeScreen> {
     // Assume current year but don't set dates yet
     _selectedYear = DateTime.now().year;
 
-    // Timeout de segurança para garantir que o loading sempre termine
-    Timer(const Duration(seconds: 15), () {
+    // Timeout de segurança reduzido para garantir que o loading sempre termine rapidamente
+    Timer(const Duration(seconds: 8), () {
       if (mounted && _isInitialLoading) {
         setState(() {
           _isInitialLoading = false;
+          // Se ainda não tem wallet ativa após timeout, mostrar erro
+          if (_activeWallet == null) {
+            _initializationError = 'Não foi possível carregar a wallet. Verifique sua conexão e tente novamente.';
+          }
         });
       }
     });
@@ -87,24 +92,29 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
         await _initializeApp().timeout(
-          const Duration(seconds: 12),
+          const Duration(seconds: 6), // Timeout reduzido para 6 segundos
           onTimeout: () {
             if (mounted) {
               setState(() {
                 _isInitialLoading = false;
+                // Se ainda não tem wallet ativa após timeout, mostrar erro
+                if (_activeWallet == null) {
+                  _initializationError = 'Timeout ao carregar dados. Verifique sua conexão.';
+                }
               });
             }
           },
         );
       } catch (e) {
-        // Em caso de erro, garantir que o loading termine
+        // Em caso de erro, garantir que o loading termine e mostrar erro
         if (mounted) {
           setState(() {
             _isInitialLoading = false;
+            _initializationError = 'Erro ao carregar dados: ${e.toString()}';
           });
         }
       }
-      // Iniciar timer de refresh automático a cada 30 segundos
+      // Iniciar timer de refresh automático a cada 5 minutos
       _startCacheRefreshTimer();
     });
   }
@@ -130,58 +140,108 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Método de inicialização otimizado com cache
+  // Método de inicialização otimizado com cache e timeouts robustos
   Future<void> _initializeApp() async {
     try {
-      // 1. Carregar wallet ativa primeiro
-      await _loadActiveWallet();
+      // 1. Carregar wallet ativa primeiro com timeout individual
+      try {
+        await _loadActiveWallet().timeout(
+          const Duration(seconds: 4),
+          onTimeout: () {
+            print('[HomeScreen] Timeout ao carregar wallet ativa');
+          },
+        );
+      } catch (e) {
+        print('[HomeScreen] Erro ao carregar wallet: $e');
+        // Continuar mesmo se falhar - tentar usar cache
+      }
 
-      // Se não houver wallet ativa após carregar, algo deu errado
+      // Se não houver wallet ativa após carregar, tentar usar cache ou mostrar erro
       if (_activeWallet == null) {
         if (mounted) {
           setState(() {
             _isInitialLoading = false;
+            _initializationError = 'Não foi possível carregar a wallet. Tente novamente.';
           });
         }
         return;
       }
 
-      // 2. Carregar dados do cache primeiro (rápido)
-      await _loadFromCache();
+      // 2. Carregar dados do cache primeiro (rápido) com timeout
+      try {
+        await _loadFromCache().timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {
+            print('[HomeScreen] Timeout ao carregar cache');
+          },
+        );
+      } catch (e) {
+        print('[HomeScreen] Erro ao carregar cache: $e');
+        // Continuar mesmo se cache falhar
+      }
 
-      // 3. Carregar dados do servidor em paralelo com timeout
+      // 3. Carregar dados do servidor em paralelo com timeout reduzido
       try {
         await Future.wait([
-          _loadUserData(),
-          _loadPeriodHistories(),
+          _loadUserData().timeout(const Duration(seconds: 3), onTimeout: () {}),
+          _loadPeriodHistories().timeout(const Duration(seconds: 3), onTimeout: () {}),
         ]).timeout(
-          const Duration(seconds: 8),
+          const Duration(seconds: 4), // Timeout total reduzido
         );
       } catch (e) {
         // Continuar mesmo se timeout ou erro ocorrer
+        print('[HomeScreen] Erro ao carregar dados do servidor: $e');
       }
 
-      // 4. Se não tiver período selecionado do cache, selecionar
+      // 4. Se não tiver período selecionado do cache, selecionar com timeout
       if (!_periodSelected) {
-        await _selectDateRangeOnStartup().timeout(
-          const Duration(seconds: 5),
-          onTimeout: () {
-            // Se timeout, apenas marcar como carregado
-            if (mounted) {
-              setState(() {
-                _isInitialLoading = false;
-              });
-            }
-          },
-        );
+        try {
+          await _selectDateRangeOnStartup().timeout(
+            const Duration(seconds: 3), // Timeout reduzido
+            onTimeout: () {
+              // Se timeout, usar período padrão (mês atual)
+              if (mounted) {
+                final now = DateTime.now();
+                setState(() {
+                  _startDate = DateTime(now.year, now.month, 1);
+                  _endDate = DateTime(now.year, now.month + 1, 0);
+                  _selectedYear = now.year;
+                  _periodSelected = true;
+                  _isInitialLoading = false;
+                });
+                // Tentar carregar transações em background
+                _loadTransactions(savePeriod: false, useCache: false).catchError((e) {
+                  print('[HomeScreen] Erro ao carregar transações: $e');
+                });
+              }
+            },
+          );
+        } catch (e) {
+          // Em caso de erro, usar período padrão
+          if (mounted) {
+            final now = DateTime.now();
+            setState(() {
+              _startDate = DateTime(now.year, now.month, 1);
+              _endDate = DateTime(now.year, now.month + 1, 0);
+              _selectedYear = now.year;
+              _periodSelected = true;
+              _isInitialLoading = false;
+            });
+          }
+        }
       } else {
-        // Se já tiver período do cache, carregar transações
-        await _loadTransactions(savePeriod: false, useCache: true).timeout(
-          const Duration(seconds: 5),
-          onTimeout: () {
-            // Continuar mesmo se timeout ocorrer
-          },
-        );
+        // Se já tiver período do cache, carregar transações com timeout
+        try {
+          await _loadTransactions(savePeriod: false, useCache: true).timeout(
+            const Duration(seconds: 3),
+            onTimeout: () {
+              // Continuar mesmo se timeout ocorrer - dados do cache já estão carregados
+              print('[HomeScreen] Timeout ao carregar transações');
+            },
+          );
+        } catch (e) {
+          print('[HomeScreen] Erro ao carregar transações: $e');
+        }
       }
 
       // 5. Marcar loading inicial como completo
@@ -191,13 +251,15 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
 
-      // 6. Atualizar dados em background se necessário
+      // 6. Atualizar dados em background se necessário (não bloqueia UI)
       _refreshDataInBackground();
     } catch (e) {
-      // Em caso de erro, garantir que o loading termine
+      // Em caso de erro, garantir que o loading termine e mostrar erro
+      print('[HomeScreen] Erro na inicialização: $e');
       if (mounted) {
         setState(() {
           _isInitialLoading = false;
+          _initializationError = 'Erro ao inicializar: ${e.toString()}';
         });
       }
     }
@@ -205,11 +267,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadActiveWallet() async {
     try {
-      // Primeiro, carregar dados do usuário para obter personalWalletId
-      final user = await _userService.getCurrentUser();
+      // Primeiro, carregar dados do usuário para obter personalWalletId com timeout
+      final user = await _userService.getCurrentUser().timeout(
+        const Duration(seconds: 3),
+        onTimeout: () {
+          print('[HomeScreen] Timeout ao carregar usuário');
+          return null;
+        },
+      );
 
-      // Buscar todas as wallets e criar lista mutável
-      final walletsList = await _walletService.getAllWallets();
+      // Buscar todas as wallets e criar lista mutável com timeout
+      final walletsList = await _walletService.getAllWallets().timeout(
+        const Duration(seconds: 3),
+        onTimeout: () {
+          print('[HomeScreen] Timeout ao carregar wallets');
+          return <Wallet>[];
+        },
+      );
       final wallets = List<Wallet>.from(walletsList);
 
       // Buscar wallet pessoal - tentar usar personalWalletId primeiro
@@ -476,8 +550,10 @@ class _HomeScreenState extends State<HomeScreen> {
             _selectedYear = period.startDate.year;
             _periodSelected = true;
           });
-          await _loadTransactions(savePeriod: false, useCache: false);
+          // Salvar o período selecionado para que fique ativo
+          await _loadTransactions(savePeriod: true, periodName: period.name, useCache: false);
         } else if (result['type'] == 'new') {
+          final periodName = result['name'] as String? ?? '';
           setState(() {
             _selectedYear = result['year'];
             _startDate = result['startDate'];
@@ -486,7 +562,7 @@ class _HomeScreenState extends State<HomeScreen> {
           });
           await _loadTransactions(
               savePeriod: true,
-              periodName: result['name'] as String? ?? '',
+              periodName: periodName,
               useCache: false);
         }
       }
@@ -572,7 +648,18 @@ class _HomeScreenState extends State<HomeScreen> {
             : null;
         await _apiService.savePeriodHistory(periodHistory, ownerId: ownerId);
         await _loadPeriodHistories();
-      } catch (e) {}
+        if (mounted && periodName.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Período salvo com sucesso')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Erro ao salvar período: $e')),
+          );
+        }
+      }
     }
 
     // Salvar no cache
@@ -670,17 +757,26 @@ class _HomeScreenState extends State<HomeScreen> {
             _startDate = period.startDate;
             _endDate = period.endDate;
             _selectedYear = period.startDate.year;
+            _periodSelected = true;
           });
-          await _loadTransactions(savePeriod: false, useCache: false);
+          // Salvar o período selecionado para que fique ativo
+          await _loadTransactions(savePeriod: true, periodName: period.name, useCache: false);
         },
         onPeriodDeleted: (id) async {
           try {
-            await _apiService.deletePeriodHistory(id);
+            // Se a wallet ativa não é do usuário logado, deletar período do dono da wallet
+            final ownerId = _activeWallet != null && !_activeWallet!.isOwner
+                ? _activeWallet!.ownerId
+                : null;
+            await _apiService.deletePeriodHistory(id, ownerId: ownerId);
             await _loadPeriodHistories();
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Período excluído com sucesso')),
               );
+              // Fechar e reabrir o diálogo para atualizar a lista
+              Navigator.of(context).pop();
+              _showPeriodHistory();
             }
           } catch (e) {
             if (mounted) {
@@ -698,6 +794,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SnackBar(
                     content: Text('Nome do período atualizado com sucesso')),
               );
+              // Fechar e reabrir o diálogo para atualizar a lista
+              Navigator.of(context).pop();
+              _showPeriodHistory();
             }
           } catch (e) {
             if (mounted) {
@@ -1089,24 +1188,26 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (mounted) {
       final userId = _authService.currentUser?.id;
-      showDialog(
-        context: context,
-        builder: (context) => DayDetailsDialog(
-          date: date,
-          transactions: dayTransactions,
-          availableBalance: balance,
-          budgetBalances: budgetBalances,
-          allPeriodTransactions: _transactions,
-          periodStartDate: _startDate,
-          periodEndDate: _endDate,
-          walletId: _activeWallet?.id,
-          userId: userId,
-          onTransactionAdded: () async {
-            await _loadTransactions(savePeriod: false, useCache: false);
-          },
-          onTransactionDeleted: () async {
-            await _loadTransactions(savePeriod: false, useCache: false);
-          },
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => DayDetailsScreen(
+            date: date,
+            transactions: dayTransactions,
+            availableBalance: balance,
+            budgetBalances: budgetBalances,
+            allPeriodTransactions: _transactions,
+            periodStartDate: _startDate,
+            periodEndDate: _endDate,
+            walletId: _activeWallet?.id,
+            userId: userId,
+            onTransactionAdded: () async {
+              await _loadTransactions(savePeriod: false, useCache: false);
+            },
+            onTransactionDeleted: () async {
+              await _loadTransactions(savePeriod: false, useCache: false);
+            },
+          ),
+          fullscreenDialog: true,
         ),
       );
     }
@@ -1259,12 +1360,70 @@ class _HomeScreenState extends State<HomeScreen> {
     return dailyBalances;
   }
 
+  // Método para retentar inicialização
+  Future<void> _retryInitialization() async {
+    setState(() {
+      _isInitialLoading = true;
+      _initializationError = null;
+    });
+    await _initializeApp();
+  }
+
   @override
   Widget build(BuildContext context) {
     // Mostrar tela de loading durante inicialização
     if (_isInitialLoading) {
-      return const LoadingScreen(
+      return LoadingScreen(
         message: 'Carregando seus dados financeiros...',
+      );
+    }
+
+    // Se houver erro na inicialização e não tiver wallet ativa, mostrar tela de erro
+    // MAS se tiver wallet ativa mesmo com erro, mostrar a tela normal (pode ter dados do cache)
+    if (_initializationError != null && _activeWallet == null) {
+      return Scaffold(
+        backgroundColor: AppTheme.white,
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    size: 64,
+                    color: Colors.red,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Erro ao carregar',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _initializationError!,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: _retryInitialization,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Tentar novamente'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       );
     }
 

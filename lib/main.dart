@@ -204,13 +204,21 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     // Verificar autenticação e invite (já chama _checkAuth internamente)
     _checkAuthAndInvite();
     
-    // Escutar mudanças de autenticação com debounce
+    // Escutar mudanças de autenticação com debounce mais longo
+    // Não verificar imediatamente - apenas quando realmente necessário
+    // Isso previne interrupções durante operações do usuário
     _authSubscription = _authService.authStateChanges.listen((AuthState state) {
       if (mounted && !_isCheckingAuth) {
-        // Debounce: aguardar um pouco antes de re-verificar
-        Future.delayed(const Duration(milliseconds: 500), () {
+        // Debounce mais longo: aguardar 3 segundos antes de re-verificar
+        // Isso dá tempo para operações do usuário completarem
+        Future.delayed(const Duration(seconds: 3), () {
           if (mounted && !_isCheckingAuth) {
-            _checkAuth();
+            // Só verificar se realmente houve uma mudança significativa
+            // Se o usuário ainda está autenticado, não precisa verificar novamente
+            if (state.event == AuthChangeEvent.signedOut || 
+                state.event == AuthChangeEvent.tokenRefreshed) {
+              _checkAuth();
+            }
           }
         });
       }
@@ -301,6 +309,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
 
   /// Verifica se a sessão ainda é válida quando o app volta ao foreground
   /// Se a sessão expirou, redireciona imediatamente para login
+  /// MAS só se realmente necessário - não interrompe operações ativas
   Future<void> _verifySessionOnResume() async {
     // Prevenir chamadas simultâneas
     if (_isCheckingAuth) {
@@ -313,45 +322,67 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     }
 
     try {
-      // Verificar se a sessão ainda é válida
-      final isSessionValid = await _authService.isSessionValid().timeout(
+      // Verificar se a sessão ainda é válida SEM fazer refresh forçado
+      // Isso previne interrupções por erros de rede transitórios
+      final isSessionValid = await _authService.isSessionValid(forceRefresh: false).timeout(
         const Duration(seconds: 5),
         onTimeout: () {
-          // Timeout significa que não conseguiu verificar - assumir inválida
-          return false;
+          // Timeout não significa necessariamente que está inválida
+          // Pode ser erro de rede - verificar se ainda temos sessão local
+          final hasSession = _authService.isAuthenticated;
+          print('[AuthWrapper] Timeout ao verificar sessão - mantendo sessão local: $hasSession');
+          return hasSession; // Manter sessão se ainda existe localmente
         },
       );
 
       if (!isSessionValid) {
-        print('[AuthWrapper] Sessão expirada - redirecionando para login');
+        // Verificar novamente com refresh forçado antes de deslogar
+        // Isso previne deslogar por erros transitórios
+        print('[AuthWrapper] Sessão pode ter expirado - verificando novamente com refresh...');
+        final isValidAfterRefresh = await _authService.isSessionValid(forceRefresh: true).timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            // Se timeout no refresh também, verificar se ainda temos sessão local
+            return _authService.isAuthenticated;
+          },
+        );
         
-        // Sessão expirada - fazer logout e redirecionar para login
-        if (mounted) {
-          // Fazer logout silencioso (sem mostrar erros)
-          try {
-            await _authService.signOut();
-          } catch (e) {
-            // Ignorar erros no logout - o importante é redirecionar
-            print('[AuthWrapper] Erro ao fazer logout: $e');
-          }
-
-          // Atualizar estado para forçar redirecionamento para login
+        if (!isValidAfterRefresh) {
+          print('[AuthWrapper] Sessão realmente expirada - redirecionando para login');
+          
+          // Sessão expirada - fazer logout e redirecionar para login
           if (mounted) {
-            setState(() {
-              _onboardingState = OnboardingState.notAuthenticated;
-              _isLoading = false;
-            });
+            // Fazer logout silencioso (sem mostrar erros)
+            try {
+              await _authService.signOut();
+            } catch (e) {
+              // Ignorar erros no logout - o importante é redirecionar
+              print('[AuthWrapper] Erro ao fazer logout: $e');
+            }
+
+            // Atualizar estado para forçar redirecionamento para login
+            if (mounted) {
+              setState(() {
+                _onboardingState = OnboardingState.notAuthenticated;
+                _isLoading = false;
+              });
+            }
           }
+        } else {
+          print('[AuthWrapper] Sessão válida após refresh');
         }
       } else {
         print('[AuthWrapper] Sessão ainda válida');
-        // Sessão válida - fazer refresh do estado de autenticação para garantir sincronização
-        _checkAuth();
+        // Não fazer refresh automático - só quando necessário
       }
     } catch (e) {
       print('[AuthWrapper] Erro ao verificar sessão no resume: $e');
-      // Em caso de erro, assumir que sessão pode estar inválida e verificar novamente
-      _checkAuth();
+      // Em caso de erro, não assumir imediatamente que está inválida
+      // Pode ser erro de rede transitório - manter sessão se ainda existe
+      if (!_authService.isAuthenticated) {
+        // Só verificar novamente se realmente não há sessão
+        _checkAuth();
+      }
     }
   }
 
@@ -414,29 +445,44 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     try {
       // PRIMEIRO: Verificar se há uma sessão e se ela ainda é válida
       // Isso previne que o usuário use a app com sessão expirada
+      // MAS não fazer refresh forçado para evitar interrupções
       if (_authService.isAuthenticated) {
-        final isSessionValid = await _authService.isSessionValid().timeout(
+        final isSessionValid = await _authService.isSessionValid(forceRefresh: false).timeout(
           const Duration(seconds: 3),
-          onTimeout: () => false,
+          onTimeout: () {
+            // Timeout não significa necessariamente inválida - pode ser erro de rede
+            // Se ainda temos sessão local, considerar válida
+            return _authService.isAuthenticated;
+          },
         );
         
         if (!isSessionValid) {
-          print('[AuthWrapper] Sessão expirada na verificação inicial - redirecionando para login');
-          // Sessão expirada - fazer logout e redirecionar para login
-          try {
-            await _authService.signOut();
-          } catch (e) {
-            // Ignorar erros no logout
-            print('[AuthWrapper] Erro ao fazer logout: $e');
-          }
+          // Verificar novamente com refresh antes de deslogar
+          // Isso previne deslogar por erros transitórios
+          print('[AuthWrapper] Sessão pode ter expirado - verificando novamente...');
+          final isValidAfterRefresh = await _authService.isSessionValid(forceRefresh: true).timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => _authService.isAuthenticated, // Manter se ainda existe localmente
+          );
           
-          if (mounted) {
-            setState(() {
-              _onboardingState = OnboardingState.notAuthenticated;
-              _isLoading = false;
-            });
+          if (!isValidAfterRefresh) {
+            print('[AuthWrapper] Sessão realmente expirada na verificação inicial - redirecionando para login');
+            // Sessão expirada - fazer logout e redirecionar para login
+            try {
+              await _authService.signOut();
+            } catch (e) {
+              // Ignorar erros no logout
+              print('[AuthWrapper] Erro ao fazer logout: $e');
+            }
+            
+            if (mounted) {
+              setState(() {
+                _onboardingState = OnboardingState.notAuthenticated;
+                _isLoading = false;
+              });
+            }
+            return;
           }
-          return;
         }
       }
       

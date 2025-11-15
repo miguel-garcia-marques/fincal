@@ -14,6 +14,7 @@ import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/date_utils.dart';
 import '../utils/zeller_formula.dart';
+import '../utils/api_error_handler.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   final Transaction? transactionToEdit;
@@ -394,6 +395,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       createdBy: widget.userId,
     );
 
+    // Marcar como operação crítica para prevenir redirecionamento durante o salvamento
+    ApiErrorHandler.startCriticalOperation();
     try {
       final dbService = DatabaseService();
       if (widget.transactionToEdit != null) {
@@ -412,6 +415,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         });
         _showErrorDialog('Erro ao salvar: $e');
       }
+    } finally {
+      // Sempre marcar fim da operação crítica, mesmo em caso de erro
+      ApiErrorHandler.endCriticalOperation();
     }
   }
 
@@ -1789,6 +1795,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 ),
                 child: Form(
                   key: _formKey,
+                  autovalidateMode: AutovalidateMode.disabled,
                   child: _buildInvoiceTicketView(amount, frequencyText),
                 ),
               ),

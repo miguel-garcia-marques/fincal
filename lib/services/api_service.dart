@@ -334,10 +334,14 @@ class ApiService {
     }
   }
 
-  Future<void> deletePeriodHistory(String id) async {
+  Future<void> deletePeriodHistory(String id, {String? ownerId}) async {
     try {
+      final uri = ownerId != null
+          ? Uri.parse('$baseUrl/period-history/$id?ownerId=$ownerId')
+          : Uri.parse('$baseUrl/period-history/$id');
+      
       final response = await http.delete(
-        Uri.parse('$baseUrl/period-history/$id'),
+        uri,
         headers: _getHeaders(),
       );
 

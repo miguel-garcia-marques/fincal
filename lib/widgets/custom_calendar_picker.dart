@@ -398,15 +398,8 @@ class _CustomCalendarPickerState extends State<CustomCalendarPicker> {
                               return;
                             }
                             
-                            if (daysDiff > 31) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('O período não pode ter mais de 31 dias'),
-                                  backgroundColor: AppTheme.expenseRed,
-                                ),
-                              );
-                              return;
-                            }
+                            // Removida validação de máximo 31 dias - agora permite períodos maiores
+                            // O calendário mostrará 31 dias de cada vez com scroll infinito
                             
                             Navigator.of(context).pop(<String, DateTime>{
                               'startDate': _selectedStartDate!,
