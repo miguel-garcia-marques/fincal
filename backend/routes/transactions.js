@@ -176,37 +176,37 @@ router.get('/range', validateTransactionRange, requireWalletId, async (req, res)
         // Transações mensais: gerar para todos os meses no período
         if (transaction.dayOfMonth === null || transaction.dayOfMonth === undefined) continue;
         
-        let currentDate = new Date(start);
-        currentDate.setHours(0, 0, 0, 0);
+        const targetDay = transaction.dayOfMonth;
         
-        // Criar uma cópia do end apenas com a data (sem hora) para comparação
-        const endDateOnly = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-        endDateOnly.setHours(0, 0, 0, 0);
+        // Iterar pelos meses no período, não pelos dias
+        let currentMonth = new Date(start.getFullYear(), start.getMonth(), 1);
+        const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
         
-        while (currentDate <= end) {
-          // Verificar se o dia existe no mês antes de criar a transação
-          const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
-          const targetDay = transaction.dayOfMonth;
+        while (currentMonth <= endMonth) {
+          // Verificar se o dia existe neste mês
+          const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
           
-          // Se o dia do mês da transação existe neste mês e corresponde ao dia atual
-          if (targetDay <= daysInMonth && currentDate.getDate() === targetDay) {
-            const generatedTransaction = transaction.toObject();
-            generatedTransaction._id = `${transaction._id}_${currentDate.getTime()}`;
-            generatedTransaction.id = `${transaction.id}_${currentDate.getTime()}`;
-            generatedTransaction.date = new Date(currentDate);
-            generatedTransaction.frequency = 'monthly'; // Manter informação de periodicidade
-            generatedTransaction.dayOfWeek = null;
-            generatedTransaction.dayOfMonth = transaction.dayOfMonth; // Manter informação do dia
-            result.push(generatedTransaction);
+          // Se o dia do mês da transação existe neste mês
+          if (targetDay <= daysInMonth) {
+            // Criar a data da transação para este mês
+            const transactionDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), targetDay);
+            transactionDate.setHours(0, 0, 0, 0);
+            
+            // Verificar se a data da transação está dentro do período solicitado
+            if (transactionDate >= start && transactionDate <= end) {
+              const generatedTransaction = transaction.toObject();
+              generatedTransaction._id = `${transaction._id}_${transactionDate.getTime()}`;
+              generatedTransaction.id = `${transaction.id}_${transactionDate.getTime()}`;
+              generatedTransaction.date = transactionDate;
+              generatedTransaction.frequency = 'monthly'; // Manter informação de periodicidade
+              generatedTransaction.dayOfWeek = null;
+              generatedTransaction.dayOfMonth = transaction.dayOfMonth; // Manter informação do dia
+              result.push(generatedTransaction);
+            }
           }
           
-          // Verificar se já chegamos ao último dia antes de incrementar
-          const currentDateOnly = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
-          if (currentDateOnly.getTime() >= endDateOnly.getTime()) {
-            break;
-          }
-          
-          currentDate.setDate(currentDate.getDate() + 1);
+          // Avançar para o próximo mês
+          currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
         }
       }
     }
