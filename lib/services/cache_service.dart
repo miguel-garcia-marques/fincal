@@ -20,16 +20,16 @@ class CacheService {
   static const String _walletsLastUpdateKey = 'cache_wallets_last_update';
   static const String _invitesPrefix = 'cached_invites_';
   
-  // Cache válido por 5 minutos (aumentado para reduzir requisições)
-  static const Duration cacheValidityDuration = Duration(minutes: 5);
-  // Cache de usuário válido por 10 minutos (muda menos frequentemente)
-  static const Duration userCacheValidityDuration = Duration(minutes: 10);
-  // Cache de membros da wallet válido por 5 minutos
-  static const Duration walletMembersCacheValidityDuration = Duration(minutes: 5);
-  // Cache de wallets válido por 5 minutos
-  static const Duration walletsCacheValidityDuration = Duration(minutes: 5);
-  // Cache de invites válido por 3 minutos (mudam mais frequentemente)
-  static const Duration invitesCacheValidityDuration = Duration(minutes: 3);
+  // Cache válido por 2 minutos (equilíbrio entre consistência e performance)
+  static const Duration cacheValidityDuration = Duration(minutes: 2);
+  // Cache de usuário válido por 5 minutos (muda menos frequentemente)
+  static const Duration userCacheValidityDuration = Duration(minutes: 5);
+  // Cache de membros da wallet válido por 2 minutos
+  static const Duration walletMembersCacheValidityDuration = Duration(minutes: 2);
+  // Cache de wallets válido por 3 minutos
+  static const Duration walletsCacheValidityDuration = Duration(minutes: 3);
+  // Cache de invites válido por 1 minuto (mudam mais frequentemente)
+  static const Duration invitesCacheValidityDuration = Duration(minutes: 1);
 
   // Salvar transações no cache (usando compute para não bloquear UI)
   Future<void> cacheTransactions(List<Transaction> transactions) async {

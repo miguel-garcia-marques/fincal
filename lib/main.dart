@@ -182,7 +182,6 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   bool _isCheckingAuth = false; // Flag para prevenir chamadas simultâneas
   bool _isLocked = false; // Flag para controlar bloqueio quando app perde foco
   DateTime? _lastAuthCheckTime; // Timestamp da última verificação para evitar verificações muito frequentes
-  bool _isNavigatingAfterPasskeyLogin = false; // Flag para indicar que acabamos de fazer login com passkey
 
   StreamSubscription<AuthState>? _authSubscription;
   StreamSubscription<Uri>? _linkSubscription;
@@ -217,37 +216,25 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     // Verificar autenticação e invite (já chama _checkAuth internamente)
     _checkAuthAndInvite();
     
-    // Escutar mudanças de autenticação com debounce mais longo
-    // Não verificar imediatamente - apenas quando realmente necessário
-    // Isso previne interrupções durante operações do usuário
+    // Escutar mudanças de autenticação com debounce inteligente
     _authSubscription = _authService.authStateChanges.listen((AuthState state) {
-      if (mounted && !_isCheckingAuth && !_isNavigatingAfterPasskeyLogin) {
-        // Prevenir verificações muito frequentes (máximo uma vez a cada 2 segundos)
+      if (mounted && !_isCheckingAuth) {
+        // Prevenir verificações muito frequentes (máximo uma vez a cada 5 segundos)
         final now = DateTime.now();
         if (_lastAuthCheckTime != null && 
-            now.difference(_lastAuthCheckTime!).inMilliseconds < 2000) {
+            now.difference(_lastAuthCheckTime!).inSeconds < 5) {
           print('[AuthWrapper] Ignorando verificação muito frequente');
           return;
         }
         
-        // Para signedIn, aguardar mais tempo para garantir que flags de passkey foram salvas
-        final delay = state.event == AuthChangeEvent.signedIn 
-            ? const Duration(milliseconds: 1200)
-            : const Duration(seconds: 3);
-        
-        // Debounce mais longo: aguardar antes de re-verificar
-        // Isso dá tempo para operações do usuário completarem
-        Future.delayed(delay, () {
-          if (mounted && !_isCheckingAuth && !_isNavigatingAfterPasskeyLogin) {
-            // Só verificar se realmente houve uma mudança significativa
-            // Se o usuário ainda está autenticado, não precisa verificar novamente
+        // Debounce: aguardar 2 segundos antes de verificar
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted && !_isCheckingAuth) {
+            // Só verificar eventos importantes
             if (state.event == AuthChangeEvent.signedOut || 
-                state.event == AuthChangeEvent.tokenRefreshed) {
-              _lastAuthCheckTime = DateTime.now();
-              _checkAuth();
-            } else if (state.event == AuthChangeEvent.signedIn && 
-                       _onboardingState == OnboardingState.notAuthenticated) {
-              // Só verificar signedIn se ainda não estamos autenticados
+                state.event == AuthChangeEvent.tokenRefreshed ||
+                (state.event == AuthChangeEvent.signedIn && 
+                 _onboardingState == OnboardingState.notAuthenticated)) {
               _lastAuthCheckTime = DateTime.now();
               _checkAuth();
             }
@@ -530,7 +517,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     // Prevenir verificações muito frequentes
     final now = DateTime.now();
     if (_lastAuthCheckTime != null && 
-        now.difference(_lastAuthCheckTime!).inMilliseconds < 1000) {
+        now.difference(_lastAuthCheckTime!).inSeconds < 3) {
       print('[AuthWrapper] Verificação muito frequente, ignorando...');
       return;
     }
@@ -539,74 +526,8 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     _lastAuthCheckTime = now;
     
     try {
-      // Se o usuário acabou de fazer login (estava não autenticado e agora está autenticado),
-      // aguardar um pouco para garantir que flags de passkey foram salvas
-      if (_onboardingState == OnboardingState.notAuthenticated && _authService.isAuthenticated) {
-        print('[AuthWrapper] Usuário acabou de fazer login, aguardando flags de passkey...');
-        await Future.delayed(const Duration(milliseconds: 800));
-      }
-      
-      // PRIMEIRO: Verificar se há uma sessão e se ela ainda é válida
-      // Isso previne que o usuário use a app com sessão expirada
-      // MAS não fazer refresh forçado para evitar interrupções
-      if (_authService.isAuthenticated) {
-        final isSessionValid = await _authService.isSessionValid(forceRefresh: false).timeout(
-          const Duration(seconds: 3),
-          onTimeout: () {
-            // Timeout não significa necessariamente inválida - pode ser erro de rede
-            // Se ainda temos sessão local, considerar válida
-            return _authService.isAuthenticated;
-          },
-        );
-        
-        if (!isSessionValid) {
-          // Verificar novamente com refresh antes de deslogar
-          // Isso previne deslogar por erros transitórios
-          print('[AuthWrapper] Sessão pode ter expirado - verificando novamente...');
-          final isValidAfterRefresh = await _authService.isSessionValid(forceRefresh: true).timeout(
-            const Duration(seconds: 3),
-            onTimeout: () => _authService.isAuthenticated, // Manter se ainda existe localmente
-          );
-          
-          if (!isValidAfterRefresh) {
-            print('[AuthWrapper] Sessão realmente expirada na verificação inicial - redirecionando para login');
-            // Sessão expirada - fazer logout e redirecionar para login
-            try {
-              await _authService.signOut();
-            } catch (e) {
-              // Ignorar erros no logout
-              print('[AuthWrapper] Erro ao fazer logout: $e');
-            }
-            
-            if (mounted) {
-              setState(() {
-                _onboardingState = OnboardingState.notAuthenticated;
-                _isLoading = false;
-              });
-            }
-            return;
-          }
-        }
-      }
-      
+      // Verificar estado do onboarding
       print('[AuthWrapper] Verificando estado do onboarding...');
-      
-      // Verificar se acabamos de fazer login com passkey verificando a flag
-      if (_authService.isAuthenticated) {
-        try {
-          final currentUser = _authService.currentUser;
-          if (currentUser != null) {
-            final prefs = await SharedPreferences.getInstance();
-            final hasPasskeyAuth = prefs.getBool('passkey_authenticated_${currentUser.id}') ?? false;
-            if (hasPasskeyAuth) {
-              print('[AuthWrapper] Detectado login com passkey, aguardando um pouco mais...');
-              await Future.delayed(const Duration(milliseconds: 300));
-            }
-          }
-        } catch (e) {
-          // Ignorar erros ao verificar flag
-        }
-      }
       
       final state = await _onboardingOrchestrator.getCurrentState().timeout(
         const Duration(seconds: 5),
@@ -637,8 +558,6 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
         setState(() {
           _onboardingState = state;
           _isLoading = false;
-          // Resetar flag após verificação
-          _isNavigatingAfterPasskeyLogin = false;
         });
       }
     } catch (e, stackTrace) {

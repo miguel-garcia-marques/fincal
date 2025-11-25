@@ -41,6 +41,15 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+// Enum para estados de loading consolidados
+enum LoadingState {
+  initial,      // Loading inicial da app
+  loading,      // Loading de dados
+  loaded,       // Dados carregados
+  error,        // Erro durante loading
+  retrying,     // Tentando novamente após erro
+}
+
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final DatabaseService _databaseService = DatabaseService();
   final AuthService _authService = AuthService();
@@ -93,9 +102,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   bool _showTransactions = false;
   List<Transaction> _transactions = [];
-  bool _isLoading = true;
-  bool _isInitialLoading = true; // Novo estado para loading inicial
-  bool _isRetrying = false; // Estado para controlar quando está fazendo retry
+  LoadingState _loadingState = LoadingState.initial; // Estado de loading consolidado
   String? _initializationError; // Erro durante inicialização
   List<PeriodHistory> _periodHistories = [];
   bool _periodSelected = false;
@@ -122,10 +129,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _selectedYear = DateTime.now().year;
 
     // Timeout de segurança reduzido para garantir que o loading sempre termine rapidamente
-    Timer(const Duration(seconds: 8), () {
-      if (mounted && _isInitialLoading) {
+    Timer(const Duration(seconds: 5), () {
+      if (mounted && _loadingState == LoadingState.initial) {
         setState(() {
-          _isInitialLoading = false;
+          _loadingState = LoadingState.error;
           // Se ainda não tem wallet ativa após timeout, mostrar erro
           if (_activeWallet == null) {
             _initializationError = 'Não foi possível carregar a wallet. Verifique sua conexão e tente novamente.';
@@ -138,11 +145,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
         await _initializeApp().timeout(
-          const Duration(seconds: 6), // Timeout reduzido para 6 segundos
+          const Duration(seconds: 5), // Timeout reduzido para 5 segundos
           onTimeout: () {
             if (mounted) {
               setState(() {
-                _isInitialLoading = false;
+                _loadingState = LoadingState.error;
                 // Se ainda não tem wallet ativa após timeout, mostrar erro
                 if (_activeWallet == null) {
                   _initializationError = 'Timeout ao carregar dados. Verifique sua conexão.';
@@ -155,7 +162,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         // Em caso de erro, garantir que o loading termine e mostrar erro
         if (mounted) {
           setState(() {
-            _isInitialLoading = false;
+            _loadingState = LoadingState.error;
             _initializationError = 'Erro ao carregar dados: ${e.toString()}';
           });
         }
@@ -237,11 +244,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  // Iniciar timer para atualizar cache a cada 5 minutos (reduzido para melhorar performance)
+  // Iniciar timer para atualizar cache a cada 2 minutos (equilíbrio entre consistência e performance)
   void _startCacheRefreshTimer() {
     _cacheRefreshTimer?.cancel();
     _cacheRefreshTimer = Timer.periodic(
-      const Duration(minutes: 5),
+      const Duration(minutes: 2),
       (_) {
         if (mounted) {
           _refreshDataInBackground();
@@ -252,13 +259,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  // Método de inicialização otimizado com cache e timeouts robustos
+  // Método de inicialização otimizado: cache-first, update-later
   Future<void> _initializeApp() async {
     try {
-      // 1. Carregar wallet ativa primeiro com timeout individual
+      // 1. Carregar wallet ativa primeiro (crítico)
       try {
         await _loadActiveWallet().timeout(
-          const Duration(seconds: 6), // Aumentado para dar mais tempo
+          const Duration(seconds: 5),
           onTimeout: () {
             print('[HomeScreen] Timeout ao carregar wallet ativa');
             throw TimeoutException('Timeout ao carregar wallet ativa');
@@ -266,70 +273,53 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       } catch (e) {
         print('[HomeScreen] Erro ao carregar wallet: $e');
-        // Garantir que _activeWallet está null quando há erro
         if (mounted) {
           setState(() {
             _activeWallet = null;
-          });
-        }
-        // Não continuar se não conseguir carregar a wallet - é crítico
-        if (mounted) {
-          setState(() {
-            _isInitialLoading = false;
-            if (e is TimeoutException) {
-              _initializationError = 'Timeout ao carregar dados. Verifique sua conexão e tente novamente.';
-            } else {
-              _initializationError = 'Não foi possível carregar a wallet. Tente novamente.';
-            }
+            _loadingState = LoadingState.error;
+            _initializationError = e is TimeoutException
+                ? 'Timeout ao carregar dados. Verifique sua conexão.'
+                : 'Não foi possível carregar a wallet. Tente novamente.';
           });
         }
         return;
       }
 
-      // Se não houver wallet ativa após carregar, mostrar erro
+      // Verificar se wallet foi carregada
       if (_activeWallet == null) {
         if (mounted) {
           setState(() {
-            _isInitialLoading = false;
+            _loadingState = LoadingState.error;
             _initializationError = 'Não foi possível carregar a wallet. Tente novamente.';
           });
         }
         return;
       }
 
-      // 2. Carregar dados do cache primeiro (rápido) com timeout
+      // 2. Carregar dados do cache PRIMEIRO (rápido - mostra UI imediatamente)
       try {
-        await _loadFromCache().timeout(
-          const Duration(seconds: 2),
-          onTimeout: () {
-            print('[HomeScreen] Timeout ao carregar cache');
-          },
-        );
+        await _loadFromCache().timeout(const Duration(seconds: 1));
+        // Se temos dados do cache, marcar como carregado e mostrar UI
+        if (mounted && _transactions.isNotEmpty) {
+          setState(() {
+            _loadingState = LoadingState.loaded;
+          });
+        }
       } catch (e) {
         print('[HomeScreen] Erro ao carregar cache: $e');
-        // Continuar mesmo se cache falhar
       }
 
-      // 3. Carregar dados do servidor em paralelo com timeout reduzido
-      try {
-        await Future.wait([
-          _loadUserData().timeout(const Duration(seconds: 3), onTimeout: () {}),
-          _loadPeriodHistories().timeout(const Duration(seconds: 3), onTimeout: () {}),
-        ]).timeout(
-          const Duration(seconds: 4), // Timeout total reduzido
-        );
-      } catch (e) {
-        // Continuar mesmo se timeout ou erro ocorrer
-        print('[HomeScreen] Erro ao carregar dados do servidor: $e');
-      }
+      // 3. Carregar dados do servidor em BACKGROUND (não bloqueia UI)
+      _loadUserData().timeout(const Duration(seconds: 3), onTimeout: () {});
+      _loadPeriodHistories().timeout(const Duration(seconds: 3), onTimeout: () {});
 
-      // 4. Se não tiver período selecionado do cache, selecionar com timeout
+      // 4. Se não tiver período selecionado, selecionar
       if (!_periodSelected) {
         try {
           await _selectDateRangeOnStartup().timeout(
-            const Duration(seconds: 3), // Timeout reduzido
+            const Duration(seconds: 2),
             onTimeout: () {
-              // Se timeout, usar período padrão (mês atual)
+              // Usar período padrão (mês atual)
               if (mounted) {
                 final now = DateTime.now();
                 setState(() {
@@ -337,17 +327,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _endDate = DateTime(now.year, now.month + 1, 0);
                   _selectedYear = now.year;
                   _periodSelected = true;
-                  _isInitialLoading = false;
+                  _loadingState = LoadingState.loaded;
                 });
-                // Tentar carregar transações em background
-                _loadTransactions(savePeriod: false, useCache: false).catchError((e) {
-                  print('[HomeScreen] Erro ao carregar transações: $e');
-                });
+                // Carregar transações em background
+                _loadTransactions(savePeriod: false, useCache: false);
               }
             },
           );
         } catch (e) {
-          // Em caso de erro, usar período padrão
+          // Usar período padrão
           if (mounted) {
             final now = DateTime.now();
             setState(() {
@@ -355,40 +343,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _endDate = DateTime(now.year, now.month + 1, 0);
               _selectedYear = now.year;
               _periodSelected = true;
-              _isInitialLoading = false;
+              _loadingState = LoadingState.loaded;
             });
           }
         }
       } else {
-        // Se já tiver período do cache, carregar transações com timeout
-        try {
-          await _loadTransactions(savePeriod: false, useCache: true).timeout(
-            const Duration(seconds: 3),
-            onTimeout: () {
-              // Continuar mesmo se timeout ocorrer - dados do cache já estão carregados
-              print('[HomeScreen] Timeout ao carregar transações');
-            },
-          );
-        } catch (e) {
-          print('[HomeScreen] Erro ao carregar transações: $e');
-        }
+        // Já tem período do cache, carregar transações
+        _loadTransactions(savePeriod: false, useCache: true);
       }
 
-      // 5. Marcar loading inicial como completo
+      // 5. Marcar como carregado
       if (mounted) {
         setState(() {
-          _isInitialLoading = false;
+          _loadingState = LoadingState.loaded;
         });
       }
 
-      // 6. Atualizar dados em background se necessário (não bloqueia UI)
+      // 6. Atualizar dados em background (não bloqueia UI)
       _refreshDataInBackground();
     } catch (e) {
-      // Em caso de erro, garantir que o loading termine e mostrar erro
       print('[HomeScreen] Erro na inicialização: $e');
       if (mounted) {
         setState(() {
-          _isInitialLoading = false;
+          _loadingState = LoadingState.error;
           _initializationError = 'Erro ao inicializar: ${e.toString()}';
         });
       }
@@ -574,7 +551,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             mounted) {
           setState(() {
             _transactions = cachedTransactions;
-            _isLoading = false;
+            _loadingState = LoadingState.loaded;
           });
           // Inicializar o saldo inicial para o gráfico poder ser exibido
           _initialBalanceFuture = _calculateInitialBalance();
@@ -730,7 +707,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     bool useCache = false,
   }) async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    setState(() => _loadingState = LoadingState.loading);
 
     List<Transaction> transactions = [];
 
@@ -742,7 +719,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (mounted) {
           setState(() {
             _transactions = transactions;
-            _isLoading = false;
+            _loadingState = LoadingState.loaded;
           });
           // Continuar em background para atualizar
           _refreshTransactionsInBackground();
@@ -755,7 +732,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_activeWallet == null) {
       if (mounted) {
         setState(() {
-          _isLoading = false;
+          _loadingState = LoadingState.loaded;
         });
       }
       return;
@@ -837,7 +814,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (mounted) {
       setState(() {
         _transactions = transactions;
-        _isLoading = false;
+        _loadingState = LoadingState.loaded;
       });
       // Forçar atualização do calendário após carregar transações
       if (_calendarKey.currentState != null) {
@@ -1505,8 +1482,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     
     // Resetar completamente o estado antes de tentar novamente
     setState(() {
-      _isRetrying = true;
-      _isInitialLoading = true; // Garantir que está em loading durante retry
+      _loadingState = LoadingState.retrying;
       _initializationError = null;
       _activeWallet = null; // Resetar wallet ativa para forçar recarregamento
       _transactions = []; // Limpar transações antigas
@@ -1525,20 +1501,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         // Se não há wallet e não há erro definido, definir erro genérico
         setState(() {
           _initializationError = 'Não foi possível carregar a wallet. Verifique sua conexão e tente novamente.';
-          _isInitialLoading = false;
-          _isRetrying = false;
-        });
-      } else if (mounted) {
-        setState(() {
-          _isRetrying = false;
+          _loadingState = LoadingState.error;
         });
       }
     } catch (e) {
       print('[HomeScreen] Erro no retry de inicialização: $e');
       if (mounted) {
         setState(() {
-          _isInitialLoading = false;
-          _isRetrying = false;
+          _loadingState = LoadingState.error;
           _initializationError = 'Erro ao tentar novamente: ${e.toString()}';
         });
       }
@@ -1554,14 +1524,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     }
     
-    // Mostrar tela de loading durante inicialização (mas não durante retry)
-    if (_isInitialLoading && !_isRetrying) {
-      return const LoadingScreen();
+    // Mostrar tela de loading durante inicialização
+    if (_loadingState == LoadingState.initial || _loadingState == LoadingState.loading) {
+      return Scaffold(
+        backgroundColor: Colors.white,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Image.asset(
+                'assets/app_icon.png',
+                width: 80,
+                height: 80,
+                fit: BoxFit.cover,
+              ),
+              const SizedBox(height: 24),
+              const CircularProgressIndicator(),
+            ],
+          ),
+        ),
+      );
     }
 
-    // Se houver erro na inicialização e não tiver wallet ativa, mostrar tela de erro minimalista
-    // MAS se tiver wallet ativa mesmo com erro, mostrar a tela normal (pode ter dados do cache)
-    if (_initializationError != null && _activeWallet == null) {
+    // Se houver erro na inicialização e não tiver wallet ativa, mostrar tela de erro
+    if (_loadingState == LoadingState.error && _activeWallet == null) {
       return Scaffold(
         backgroundColor: AppTheme.white,
         body: SafeArea(
@@ -1576,7 +1562,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 24),
                 GestureDetector(
-                  onTap: _isRetrying ? null : _retryInitialization,
+                  onTap: _loadingState == LoadingState.retrying ? null : _retryInitialization,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 32,
@@ -1586,7 +1572,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       color: AppTheme.darkGray,
                       borderRadius: BorderRadius.circular(24),
                     ),
-                    child: _isRetrying
+                    child: _loadingState == LoadingState.retrying
                         ? const SizedBox(
                             width: 20,
                             height: 20,
@@ -1696,7 +1682,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 Expanded(
                   child: !_periodSelected
                       ? const Center(child: CircularProgressIndicator())
-                      : _isLoading
+                      : _loadingState == LoadingState.loading
                           ? const Center(child: CircularProgressIndicator())
                           : Stack(
                               children: [
