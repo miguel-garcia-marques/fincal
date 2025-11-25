@@ -296,14 +296,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return;
       }
 
-      // 2. Carregar dados do cache PRIMEIRO (rápido - mostra UI imediatamente)
+      // 2. Carregar dados do cache PRIMEIRO (rápido)
+      bool hasDataFromCache = false;
       try {
         await _loadFromCache().timeout(const Duration(seconds: 1));
-        // Se temos dados do cache, marcar como carregado e mostrar UI
-        if (mounted && _transactions.isNotEmpty) {
-          setState(() {
-            _loadingState = LoadingState.loaded;
-          });
+        // Verificar se realmente temos dados do cache
+        if (mounted && _transactions.isNotEmpty && _periodSelected) {
+          hasDataFromCache = true;
+          // NÃO marcar como loaded ainda - esperar confirmação do servidor
         }
       } catch (e) {
         print('[HomeScreen] Erro ao carregar cache: $e');
@@ -313,12 +313,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _loadUserData().timeout(const Duration(seconds: 3), onTimeout: () {});
       _loadPeriodHistories().timeout(const Duration(seconds: 3), onTimeout: () {});
 
-      // 4. Se não tiver período selecionado, selecionar
+      // 4. Se não tiver período selecionado, selecionar E AGUARDAR transações
       if (!_periodSelected) {
         try {
           await _selectDateRangeOnStartup().timeout(
             const Duration(seconds: 2),
-            onTimeout: () {
+            onTimeout: () async {
               // Usar período padrão (mês atual)
               if (mounted) {
                 final now = DateTime.now();
@@ -327,15 +327,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _endDate = DateTime(now.year, now.month + 1, 0);
                   _selectedYear = now.year;
                   _periodSelected = true;
-                  _loadingState = LoadingState.loaded;
                 });
-                // Carregar transações em background
-                _loadTransactions(savePeriod: false, useCache: false);
+                // AGUARDAR transações carregarem
+                await _loadTransactions(savePeriod: false, useCache: false);
               }
             },
           );
         } catch (e) {
-          // Usar período padrão
+          // Usar período padrão e AGUARDAR transações
           if (mounted) {
             final now = DateTime.now();
             setState(() {
@@ -343,16 +342,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _endDate = DateTime(now.year, now.month + 1, 0);
               _selectedYear = now.year;
               _periodSelected = true;
-              _loadingState = LoadingState.loaded;
             });
+            // AGUARDAR transações carregarem
+            await _loadTransactions(savePeriod: false, useCache: false);
           }
         }
       } else {
-        // Já tem período do cache, carregar transações
-        _loadTransactions(savePeriod: false, useCache: true);
+        // Já tem período do cache, AGUARDAR transações carregarem
+        await _loadTransactions(savePeriod: false, useCache: !hasDataFromCache);
       }
 
-      // 5. Marcar como carregado
+      // 5. SÓ marcar como carregado DEPOIS de ter transações
+      // (ou confirmar que não há transações para este período)
       if (mounted) {
         setState(() {
           _loadingState = LoadingState.loaded;
@@ -1496,13 +1497,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       await _initializeApp();
       
-      // Verificar se ainda há erro após inicialização
-      if (mounted && _activeWallet == null && _initializationError == null) {
-        // Se não há wallet e não há erro definido, definir erro genérico
-        setState(() {
-          _initializationError = 'Não foi possível carregar a wallet. Verifique sua conexão e tente novamente.';
-          _loadingState = LoadingState.error;
-        });
+      // IMPORTANTE: Verificar se realmente temos dados antes de marcar como loaded
+      if (mounted) {
+        if (_activeWallet == null) {
+          // Sem wallet = erro
+          setState(() {
+            _initializationError = 'Não foi possível carregar a wallet. Verifique sua conexão e tente novamente.';
+            _loadingState = LoadingState.error;
+          });
+        } else if (!_periodSelected) {
+          // Sem período selecionado = erro
+          setState(() {
+            _initializationError = 'Não foi possível selecionar período. Tente novamente.';
+            _loadingState = LoadingState.error;
+          });
+        } else if (_loadingState != LoadingState.loaded) {
+          // Se _initializeApp não marcou como loaded, há um problema
+          setState(() {
+            _initializationError = 'Erro ao carregar dados. Tente novamente.';
+            _loadingState = LoadingState.error;
+          });
+        }
+        // Se tudo OK, _initializeApp já marcou como loaded
       }
     } catch (e) {
       print('[HomeScreen] Erro no retry de inicialização: $e');
@@ -1524,8 +1540,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     }
     
-    // Mostrar tela de loading durante inicialização
-    if (_loadingState == LoadingState.initial || _loadingState == LoadingState.loading) {
+    // Mostrar tela de loading durante inicialização e retry
+    if (_loadingState == LoadingState.initial || 
+        _loadingState == LoadingState.loading ||
+        _loadingState == LoadingState.retrying) {
       return Scaffold(
         backgroundColor: Colors.white,
         body: Center(
