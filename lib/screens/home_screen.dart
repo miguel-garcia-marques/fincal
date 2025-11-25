@@ -720,7 +720,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (mounted) {
           setState(() {
             _transactions = transactions;
-            _loadingState = LoadingState.loaded;
+            // NÃO marcar como loaded aqui - deixar _initializeApp controlar
           });
           // Continuar em background para atualizar
           _refreshTransactionsInBackground();
@@ -815,7 +815,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (mounted) {
       setState(() {
         _transactions = transactions;
-        _loadingState = LoadingState.loaded;
+        // NÃO marcar como loaded aqui - deixar _initializeApp controlar
       });
       // Forçar atualização do calendário após carregar transações
       if (_calendarKey.currentState != null) {

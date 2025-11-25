@@ -124,6 +124,137 @@ Este script carrega as variáveis do `.env`, faz o build (`flutter build web --r
     - Sanitização de inputs contra XSS.
     - Headers de segurança (HSTS, NoSniff) configurados no `firebase.json`.
 
+## 📱 Fluxos de Navegação
+
+### Fluxo de Autenticação e Onboarding
+
+```mermaid
+flowchart TD
+    Start([App Iniciado]) --> AuthCheck{Usuário<br/>Autenticado?}
+    
+    AuthCheck -->|Não| Login[Login Screen]
+    Login --> LoginMethod{Método de<br/>Login}
+    LoginMethod -->|Email/Password| EmailLogin[Login com Email]
+    LoginMethod -->|Passkey| PasskeyLogin[Login com Passkey]
+    LoginMethod -->|Registro| SignUp[Registro de Novo Usuário]
+    
+    SignUp --> EmailVerif[Email Verification Screen]
+    EmailLogin --> EmailCheck{Email<br/>Verificado?}
+    EmailCheck -->|Não| EmailVerif
+    EmailCheck -->|Sim| ProfileCheck
+    
+    EmailVerif -->|Email Confirmado| ProfileCheck{Tem Foto<br/>de Perfil?}
+    PasskeyLogin --> PasskeyVerif[Passkey Verification Screen]
+    PasskeyVerif -->|Autenticado| ProfileCheck
+    
+    ProfileCheck -->|Não| ProfilePic[Profile Picture Selection Screen]
+    ProfileCheck -->|Sim| WalletCheck{Tem Wallet<br/>Selecionada?}
+    
+    ProfilePic -->|Foto Selecionada/Pulada| WalletCheck
+    
+    WalletCheck -->|Não| WalletSelect[Wallet Selection Screen]
+    WalletCheck -->|Sim| Home[Home Screen]
+    WalletSelect -->|Wallet Selecionada| Home
+    
+    AuthCheck -->|Sim| OnboardingCheck{Onboarding<br/>Completo?}
+    OnboardingCheck -->|Não| ProfileCheck
+    OnboardingCheck -->|Sim| Home
+    
+    style Start fill:#e1f5ff
+    style Home fill:#c8e6c9
+    style Login fill:#fff9c4
+    style EmailVerif fill:#ffe0b2
+    style PasskeyVerif fill:#ffe0b2
+```
+
+### Fluxo de Convites (Invite Flow)
+
+```mermaid
+flowchart TD
+    InviteLink([Link de Convite Recebido]) --> AuthCheck{Usuário<br/>Autenticado?}
+    
+    AuthCheck -->|Não| LoginInvite[Login Screen<br/>com Token de Convite]
+    LoginInvite --> LoginComplete{Login<br/>Completo?}
+    LoginComplete -->|Sim| InviteAccept
+    LoginComplete -->|Não| LoginInvite
+    
+    AuthCheck -->|Sim| InviteAccept[Invite Accept Screen]
+    
+    InviteAccept --> InviteAction{Ação do<br/>Usuário}
+    InviteAction -->|Aceitar| CreateAccount[Criar Conta na Wallet]
+    InviteAction -->|Recusar| Home[Home Screen]
+    
+    CreateAccount --> Home
+    
+    style InviteLink fill:#e1f5ff
+    style InviteAccept fill:#fff9c4
+    style Home fill:#c8e6c9
+```
+
+### Fluxo Principal da Aplicação (Home Screen)
+
+```mermaid
+flowchart TD
+    Home[Home Screen] --> HomeActions{Ação do<br/>Usuário}
+    
+    HomeActions -->|Ver Calendário| Calendar[Visualização do Calendário]
+    HomeActions -->|Ver Transações| TransList[Lista de Transações]
+    HomeActions -->|Adicionar Transação| AddTx[Add Transaction Screen]
+    HomeActions -->|Configurações| Settings[Settings Menu Screen]
+    HomeActions -->|Perfil| Profile[Profile Screen]
+    
+    Calendar -->|Clicar em Dia| DayDetails[Day Details Screen]
+    DayDetails -->|Ver Transação| TxDetails[Transaction Details Screen]
+    DayDetails -->|Editar Transação| AddTx
+    
+    TransList -->|Clicar em Transação| TxDetails
+    
+    TxDetails -->|Editar| AddTx
+    TxDetails -->|Voltar| Home
+    
+    AddTx -->|Salvar| Home
+    AddTx -->|Cancelar| Home
+    
+    Settings -->|Segurança| Security[Security Screen]
+    Settings -->|Configurações Gerais| SettingsGen[Settings Screen]
+    Settings -->|Convites de Wallet| WalletInvites[Wallet Invites Screen]
+    Settings -->|Voltar| Home
+    
+    Security -->|Voltar| Settings
+    SettingsGen -->|Voltar| Settings
+    WalletInvites -->|Voltar| Settings
+    
+    Profile -->|Voltar| Home
+    
+    style Home fill:#c8e6c9
+    style AddTx fill:#fff9c4
+    style TxDetails fill:#e1f5ff
+    style DayDetails fill:#e1f5ff
+```
+
+### Estados de Bloqueio e Segurança
+
+```mermaid
+flowchart TD
+    AppActive[App Ativo] --> FocusLost{App Perde<br/>Foco?}
+    
+    FocusLost -->|Sim| Locked[App Lock Screen]
+    FocusLost -->|Não| AppActive
+    
+    Locked --> UserAction{Usuário<br/>Interage?}
+    UserAction -->|Desbloquear| SessionCheck{Sessão<br/>Válida?}
+    
+    SessionCheck -->|Sim| AppActive
+    SessionCheck -->|Não| Logout[Logout Automático]
+    Logout --> Login[Login Screen]
+    
+    Login --> AppActive
+    
+    style AppActive fill:#c8e6c9
+    style Locked fill:#ffcdd2
+    style Login fill:#fff9c4
+```
+
 ## 🐛 Troubleshooting
 
 ### Passkeys pedindo senha?
