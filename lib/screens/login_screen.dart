@@ -915,6 +915,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 await prefs.setBool('user_has_passkeys_${session.user!.id}', true);
                 await prefs.setBool('passkey_authenticated_${session.user!.id}', true);
                 
+                // Aguardar um pouco para garantir que as flags foram salvas completamente
+                await Future.delayed(const Duration(milliseconds: 200));
+                
                 // Salvar email usado anteriormente
                 await _saveEmail(userEmail);
               } catch (e) {
@@ -928,13 +931,18 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               );
               
-              // Navegar para AuthWrapper
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(
-                  builder: (context) => const AuthWrapper(),
-                ),
-                (route) => false,
-              );
+              // Aguardar um pouco adicional antes de navegar para garantir que tudo foi processado
+              await Future.delayed(const Duration(milliseconds: 500));
+              
+              if (mounted) {
+                // Navegar para AuthWrapper usando NavigatorService para evitar loops
+                // Não usar pushAndRemoveUntil aqui - deixar o AuthWrapper gerenciar a navegação
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (context) => const AuthWrapper(),
+                  ),
+                );
+              }
               return;
             }
           } catch (e) {
@@ -1103,6 +1111,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 await prefs.setBool('user_has_passkeys_${session.user!.id}', true);
                 await prefs.setBool('passkey_authenticated_${session.user!.id}', true);
                 
+                // Aguardar um pouco para garantir que as flags foram salvas completamente
+                await Future.delayed(const Duration(milliseconds: 200));
+                
                 // Salvar email usado anteriormente
                 await _saveEmail(userEmail);
               } catch (e) {
@@ -1117,13 +1128,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 );
                 
-                // Navegar para AuthWrapper
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(
-                    builder: (context) => const AuthWrapper(),
-                  ),
-                  (route) => false,
-                );
+                // Aguardar um pouco adicional antes de navegar para garantir que tudo foi processado
+                await Future.delayed(const Duration(milliseconds: 500));
+                
+                if (mounted) {
+                  // Navegar para AuthWrapper usando pushReplacement para evitar loops
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (context) => const AuthWrapper(),
+                    ),
+                  );
+                }
               }
               return; // Sair se login foi bem-sucedido
             }
@@ -1232,10 +1247,14 @@ class _LoginScreenState extends State<LoginScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Logo/Título
-        Icon(
-          Icons.account_balance_wallet,
-          size: isDesktop ? 60 : 80,
-          color: AppTheme.black,
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Image.asset(
+            'assets/app_icon.png',
+            width: isDesktop ? 60 : 80,
+            height: isDesktop ? 60 : 80,
+            fit: BoxFit.contain,
+          ),
         ),
         SizedBox(height: isDesktop ? 16 : 24),
         Text(
@@ -1402,10 +1421,14 @@ class _LoginScreenState extends State<LoginScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Logo/Título
-          Icon(
-            Icons.account_balance_wallet,
-            size: isDesktop ? 60 : 80,
-            color: AppTheme.black,
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Image.asset(
+              'assets/app_icon.png',
+              width: isDesktop ? 60 : 80,
+              height: isDesktop ? 60 : 80,
+              fit: BoxFit.contain,
+            ),
           ),
           SizedBox(height: isDesktop ? 16 : 24),
           Text(

@@ -70,18 +70,25 @@ class _PasskeyVerificationScreenState extends State<PasskeyVerificationScreen> {
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setBool('user_has_passkeys_${session.user!.id}', true);
                 await prefs.setBool('passkey_authenticated_${session.user!.id}', true);
+                
+                // Aguardar um pouco para garantir que as flags foram salvas completamente
+                await Future.delayed(const Duration(milliseconds: 200));
               } catch (e) {
                 // Ignorar erros no refresh
               }
               
               if (!_isDisposed && mounted) {
-                // Navegar para AuthWrapper
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(
-                    builder: (context) => const AuthWrapper(),
-                  ),
-                  (route) => false,
-                );
+                // Aguardar um pouco adicional antes de navegar para garantir que tudo foi processado
+                await Future.delayed(const Duration(milliseconds: 500));
+                
+                if (!_isDisposed && mounted) {
+                  // Navegar para AuthWrapper usando pushReplacement para evitar loops
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (context) => const AuthWrapper(),
+                    ),
+                  );
+                }
               }
               return;
             }

@@ -36,65 +36,39 @@ abstract class CalendarWidgetState extends State<CalendarWidget> {
 }
 
 class _CalendarWidgetState extends CalendarWidgetState {
-  late ScrollController _scrollController;
-  int _loadedPages = 1; // Número de páginas carregadas (começa com 1 = primeiros 31 dias)
+  late PageController _pageController;
+  int _currentPageIndex = 0; // Índice da página atual (0 = primeiros 31 dias, 1 = próximos 31, etc.)
   static const int _daysPerPage = 31;
-  bool _isLoadingMore = false;
 
   @override
   void initState() {
     super.initState();
-    _scrollController = ScrollController();
-    _scrollController.addListener(_onScroll);
+    _pageController = PageController();
   }
 
   @override
   void didUpdateWidget(CalendarWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Resetar páginas carregadas quando o período muda
+    // Resetar página quando o período muda
     if (oldWidget.startDate != widget.startDate || 
         oldWidget.endDate != widget.endDate) {
-      _loadedPages = 1;
+      _currentPageIndex = 0;
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(0);
+      }
     }
   }
 
   @override
   void dispose() {
-    _scrollController.removeListener(_onScroll);
-    _scrollController.dispose();
+    _pageController.dispose();
     super.dispose();
   }
 
-  void _onScroll() {
-    // Detectar quando o usuário está próximo do final (scroll para baixo)
-    if (!_isLoadingMore && _scrollController.hasClients) {
-      final maxScroll = _scrollController.position.maxScrollExtent;
-      final currentScroll = _scrollController.position.pixels;
-      // Carregar mais quando estiver a 200 pixels do final
-      if (currentScroll >= maxScroll - 200) {
-        // Verificar se há mais dias para carregar
-        final allDays = getDaysInRange(widget.startDate, widget.endDate);
-        final totalDays = allDays.length;
-        final currentlyLoadedDays = _loadedPages * _daysPerPage;
-        
-        if (currentlyLoadedDays < totalDays) {
-          // Carregar próxima página (próximos 31 dias)
-          setState(() {
-            _isLoadingMore = true;
-            _loadedPages++;
-          });
-          
-          // Aguardar um pouco para garantir que o estado foi atualizado
-          Future.delayed(const Duration(milliseconds: 50), () {
-            if (mounted) {
-              setState(() {
-                _isLoadingMore = false;
-              });
-            }
-          });
-        }
-      }
-    }
+  void _onPageChanged(int index) {
+    setState(() {
+      _currentPageIndex = index;
+    });
   }
 
   void toggleView() {
@@ -123,13 +97,62 @@ class _CalendarWidgetState extends CalendarWidgetState {
     final allDays = getDaysInRange(widget.startDate, widget.endDate);
     final weekDays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
-    // Se houver mais de 31 dias, mostrar apenas os dias carregados até agora
+    // Debug: verificar se temos dias
+    if (allDays.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppTheme.offWhite,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Center(
+          child: Text(
+            'Período inválido: ${widget.startDate} - ${widget.endDate}',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+      );
+    }
+
+    // Se houver mais de 31 dias, mostrar apenas a página atual (paginação real)
     List<DateTime> days;
     if (allDays.length > _daysPerPage) {
-      final endIndex = (_loadedPages * _daysPerPage).clamp(0, allDays.length);
-      days = allDays.sublist(0, endIndex);
+      final startIndex = _currentPageIndex * _daysPerPage;
+      final endIndex = (startIndex + _daysPerPage).clamp(0, allDays.length);
+      days = allDays.sublist(startIndex, endIndex);
+      // Garantir que sempre temos pelo menos alguns dias
+      if (days.isEmpty && allDays.isNotEmpty) {
+        days = allDays.sublist(0, allDays.length.clamp(0, _daysPerPage));
+        _currentPageIndex = 0; // Resetar índice se necessário
+      }
     } else {
       days = allDays;
+    }
+    
+    // Debug: garantir que temos dias após o cálculo
+    if (days.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppTheme.offWhite,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Erro: Nenhum dia calculado',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              Text(
+                'Total de dias: ${allDays.length}, Página: $_currentPageIndex',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     // Calcular saldos para TODOS os dias do período (não apenas os visíveis)
@@ -140,8 +163,7 @@ class _CalendarWidgetState extends CalendarWidgetState {
     final Map<DateTime, List<Transaction>> dailyTransactions =
         _groupTransactionsByDay(allDays);
 
-    // Organizar dias por semanas apenas para os dias visíveis
-    final weeks = _organizeDaysIntoWeeks(days);
+    // Para PageView, não precisamos organizar semanas aqui - será feito dentro do itemBuilder
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -149,71 +171,92 @@ class _CalendarWidgetState extends CalendarWidgetState {
         final screenHeight = MediaQuery.of(context).size.height;
 
         // Calcular altura disponível para o calendário (altura do container menos padding e cabeçalho)
-        const headerHeight = 80.0; // Altura aproximada do cabeçalho
-        // Usar mais espaço disponível, reduzindo menos do padding
-        final availableHeight = constraints.maxHeight > 0
-            ? constraints.maxHeight - headerHeight - 12
-            : screenHeight * 0.5; // Fallback se não houver constraints
+        const headerHeight = 60.0; // Altura reduzida do cabeçalho para dar mais espaço
+        // Usar mais espaço disponível - reduzir menos do padding e header
+        final availableHeight = constraints.maxHeight > 0 && constraints.maxHeight.isFinite
+            ? constraints.maxHeight - headerHeight - 8
+            : screenHeight * 0.75; // Aumentar fallback para usar mais espaço
 
         // Calcular altura dos dias dinamicamente
         // Para ecrãs pequenos, aumentar a altura mínima
         final isSmallScreen = screenHeight < 700;
-        // Aumentar os limites para ocupar mais espaço
-        final dayHeight = (availableHeight / weeks.length.clamp(1, 6)).clamp(
-            isSmallScreen ? 150.0 : 130.0,
-            250.0); // Vista mensal: dividir pelas semanas, altura aumentada
+        // Estimar número de semanas baseado nos dias (máximo 5 semanas para 31 dias)
+        final estimatedWeeks = (days.length / 7).ceil().clamp(1, 6);
+        final dayHeight = (availableHeight / estimatedWeeks).clamp(
+            isSmallScreen ? 120.0 : 100.0,
+            200.0); // Reduzir altura mínima para mostrar mais dias
 
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 12),
-          decoration: BoxDecoration(
-            color: AppTheme.offWhite,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: allDays.length > _daysPerPage ? MainAxisSize.max : MainAxisSize.min,
-            children: [
-              // Cabeçalho com dias da semana
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: weekDays.map((day) {
-                    return Expanded(
-                      child: Center(
-                        child: Text(
-                          day,
-                          style:
-                              Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.black,
-                                  ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              // Grid do calendário (apenas vista mensal)
-              // Se houver mais de 31 dias, usar SingleChildScrollView para scroll infinito
-              if (allDays.length > _daysPerPage)
-                Expanded(
-                  child: SingleChildScrollView(
-                    controller: _scrollController,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: _buildCalendarGrid(days, dailyBalances,
-                          dailyBudgetBalances, dailyTransactions, context, dayHeight),
-                    ),
-                  ),
-                )
-              else
+        final hasMoreThan31Days = allDays.length > _daysPerPage;
+        final totalPages = hasMoreThan31Days ? (allDays.length / _daysPerPage).ceil() : 1;
+        
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.offWhite,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Cabeçalho com dias da semana
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: _buildCalendarGrid(days, dailyBalances,
-                      dailyBudgetBalances, dailyTransactions, context, dayHeight),
+                  child: Row(
+                    children: weekDays.map((day) {
+                      return Expanded(
+                        child: Center(
+                          child: Text(
+                            day,
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.black,
+                                    ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
                 ),
-            ],
+                const SizedBox(height: 8),
+                // Grid do calendário com paginação real usando PageView
+                if (hasMoreThan31Days)
+                  Expanded(
+                    child: PageView.builder(
+                      controller: _pageController,
+                      onPageChanged: _onPageChanged,
+                      itemCount: totalPages,
+                      itemBuilder: (context, pageIndex) {
+                        // Calcular dias para esta página
+                        final startIndex = pageIndex * _daysPerPage;
+                        final endIndex = (startIndex + _daysPerPage).clamp(0, allDays.length);
+                        final pageDays = allDays.sublist(startIndex, endIndex);
+                        
+                        return SingleChildScrollView(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: _buildCalendarGrid(pageDays, dailyBalances,
+                                dailyBudgetBalances, dailyTransactions, context, dayHeight),
+                          ),
+                        );
+                      },
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: _buildCalendarGrid(days, dailyBalances,
+                            dailyBudgetBalances, dailyTransactions, context, dayHeight),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         );
       },
@@ -380,213 +423,421 @@ class _CalendarWidgetState extends CalendarWidgetState {
       weeks.add(currentWeek);
     }
 
+    // Agrupar semanas por mês para adicionar separadores
+    // Para páginas subsequentes, precisamos determinar o último mês da página anterior
+    List<Widget> weekWidgets = [];
+    int? lastMonth;
+    int? lastYear;
+    
+    // Se não é a primeira página, determinar o último mês da página anterior
+    if (_currentPageIndex > 0) {
+      final allDays = getDaysInRange(widget.startDate, widget.endDate);
+      final prevPageStartIndex = (_currentPageIndex - 1) * _daysPerPage;
+      if (prevPageStartIndex < allDays.length) {
+        final prevPageEndIndex = (prevPageStartIndex + _daysPerPage).clamp(0, allDays.length);
+        final prevPageDays = allDays.sublist(prevPageStartIndex, prevPageEndIndex);
+        if (prevPageDays.isNotEmpty) {
+          final lastDayOfPrevPage = prevPageDays.last;
+          lastMonth = lastDayOfPrevPage.month;
+          lastYear = lastDayOfPrevPage.year;
+        }
+      }
+    }
+    
+    for (int i = 0; i < weeks.length; i++) {
+      final week = weeks[i];
+      
+      // Encontrar todos os dias não-nulos da semana
+      List<DateTime> weekDays = [];
+      for (var day in week) {
+        if (day != null) {
+          weekDays.add(day);
+        }
+      }
+      
+      if (weekDays.isEmpty) {
+        // Semana vazia, apenas adicionar sem separador
+        weekWidgets.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: week.map((day) => const Expanded(child: SizedBox())).toList(),
+            ),
+          ),
+        );
+        continue;
+      }
+      
+      // Ordenar dias da semana cronologicamente
+      weekDays.sort((a, b) => a.compareTo(b));
+      
+      // Encontrar o primeiro e último dia da semana
+      final firstDayOfWeek = weekDays.first;
+      final lastDayOfWeek = weekDays.last;
+      
+      // Verificar se há algum dia de um novo mês nesta semana
+      bool hasNewMonth = false;
+      int? newMonth;
+      int? newYear;
+      
+      for (var day in weekDays) {
+        if (lastMonth == null) {
+          // Primeira semana da página
+          hasNewMonth = true;
+          newMonth = day.month;
+          newYear = day.year;
+          break;
+        } else if (day.month != lastMonth || day.year != lastYear) {
+          // Encontramos um dia de um novo mês
+          hasNewMonth = true;
+          newMonth = day.month;
+          newYear = day.year;
+          break;
+        }
+      }
+      
+      // Verificar se esta semana cruza dois meses (semana mista)
+      bool isMixedWeek = false;
+      int? firstMonthInWeek;
+      int? firstYearInWeek;
+      int splitIndex = -1;
+      
+      if (hasNewMonth && newMonth != null && newYear != null && lastMonth != null) {
+        // Verificar se o primeiro dia é do mês anterior e há dias do novo mês
+        if (firstDayOfWeek.month != newMonth || firstDayOfWeek.year != newYear) {
+          // Semana mista: começa com mês anterior e tem dias do novo mês
+          isMixedWeek = true;
+          firstMonthInWeek = firstDayOfWeek.month;
+          firstYearInWeek = firstDayOfWeek.year;
+          
+          // Encontrar o índice onde o mês muda na semana
+          for (int j = 0; j < week.length; j++) {
+            final day = week[j];
+            if (day != null && (day.month == newMonth && day.year == newYear)) {
+              splitIndex = j;
+              break;
+            }
+          }
+        }
+      }
+      
+      // Se encontramos um novo mês E o primeiro dia da semana é desse novo mês, adicionar separador
+      if (hasNewMonth && newMonth != null && newYear != null && !isMixedWeek) {
+        if (firstDayOfWeek.month == newMonth && firstDayOfWeek.year == newYear) {
+          // O primeiro dia da semana é do novo mês - adicionar separador ANTES desta semana
+          if (lastMonth == null) {
+            // Primeira semana da página
+            weekWidgets.add(_buildMonthSeparator(
+              null, 
+              null, 
+              newMonth, 
+              newYear
+            ));
+          } else {
+            // Mês mudou
+            weekWidgets.add(_buildMonthSeparator(
+              lastMonth, 
+              lastYear, 
+              newMonth, 
+              newYear
+            ));
+          }
+          lastMonth = newMonth;
+          lastYear = newYear;
+        }
+      }
+      
+      // Se é uma semana mista, dividir em duas partes com separador no meio
+      if (isMixedWeek && splitIndex >= 0 && firstMonthInWeek != null && firstYearInWeek != null && newMonth != null && newYear != null) {
+        // Primeira parte: dias do mês anterior
+        final firstPartDays = week.sublist(0, splitIndex);
+        final firstPartWidgets = firstPartDays.map((day) => _buildDayCell(day, dailyBalances, dailyBudgetBalances, dailyTransactions, context)).toList();
+        // Adicionar espaços vazios para completar a linha
+        firstPartWidgets.addAll(List.generate(7 - splitIndex, (_) => const Expanded(child: SizedBox())));
+        
+        weekWidgets.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: firstPartWidgets,
+            ),
+          ),
+        );
+        
+        // Adicionar separador entre as duas partes
+        weekWidgets.add(_buildMonthSeparator(
+          firstMonthInWeek,
+          firstYearInWeek,
+          newMonth,
+          newYear
+        ));
+        
+        // Segunda parte: dias do novo mês
+        final secondPartDays = week.sublist(splitIndex);
+        final secondPartWidgets = <Widget>[];
+        secondPartWidgets.addAll(List.generate(splitIndex, (_) => const Expanded(child: SizedBox())));
+        secondPartWidgets.addAll(secondPartDays.map((day) => _buildDayCell(day, dailyBalances, dailyBudgetBalances, dailyTransactions, context)).toList());
+        
+        weekWidgets.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: secondPartWidgets,
+            ),
+          ),
+        );
+        
+        lastMonth = newMonth;
+        lastYear = newYear;
+      } else {
+        // Semana normal - adicionar normalmente
+        // Atualizar último mês/ano com base no último dia da semana (mais recente)
+        lastMonth = lastDayOfWeek.month;
+        lastYear = lastDayOfWeek.year;
+        
+        // Adicionar a semana usando _buildDayCell
+        weekWidgets.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: week.map((day) => _buildDayCell(day, dailyBalances, dailyBudgetBalances, dailyTransactions, context)).toList(),
+            ),
+          ),
+        );
+      }
+    }
+    
     return Column(
       mainAxisSize: MainAxisSize.min,
-      children: weeks.map((week) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            children: week.map((day) {
-              if (day == null) {
-                return const Expanded(child: SizedBox());
-              }
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: weekWidgets,
+    );
+  }
 
-              // Tentar encontrar o saldo usando diferentes chaves possíveis
-              double? balance = dailyBalances[day];
-              if (balance == null) {
-                // Tentar com UTC
-                final dayUtc = DateTime.utc(day.year, day.month, day.day);
-                balance = dailyBalances[dayUtc];
-              }
-              if (balance == null) {
-                // Tentar com local
-                final dayLocal = DateTime(day.year, day.month, day.day);
-                balance = dailyBalances[dayLocal];
-              }
-              balance ??= 0.0;
+  Widget _buildDayCell(
+    DateTime? day,
+    Map<DateTime, double> dailyBalances,
+    Map<DateTime, BudgetBalances> dailyBudgetBalances,
+    Map<DateTime, List<Transaction>> dailyTransactions,
+    BuildContext context,
+  ) {
+    if (day == null) {
+      return const Expanded(child: SizedBox());
+    }
 
-              BudgetBalances? budgetBalances = dailyBudgetBalances[day];
-              if (budgetBalances == null) {
-                final dayUtc = DateTime.utc(day.year, day.month, day.day);
-                budgetBalances = dailyBudgetBalances[dayUtc];
-              }
-              if (budgetBalances == null) {
-                final dayLocal = DateTime(day.year, day.month, day.day);
-                budgetBalances = dailyBudgetBalances[dayLocal];
-              }
+    // Tentar encontrar o saldo usando diferentes chaves possíveis
+    double? balance = dailyBalances[day];
+    if (balance == null) {
+      final dayUtc = DateTime.utc(day.year, day.month, day.day);
+      balance = dailyBalances[dayUtc];
+    }
+    if (balance == null) {
+      final dayLocal = DateTime(day.year, day.month, day.day);
+      balance = dailyBalances[dayLocal];
+    }
+    balance ??= 0.0;
 
-              List<Transaction> dayTransactions = dailyTransactions[day] ?? [];
-              if (dayTransactions.isEmpty) {
-                final dayUtc = DateTime.utc(day.year, day.month, day.day);
-                dayTransactions = dailyTransactions[dayUtc] ?? [];
-              }
-              if (dayTransactions.isEmpty) {
-                final dayLocal = DateTime(day.year, day.month, day.day);
-                dayTransactions = dailyTransactions[dayLocal] ?? [];
-              }
-              final hasTransactions = dayTransactions.isNotEmpty;
+    BudgetBalances? budgetBalances = dailyBudgetBalances[day];
+    if (budgetBalances == null) {
+      final dayUtc = DateTime.utc(day.year, day.month, day.day);
+      budgetBalances = dailyBudgetBalances[dayUtc];
+    }
+    if (budgetBalances == null) {
+      final dayLocal = DateTime(day.year, day.month, day.day);
+      budgetBalances = dailyBudgetBalances[dayLocal];
+    }
 
-              // Verificar se é o dia de hoje e se está no período
-              final today = DateTime.now();
-              final isToday = isSameDay(day, today);
-              final todayNormalized = DateTime(today.year, today.month, today.day);
-              final startNormalized = DateTime(widget.startDate.year, widget.startDate.month, widget.startDate.day);
-              final endNormalized = DateTime(widget.endDate.year, widget.endDate.month, widget.endDate.day);
-              final isTodayInPeriod = isToday && 
-                  (todayNormalized.isAfter(startNormalized) || isSameDay(todayNormalized, startNormalized)) &&
-                  (todayNormalized.isBefore(endNormalized) || isSameDay(todayNormalized, endNormalized));
+    List<Transaction> dayTransactions = dailyTransactions[day] ?? [];
+    if (dayTransactions.isEmpty) {
+      final dayUtc = DateTime.utc(day.year, day.month, day.day);
+      dayTransactions = dailyTransactions[dayUtc] ?? [];
+    }
+    if (dayTransactions.isEmpty) {
+      final dayLocal = DateTime(day.year, day.month, day.day);
+      dayTransactions = dailyTransactions[dayLocal] ?? [];
+    }
+    final hasTransactions = dayTransactions.isNotEmpty;
 
-              // Determinar tipo de transações do dia
-              final hasGains =
-                  dayTransactions.any((t) => t.type == TransactionType.ganho);
-              final hasExpenses =
-                  dayTransactions.any((t) => t.type == TransactionType.despesa);
+    // Verificar se é o dia de hoje e se está no período
+    final today = DateTime.now();
+    final isToday = isSameDay(day, today);
+    final todayNormalized = DateTime(today.year, today.month, today.day);
+    final startNormalized = DateTime(widget.startDate.year, widget.startDate.month, widget.startDate.day);
+    final endNormalized = DateTime(widget.endDate.year, widget.endDate.month, widget.endDate.day);
+    final isTodayInPeriod = isToday && 
+        (todayNormalized.isAfter(startNormalized) || isSameDay(todayNormalized, startNormalized)) &&
+        (todayNormalized.isBefore(endNormalized) || isSameDay(todayNormalized, endNormalized));
 
-              // Determinar cor baseada nos tipos de transações
-              Color? dayColor;
-              Color? borderColor;
-              if (hasTransactions) {
-                if (hasGains && !hasExpenses) {
-                  // Verde: apenas ganhos
-                  dayColor = AppTheme.incomeGreen.withOpacity(0.1);
-                  borderColor = AppTheme.incomeGreen;
-                } else {
-                  // Cinzento escuro: apenas despesas ou ambos
-                  dayColor = AppTheme.darkGray.withOpacity(0.2);
-                  borderColor = AppTheme.darkGray;
-                }
-              }
+    // Determinar tipo de transações do dia
+    final hasGains = dayTransactions.any((t) => t.type == TransactionType.ganho);
+    final hasExpenses = dayTransactions.any((t) => t.type == TransactionType.despesa);
 
-              return Expanded(
-                child: AspectRatio(
-                  aspectRatio: 1.0,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: Tooltip(
-                      message: _buildTooltipMessage(
-                          balance, budgetBalances, dayTransactions),
-                        child: GestureDetector(
-                        onTap: () => widget.onDayTap(day),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: dayColor ?? Colors.transparent,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: borderColor ?? Colors.transparent,
-                              width: hasTransactions ? 2 : 0,
-                            ),
-                          ),
-                          child: Stack(
-                            children: [
-                              Column(
-                                children: [
-                                  // Parte de cima: dia em quadrado interno com outro tom de cinza
-                                  Expanded(
-                                    flex: 1,
-                                    child: Container(
-                                      width: double.infinity,
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.darkGray.withOpacity(0.1),
-                                        borderRadius: const BorderRadius.only(
-                                          topLeft: Radius.circular(8),
-                                          topRight: Radius.circular(8),
-                                        ),
-                                      ),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 4, vertical: 4),
-                                        child: Container(
-                                          width: double.infinity,
-                                          height: 38,
-                                          decoration: BoxDecoration(
-                                            color:
-                                                AppTheme.darkGray.withOpacity(0.2),
-                                            borderRadius: BorderRadius.circular(6),
-                                          ),
-                                          child: Center(
-                                            child: Text(
-                                              '${day.day}',
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .titleMedium
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.w600,
-                                                    color: AppTheme.black,
-                                                    fontSize:
-                                                        ResponsiveFonts.getFontSize(
-                                                            context, 12),
-                                                  ),
-                                              textAlign: TextAlign.center,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  // Parte de baixo: saldo em cinza
-                                  Expanded(
-                                    flex: 1,
-                                    child: Container(
-                                      width: double.infinity,
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.darkGray.withOpacity(0.1),
-                                        borderRadius: const BorderRadius.only(
-                                          bottomLeft: Radius.circular(8),
-                                          bottomRight: Radius.circular(8),
-                                        ),
-                                      ),
-                                      child: Center(
-                                        child: Text(
-                                          _formatBalanceForDay(balance),
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w600,
-                                                color: AppTheme.darkGray,
-                                                fontSize: ResponsiveFonts
-                                                    .getFontSizeWithMin(
-                                                        context, 9, 8.5),
-                                              ),
-                                          textAlign: TextAlign.center,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
+    // Determinar cor baseada nos tipos de transações
+    Color? dayColor;
+    Color? borderColor;
+    if (hasTransactions) {
+      if (hasGains && !hasExpenses) {
+        dayColor = AppTheme.incomeGreen.withOpacity(0.1);
+        borderColor = AppTheme.incomeGreen;
+      } else {
+        dayColor = AppTheme.darkGray.withOpacity(0.2);
+        borderColor = AppTheme.darkGray;
+      }
+    }
+
+    return Expanded(
+      child: AspectRatio(
+        aspectRatio: 1.0,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: Tooltip(
+            message: _buildTooltipMessage(balance, budgetBalances, dayTransactions),
+            child: GestureDetector(
+              onTap: () => widget.onDayTap(day),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: dayColor ?? Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: borderColor ?? Colors.transparent,
+                    width: hasTransactions ? 2 : 0,
+                  ),
+                ),
+                child: Stack(
+                  children: [
+                    Column(
+                      children: [
+                        Expanded(
+                          flex: 1,
+                          child: Container(
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: AppTheme.darkGray.withOpacity(0.1),
+                              borderRadius: const BorderRadius.only(
+                                topLeft: Radius.circular(8),
+                                topRight: Radius.circular(8),
                               ),
-                              // Indicador para o dia de hoje (se estiver no período)
-                              if (isTodayInPeriod)
-                                Positioned(
-                                  top: 2,
-                                  right: 2,
-                                  child: Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      color: AppTheme.incomeGreen,
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: AppTheme.white,
-                                        width: 1.5,
-                                      ),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                              child: Container(
+                                width: double.infinity,
+                                height: 38,
+                                decoration: BoxDecoration(
+                                  color: AppTheme.darkGray.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    '${day.day}',
+                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.black,
+                                      fontSize: ResponsiveFonts.getFontSize(context, 12),
                                     ),
+                                    textAlign: TextAlign.center,
                                   ),
                                 ),
-                            ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 1,
+                          child: Container(
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: AppTheme.darkGray.withOpacity(0.1),
+                              borderRadius: const BorderRadius.only(
+                                bottomLeft: Radius.circular(8),
+                                bottomRight: Radius.circular(8),
+                              ),
+                            ),
+                            child: Center(
+                              child: Text(
+                                _formatBalanceForDay(balance),
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.darkGray,
+                                  fontSize: ResponsiveFonts.getFontSizeWithMin(context, 9, 8.5),
+                                ),
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (isTodayInPeriod)
+                      Positioned(
+                        top: 2,
+                        right: 2,
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: AppTheme.incomeGreen,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: AppTheme.white,
+                              width: 1.5,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
+                  ],
                 ),
-              );
-            }).toList(),
+              ),
+            ),
           ),
-        );
-      }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMonthSeparator(int? prevMonth, int? prevYear, int currentMonth, int currentYear) {
+    // Separador minimalista entre meses
+    // Usar nomes de meses em português diretamente em vez de DateFormat para evitar problemas de locale
+    const monthNames = [
+      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+    ];
+    final monthName = monthNames[currentMonth - 1];
+    
+    return Builder(
+      builder: (context) => Container(
+        margin: const EdgeInsets.only(top: 4, bottom: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        child: Row(
+          children: [
+            Expanded(
+              child: Divider(
+                thickness: 1,
+                color: AppTheme.lighterGray.withOpacity(0.5),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                '$monthName $currentYear',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppTheme.darkGray.withOpacity(0.7),
+                      fontWeight: FontWeight.w500,
+                      fontSize: 11,
+                    ),
+              ),
+            ),
+            Expanded(
+              child: Divider(
+                thickness: 1,
+                color: AppTheme.lighterGray.withOpacity(0.5),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

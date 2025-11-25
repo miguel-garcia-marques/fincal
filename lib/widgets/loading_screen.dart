@@ -2,11 +2,8 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
 class LoadingScreen extends StatefulWidget {
-  final String? message;
-
   const LoadingScreen({
     super.key,
-    this.message,
   });
 
   @override
@@ -59,80 +56,39 @@ class _LoadingScreenState extends State<LoadingScreen>
     return Scaffold(
       backgroundColor: AppTheme.white,
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            AnimatedBuilder(
-              animation: _controller,
-              builder: (context, child) {
-                return FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: ScaleTransition(
-                    scale: _scaleAnimation,
-                    child: Container(
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            return FadeTransition(
+              opacity: _fadeAnimation,
+              child: ScaleTransition(
+                scale: _scaleAnimation,
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.black.withOpacity(0.1),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: Image.asset(
+                      'assets/app_icon.png',
                       width: 80,
                       height: 80,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.black.withOpacity(0.2),
-                            blurRadius: 20,
-                            spreadRadius: 5,
-                          ),
-                        ],
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: Image.asset(
-                          'assets/app_icon.png',
-                          width: 80,
-                          height: 80,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
+                      fit: BoxFit.cover,
                     ),
                   ),
-                );
-              },
-            ),
-            const SizedBox(height: 32),
-            Text(
-              'FinCal',
-              style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                    color: AppTheme.black,
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 16),
-            if (widget.message != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Text(
-                  widget.message!,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppTheme.darkGray,
-                      ),
                 ),
-              )
-            else
-              Text(
-                'Carregando seus dados...',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppTheme.darkGray,
-                    ),
               ),
-            const SizedBox(height: 32),
-            SizedBox(
-              width: 40,
-              height: 40,
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(AppTheme.black),
-                strokeWidth: 3,
-              ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );

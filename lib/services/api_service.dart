@@ -195,6 +195,40 @@ class ApiService {
     }
   }
 
+  Future<Transaction> createPeriodicException(
+    String originalId,
+    DateTime date,
+    Transaction newTransaction, {
+    required String walletId,
+  }) async {
+    try {
+      final dateStr = _formatDateForApi(date);
+      final transactionJson = newTransaction.toJson();
+      transactionJson['date'] = dateStr; // Garantir que a data da exceção é enviada
+      
+      final response = await http.post(
+        Uri.parse('$baseUrl/transactions/$originalId/exception?walletId=$walletId'),
+        headers: _getHeaders(),
+        body: json.encode({
+          'date': dateStr,
+          ...transactionJson,
+        }),
+      );
+
+      await ApiErrorHandler.handleResponse(response);
+
+      if (response.statusCode != 201) {
+        final errorBody = json.decode(response.body);
+        throw Exception(errorBody['message'] ?? 'Failed to create exception');
+      }
+
+      final decoded = json.decode(response.body);
+      return Transaction.fromJson(decoded);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<List<Transaction>> getTransactionsInRange(
     DateTime startDate,
     DateTime endDate, {

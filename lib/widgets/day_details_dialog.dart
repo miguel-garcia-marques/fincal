@@ -426,17 +426,36 @@ class _DayDetailsDialogState extends State<DayDetailsDialog> {
                                 minHeight: 28,
                               ),
                               onPressed: () async {
+                                Transaction? transactionToEdit = transaction;
+                                
+                                // Se for ocorrência periódica, buscar a transação original
+                                if (transaction.id.contains('_') &&
+                                    (transaction.frequency == TransactionFrequency.weekly ||
+                                        transaction.frequency == TransactionFrequency.monthly)) {
+                                  try {
+                                    final dbService = DatabaseService();
+                                    final parts = transaction.id.split('_');
+                                    if (parts.length >= 2) {
+                                      final originalId = parts.sublist(0, parts.length - 1).join('_');
+                                      final allTransactions = await dbService.getAllTransactions(walletId: widget.walletId!);
+                                      transactionToEdit = allTransactions.firstWhere(
+                                        (t) => t.id == originalId,
+                                        orElse: () => transaction,
+                                      );
+                                    }
+                                  } catch (e) {
+                                    transactionToEdit = transaction;
+                                  }
+                                }
+                                
                                 Navigator.of(context).pop();
                                 final result = await Navigator.of(context).push(
                                   MaterialPageRoute(
                                     builder: (context) => AddTransactionScreen(
-                                      transactionToEdit: transaction.id.contains('_') &&
-                                              (transaction.frequency == TransactionFrequency.weekly ||
-                                                  transaction.frequency == TransactionFrequency.monthly)
-                                          ? null
-                                          : transaction,
+                                      transactionToEdit: transactionToEdit,
                                       walletId: widget.walletId!,
                                       userId: widget.userId!,
+                                      skipImportOption: true,
                                     ),
                                     fullscreenDialog: true,
                                   ),

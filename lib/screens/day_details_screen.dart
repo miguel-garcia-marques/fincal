@@ -460,36 +460,33 @@ class _DayDetailsScreenState extends State<DayDetailsScreen> {
                                   minHeight: 36,
                                 ),
                                 onPressed: () async {
-                                  // Se for ocorrência periódica, abrir tela de detalhes primeiro
+                                  Transaction? transactionToEdit = transaction;
+                                  
+                                  // Se for ocorrência periódica, buscar a transação original
                                   if (transaction.id.contains('_') &&
                                       (transaction.frequency == TransactionFrequency.weekly ||
                                           transaction.frequency == TransactionFrequency.monthly)) {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (context) => TransactionDetailsScreen(
-                                          transaction: transaction,
-                                          walletId: widget.walletId!,
-                                          userId: widget.userId!,
-                                          walletPermission: 'write',
-                                        ),
-                                        fullscreenDialog: true,
-                                      ),
-                                    ).then((result) {
-                                      if (result == true && widget.onTransactionDeleted != null) {
-                                        widget.onTransactionDeleted!();
-                                        setState(() {
-                                          _localTransactions = List.from(widget.transactions);
-                                        });
+                                    try {
+                                      final dbService = DatabaseService();
+                                      final parts = transaction.id.split('_');
+                                      if (parts.length >= 2) {
+                                        final originalId = parts.sublist(0, parts.length - 1).join('_');
+                                        final allTransactions = await dbService.getAllTransactions(walletId: widget.walletId!);
+                                        transactionToEdit = allTransactions.firstWhere(
+                                          (t) => t.id == originalId,
+                                          orElse: () => transaction,
+                                        );
                                       }
-                                    });
-                                    return;
+                                    } catch (e) {
+                                      transactionToEdit = transaction;
+                                    }
                                   }
                                   
-                                  // Para transações únicas, abrir direto na vista de fatura pré-preenchida
+                                  // Abrir tela de edição diretamente
                                   final result = await Navigator.of(context).push(
                                     MaterialPageRoute(
                                       builder: (context) => AddTransactionScreen(
-                                        transactionToEdit: transaction,
+                                        transactionToEdit: transactionToEdit,
                                         walletId: widget.walletId!,
                                         userId: widget.userId!,
                                         skipImportOption: true, // Ir direto para vista de fatura

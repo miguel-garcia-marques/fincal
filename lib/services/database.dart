@@ -58,6 +58,21 @@ class DatabaseService {
     }
   }
 
+  Future<void> createPeriodicException(
+    String originalId,
+    DateTime date,
+    Transaction newTransaction, {
+    required String walletId,
+  }) async {
+    if (useApi) {
+      await _apiService.createPeriodicException(originalId, date, newTransaction, walletId: walletId);
+    } else {
+      // Implementação local simplificada: apenas salvar a nova transação
+      // (Em um cenário real, precisaria atualizar a original também)
+      await _saveTransactionLocal(newTransaction);
+    }
+  }
+
   Future<void> updateTransaction(Transaction transaction, {required String walletId}) async {
     if (useApi) {
       await _apiService.updateTransaction(transaction, walletId: walletId);

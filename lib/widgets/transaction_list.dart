@@ -4,7 +4,7 @@ import '../models/transaction.dart';
 import '../utils/date_utils.dart';
 import '../theme/app_theme.dart';
 import '../services/database.dart';
-import 'add_transaction_dialog.dart';
+import '../screens/add_transaction_screen.dart';
 import '../screens/transaction_details_screen.dart';
 
 class TransactionListWidget extends StatefulWidget {
@@ -228,12 +228,15 @@ class _TransactionListWidgetState extends State<TransactionListWidget> {
                       }
                     }
                     
-                    final result = await showDialog(
-                      context: context,
-                      builder: (context) => AddTransactionDialog(
-                        transactionToEdit: transactionToEdit,
-                        walletId: widget.walletId,
-                        userId: widget.userId,
+                    final result = await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => AddTransactionScreen(
+                          transactionToEdit: transactionToEdit,
+                          walletId: widget.walletId,
+                          userId: widget.userId,
+                          skipImportOption: true,
+                        ),
+                        fullscreenDialog: true,
                       ),
                     );
                     if (result == true && widget.onTransactionUpdated != null) {

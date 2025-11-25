@@ -147,6 +147,9 @@ class AuthService {
 
   // Fazer logout
   Future<void> signOut() async {
+    // Obter ID do usuário antes de fazer logout (para limpar flags de passkey)
+    final userId = _supabase.auth.currentUser?.id;
+    
     // Limpar todos os caches primeiro
     await _cacheService.invalidateUserCache();
     await _cacheService.clearAllWalletMembersCache();
@@ -157,11 +160,17 @@ class AuthService {
     // Limpar wallet ativa
     await _walletStorageService.clearActiveWalletId();
     
-    // Limpar dados pendentes do login
+    // Limpar dados pendentes do login e flags de passkey
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('pending_user_name');
       await prefs.remove('pending_user_email');
+      
+      // Limpar flags de passkey do usuário atual
+      if (userId != null) {
+        await prefs.remove('user_has_passkeys_$userId');
+        await prefs.remove('passkey_authenticated_$userId');
+      }
     } catch (e) {
       // Ignorar erros ao limpar dados pendentes
     }

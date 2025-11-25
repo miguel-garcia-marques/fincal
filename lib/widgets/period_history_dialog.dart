@@ -285,24 +285,15 @@ class _PeriodHistoryItemState extends State<_PeriodHistoryItem> {
                               fontWeight: FontWeight.w600,
                             ),
                   ),
-                  const SizedBox(height: 4),
-                  _isLoading
-                      ? SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              AppTheme.darkGray,
-                            ),
+                  if (!_isLoading) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '${_transactionCount ?? _currentPeriod.transactionIds.length} transações',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppTheme.darkGray,
                           ),
-                        )
-                      : Text(
-                          '${_transactionCount ?? _currentPeriod.transactionIds.length} transações',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: AppTheme.darkGray,
-                              ),
-                        ),
+                    ),
+                  ],
                 ],
               ),
             ),

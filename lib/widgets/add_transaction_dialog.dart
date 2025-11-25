@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:convert';
+import 'dart:typed_data';
 import '../models/transaction.dart';
 import '../services/database.dart';
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/date_utils.dart';
 
@@ -41,6 +47,10 @@ class _AddTransactionDialogState extends State<AddTransactionDialog> {
   TransactionFrequency _frequency = TransactionFrequency.unique;
   int? _selectedDayOfWeek;
   int? _selectedDayOfMonth;
+  
+  // AI Scanning
+  bool _isProcessingImage = false;
+  final ImagePicker _imagePicker = ImagePicker();
 
   @override
   void initState() {
@@ -248,11 +258,84 @@ class _AddTransactionDialogState extends State<AddTransactionDialog> {
 
       try {
         final dbService = DatabaseService();
-        if (widget.transactionToEdit != null) {
-          await dbService.updateTransaction(transaction, walletId: widget.walletId);
+        
+        // Verificar se é uma ocorrência de transação periódica (ID contém underscore)
+        if (widget.transactionToEdit != null && 
+            widget.transactionToEdit!.id.contains('_')) {
+          
+          // Perguntar ao usuário se quer editar apenas esta ocorrência ou todas
+          final result = await showDialog<String>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Editar Transação Periódica'),
+              content: const Text('Você deseja editar apenas esta ocorrência ou todas as futuras?'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, 'cancel'),
+                  child: const Text('Cancelar'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, 'series'),
+                  child: const Text('Todas'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, 'single'),
+                  child: const Text('Apenas esta'),
+                ),
+              ],
+            ),
+          );
+
+          if (result == 'cancel' || result == null) return;
+
+          if (result == 'single') {
+            // Extrair ID original e data
+            final parts = widget.transactionToEdit!.id.split('_');
+            final originalId = parts[0];
+            // A data original da ocorrência é a data que veio na transação para editar
+            final originalDate = widget.transactionToEdit!.date;
+
+            await dbService.createPeriodicException(
+              originalId,
+              originalDate,
+              transaction,
+              walletId: widget.walletId,
+            );
+          } else {
+            // Editar a série original
+            final parts = widget.transactionToEdit!.id.split('_');
+            final originalId = parts[0];
+            
+            // Criar cópia da transação com ID original
+            final originalTransaction = Transaction(
+              id: originalId,
+              type: transaction.type,
+              date: transaction.date,
+              description: transaction.description,
+              amount: transaction.amount,
+              category: transaction.category,
+              isSalary: transaction.isSalary,
+              salaryAllocation: transaction.salaryAllocation,
+              expenseBudgetCategory: transaction.expenseBudgetCategory,
+              frequency: transaction.frequency,
+              dayOfWeek: transaction.dayOfWeek,
+              dayOfMonth: transaction.dayOfMonth,
+              walletId: transaction.walletId,
+              createdBy: transaction.createdBy,
+              excludedDates: widget.transactionToEdit!.excludedDates, // Manter datas excluídas
+            );
+            
+            await dbService.updateTransaction(originalTransaction, walletId: widget.walletId);
+          }
         } else {
-          await dbService.saveTransaction(transaction, walletId: widget.walletId);
+          // Transação normal ou edição direta
+          if (widget.transactionToEdit != null) {
+            await dbService.updateTransaction(transaction, walletId: widget.walletId);
+          } else {
+            await dbService.saveTransaction(transaction, walletId: widget.walletId);
+          }
         }
+        
         if (mounted) {
           Navigator.of(context).pop(true);
         }
@@ -286,7 +369,54 @@ class _AddTransactionDialogState extends State<AddTransactionDialog> {
                   style: Theme.of(context).textTheme.displaySmall,
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
+
+                // Botão de Scan IA
+                Center(
+                  child: InkWell(
+                    onTap: _processInvoiceImage,
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.black,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_isProcessingImage)
+                            const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          else
+                            const Icon(
+                              Icons.camera_alt,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isProcessingImage
+                                ? 'Processando...'
+                                : 'Scan Fatura (IA)',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
 
                 // Tipo de transação
                 Text(

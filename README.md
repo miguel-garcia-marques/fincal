@@ -2,277 +2,144 @@
 
 Uma aplicação web moderna de gestão financeira construída com Flutter e backend Node.js + MongoDB.
 
-## Características
+## ✨ Características
 
-- 🔐 **Autenticação**: Login seguro com Supabase Auth (email/password)
-- 👤 **Multi-usuário**: Cada usuário tem sua própria collection no MongoDB
-- 📅 **Calendário Inteligente**: Visualização mensal com cálculo automático de saldo disponível por dia
-- 💰 **Gestão de Transações**: Adicione ganhos e despesas com categorias personalizadas
-- 💼 **Gestão de Salário**: Distribuição automática do salário em Gastos, Lazer e Poupança
-- 📊 **Análise Financeira**: Visualize resumos mensais de ganhos, despesas e saldo
-- 🔄 **Transações Periódicas**: Suporte para transações semanais e mensais
-- 🎨 **Design Moderno**: Interface elegante em preto e branco com toques de verde/vermelho para valores
-- 📱 **Responsivo**: Adaptável a diferentes tamanhos de ecrã
-- 🗄️ **MongoDB**: Base de dados robusta com backend Node.js
+- **🔐 Autenticação Robusta**:
+    - Login com Supabase Auth (Email/Password)
+    - **Passkeys**: Login biométrico sem senha (TouchID/FaceID)
+    - Verificação de Email
+- **🤖 IA Financeira**:
+    - **Extração de Faturas**: Tire uma foto da fatura e a IA (Gemini) extrai valor, data e categoria automaticamente.
+- **💰 Gestão Financeira**:
+    - **Calendário Inteligente**: Visualização mensal com cálculo de saldo diário.
+    - **Gestão de Salário**: Distribuição automática em Gastos (50%), Lazer (30%) e Poupança (20%).
+    - **Transações Periódicas**: Suporte a transações únicas, semanais e mensais.
+- **👤 Perfil de Usuário**:
+    - Foto de perfil com upload e redimensionamento automático.
+    - Multi-usuário: Cada usuário tem sua própria collection no MongoDB.
+- **📱 Experiência Nativa**:
+    - PWA com suporte a instalação no iOS/Android.
+    - Universal Links para abrir convites diretamente no app.
 
-## Estrutura do Projeto
+## 🛠️ Tech Stack
 
-```
-Finance Management/
-├── lib/                    # Código Flutter
-│   ├── models/            # Modelos de dados
-│   ├── screens/           # Telas da aplicação
-│   ├── widgets/           # Componentes reutilizáveis
-│   ├── services/          # Serviços (API, Database)
-│   ├── theme/             # Tema e estilos
-│   └── utils/             # Utilitários
-├── backend/               # Backend Node.js
-│   ├── config/           # Configurações
-│   ├── models/           # Modelos MongoDB
-│   ├── routes/           # Rotas da API
-│   └── utils/            # Utilitários
-└── web/                  # Configuração web
-```
+- **Frontend**: Flutter (Web & Mobile)
+- **Backend**: Node.js, Express
+- **Database**: MongoDB (Dados do usuário), Supabase (Auth & Storage)
+- **AI**: Google Gemini Flash 1.5
 
-## Instalação
+## 🚀 Configuração e Setup
 
 ### Pré-requisitos
+- Flutter SDK (3.0.0+)
+- Node.js (v14+)
+- MongoDB (Local ou Atlas)
+- Conta Supabase
 
-- Flutter SDK (versão 3.0.0 ou superior)
-- Node.js (v14 ou superior)
-- MongoDB (local ou MongoDB Atlas)
-- Conta no Supabase (gratuita em https://supabase.com)
+### 1. Variáveis de Ambiente (.env)
 
-### 1. Instalar Dependências Flutter
+Crie um arquivo `.env` no diretório `backend/` com as seguintes variáveis:
 
-```bash
-flutter pub get
+```env
+# Servidor
+PORT=3000
+
+# Banco de Dados
+MONGODB_URI=mongodb://localhost:27017/fincal
+# Para Atlas: mongodb+srv://user:pass@cluster.mongodb.net/fincal?retryWrites=true&w=majority
+
+# Supabase (Auth & Storage)
+SUPABASE_URL=https://seu-projeto.supabase.co
+SUPABASE_ANON_KEY=sua-chave-anon-publica
+SUPABASE_SERVICE_ROLE_KEY=sua-chave-service-role-secreta # Necessário para deletar usuários
+SUPABASE_JWT_SECRET=seu-legacy-jwt-secret # Necessário para Passkeys (Settings -> API -> JWT Settings)
+
+# Passkeys (WebAuthn)
+# Dev: localhost | Prod: seu-app.web.app (sem https://)
+RP_ID=localhost 
+# Dev: http://localhost:8080 | Prod: https://seu-app.web.app
+ORIGIN=http://localhost:8080 
+
+# AI (Google Gemini)
+GEMINI_API_KEY=sua-chave-api-gemini
 ```
 
-### 2. Configurar Backend
+### 2. Configuração do Supabase
+
+1.  **Auth**: Habilite Email/Password em *Authentication > Providers*.
+2.  **Storage**: Crie um bucket público chamado `profile-pictures`. Configure as políticas RLS:
+    *   SELECT: Public
+    *   INSERT/UPDATE/DELETE: Authenticated users (apenas na própria pasta)
+3.  **Email Templates**: Configure o template de confirmação em *Authentication > Email Templates*.
+4.  **Redirect URLs**: Adicione a URL de produção (ex: `https://fincal-f7.web.app`) em *Authentication > URL Configuration*.
+
+## 💻 Desenvolvimento
+
+### Instalação
 
 ```bash
+# Frontend
+flutter pub get
+
+# Backend
 cd backend
 npm install
 ```
 
-Criar ficheiro `.env`:
-```bash
-cp .env.example .env
-```
+### Executar Localmente
 
-Editar `.env` e configurar:
-```env
-PORT=3000
-MONGODB_URI=mongodb://localhost:27017/fincal
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key-here
-```
+1.  **Backend**:
+    ```bash
+    cd backend
+    npm run dev
+    ```
+2.  **Frontend**:
+    ```bash
+    flutter run -d chrome
+    # Ou com variáveis de ambiente específicas
+    flutter run -d chrome --dart-define=SUPABASE_URL=...
+    ```
 
-**Nota**: A aplicação usa a database `fincal` (não `test`). O sistema automaticamente substitui `test` por `fincal` se detectado.
+### Ícones e PWA
+Os ícones estão em `web/icons/`. Para atualizar, substitua os arquivos e rode `flutter build web`.
+Para suporte a Universal Links no iOS (abrir app via QR Code), o arquivo `apple-app-site-association` já está configurado.
 
-Para MongoDB Atlas:
-```env
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/fincal?retryWrites=true&w=majority
-```
+## 📦 Deploy
 
-### 2.1. Configurar Supabase
-
-1. Crie uma conta em https://supabase.com
-2. Crie um novo projeto
-3. Vá em **Settings** > **API**
-4. Copie a **URL** e a **anon/public key**
-5. Adicione essas credenciais no arquivo `.env` do backend
-
-**Importante**: No Supabase, certifique-se de que:
-- A autenticação por email/password está habilitada (Settings > Auth > Providers)
-- O email confirmation está desabilitado para desenvolvimento (Settings > Auth > Email Templates)
-
-### 2.2. Configurar Flutter com Supabase
-
-Edite `lib/main.dart` e adicione suas credenciais do Supabase:
-
-```dart
-await Supabase.initialize(
-  url: 'https://your-project.supabase.co',
-  anonKey: 'your-anon-key-here',
-);
-```
-
-**Alternativa**: Use variáveis de ambiente ao executar:
-```bash
-flutter run --dart-define=SUPABASE_URL=https://your-project.supabase.co --dart-define=SUPABASE_ANON_KEY=your-anon-key-here
-```
-
-### 3. Iniciar Backend
+Use o script automatizado para deploy no Firebase Hosting:
 
 ```bash
-cd backend
-npm run dev
+./build_prod.sh
 ```
+Este script carrega as variáveis do `.env`, faz o build (`flutter build web --release`) e deploy (`firebase deploy`).
 
-O servidor estará disponível em `http://localhost:3000`
+## 🔐 Segurança
 
-### 4. Configurar URL da API no Flutter
+- **Tokens**:
+    - Mobile: Armazenados seguramente (Keychain/EncryptedSharedPreferences).
+    - Web: `localStorage` (com expiração de 1h e Refresh Tokens automáticos).
+- **Passkeys**: Implementação segura usando WebAuthn. O backend gera tokens JWT manualmente usando `SUPABASE_JWT_SECRET` para permitir login sem senha.
+- **Proteção**:
+    - Rate Limiting em rotas de auth.
+    - Sanitização de inputs contra XSS.
+    - Headers de segurança (HSTS, NoSniff) configurados no `firebase.json`.
 
-Editar `lib/services/api_service.dart` e ajustar `baseUrl`:
+## 🐛 Troubleshooting
 
-```dart
-static const String baseUrl = 'http://localhost:3000/api';
-```
+### Passkeys pedindo senha?
+Verifique se `SUPABASE_JWT_SECRET` está configurado no backend. Sem ele, o backend não consegue gerar a sessão automaticamente e faz fallback para senha.
 
-**Nota importante para diferentes ambientes:**
-- **Web (Chrome)**: `http://localhost:3000/api`
-- **Android Emulator**: `http://10.0.2.2:3000/api`
-- **iOS Simulator**: `http://localhost:3000/api`
-- **Dispositivo Físico**: `http://SEU_IP_LOCAL:3000/api` (ex: `http://192.168.1.100:3000/api`)
+### Email de verificação não chega?
+1.  Verifique se "Enable email confirmations" está ON no Supabase.
+2.  Configure um SMTP customizado (Resend, SendGrid) para produção, pois o SMTP padrão do Supabase tem limite baixo (4/hora).
 
-### 5. Executar Aplicação Flutter
+### Tela branca no deploy?
+1.  Verifique o console do navegador (F12) por erros JS ou 404.
+2.  Certifique-se de que o build foi feito com `--release`.
+3.  Verifique se as variáveis de ambiente (Supabase URL/Key) foram injetadas corretamente durante o build.
 
-```bash
-flutter run -d chrome
-```
+### Erro de CORS?
+Verifique se o domínio do frontend (ex: `https://fincal-f7.web.app`) está na lista de `allowedOrigins` no `backend/server.js`.
 
-Ou para construir para produção:
-```bash
-flutter build web
-```
-
-## Funcionalidades Detalhadas
-
-### Gestão de Salário
-
-Quando uma transação é marcada como "Ganho" e "É salário?", pode definir percentagens:
-- **Gastos**: Percentagem para despesas essenciais
-- **Lazer**: Percentagem para entretenimento
-- **Poupança**: Percentagem para poupança
-
-As percentagens devem somar 100%. O sistema calcula automaticamente os valores.
-
-### Categorização de Despesas
-
-Todas as despesas devem ser categorizadas em:
-- **Gastos**: Despesas essenciais (deduz do orçamento de gastos)
-- **Lazer**: Despesas de entretenimento (deduz do orçamento de lazer)
-- **Poupança**: Despesas relacionadas a poupança (deduz do orçamento de poupança)
-
-### Transações Periódicas
-
-- **Única**: Transação única (padrão)
-- **Semanal**: Repete todas as semanas no dia selecionado
-- **Mensal**: Repete todos os meses no dia selecionado
-
-As transações periódicas são geradas automaticamente quando visualiza um período no calendário.
-
-### Visualização no Calendário
-
-O calendário mostra:
-- Saldo total disponível
-- Valores separados por categoria (G: Gastos, L: Lazer, P: Poupança)
-- Indicadores visuais para dias com transações
-
-## API Endpoints
-
-**Todas as rotas requerem autenticação via Bearer token no header Authorization.**
-
-### GET /api/transactions
-Obter todas as transações do usuário autenticado
-
-**Headers:**
-```
-Authorization: Bearer <supabase-access-token>
-```
-
-### GET /api/transactions/range?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
-Obter transações em um período (inclui transações periódicas geradas) do usuário autenticado
-
-**Headers:**
-```
-Authorization: Bearer <supabase-access-token>
-```
-
-### POST /api/transactions
-Criar nova transação para o usuário autenticado
-
-**Headers:**
-```
-Authorization: Bearer <supabase-access-token>
-```
-
-**Body exemplo:**
-```json
-{
-  "id": "1234567890",
-  "type": "ganho",
-  "date": "2025-01-15",
-  "amount": 1400,
-  "category": "miscelaneos",
-  "isSalary": true,
-  "salaryAllocation": {
-    "gastosPercent": 50,
-    "lazerPercent": 30,
-    "poupancaPercent": 20
-  },
-  "frequency": "unique"
-}
-```
-
-### PUT /api/transactions/:id
-Atualizar transação
-
-### DELETE /api/transactions/:id
-Deletar transação
-
-## Tecnologias
-
-### Frontend
-- **Flutter**: Framework de UI multiplataforma
-- **HTTP**: Cliente HTTP para comunicação com API
-
-### Backend
-- **Node.js**: Runtime JavaScript
-- **Express**: Framework web
-- **MongoDB**: Base de dados NoSQL
-- **Mongoose**: ODM para MongoDB
-- **Supabase JS**: Cliente para autenticação
-
-### Autenticação
-- **Supabase Auth**: Autenticação segura com email/password
-- **JWT Tokens**: Tokens de acesso para autenticação nas APIs
-- **Collections por Usuário**: Cada usuário tem sua própria collection no MongoDB
-
-## Modo de Desenvolvimento vs Produção
-
-O serviço `DatabaseService` suporta dois modos:
-
-1. **API Mode** (padrão): Usa MongoDB via API REST
-   - Configure `useApi = true` em `lib/services/database.dart`
-
-2. **Local Mode**: Usa SharedPreferences (fallback)
-   - Configure `useApi = false` em `lib/services/database.dart`
-
-## Troubleshooting
-
-### Backend não conecta ao MongoDB
-- Verifique se o MongoDB está em execução
-- Confirme a URI no ficheiro `.env`
-- Para MongoDB Atlas, verifique as regras de firewall
-
-### Flutter não consegue conectar à API
-- Verifique se o backend está em execução
-- Confirme a URL em `api_service.dart`
-- Para dispositivos físicos, use o IP local da máquina
-- Verifique CORS no backend (já configurado)
-
-### Transações periódicas não aparecem
-- Verifique se a transação foi salva com `frequency` correto
-- Confirme que o período selecionado inclui as datas esperadas
-
-### Erro de autenticação
-- Verifique se as credenciais do Supabase estão corretas no `.env` e no `main.dart`
-- Confirme que o token está sendo enviado nas requisições (verifique o console do navegador)
-- Verifique se o Supabase está configurado corretamente (email/password habilitado)
-
-## Licença
-
-Este projeto é de uso pessoal.
+---
+*Projeto de uso pessoal.*

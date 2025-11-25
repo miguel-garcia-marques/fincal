@@ -432,6 +432,83 @@ router.post('/:id/exclude-date', requireWalletId, checkWritePermission, async (r
   }
 });
 
+// POST criar exceção de transação periódica (substituir ocorrência específica)
+router.post('/:id/exception', requireWalletId, checkWritePermission, async (req, res) => {
+  try {
+    const Transaction = getTransactionModel(req.walletId);
+    const { date, ...newTransactionData } = req.body;
+    
+    if (!date) {
+      return res.status(400).json({ message: 'Data da ocorrência original é obrigatória' });
+    }
+
+    const originalTransaction = await Transaction.findOne({ 
+      id: req.params.id
+    });
+    
+    if (!originalTransaction) {
+      return res.status(404).json({ message: 'Transação original não encontrada' });
+    }
+
+    // Verificar se é uma transação periódica
+    if (originalTransaction.frequency === 'unique') {
+      return res.status(400).json({ message: 'Apenas transações periódicas podem ter exceções' });
+    }
+
+    // Verificar permissões
+    if (originalTransaction.createdBy !== req.userId && req.walletPermission !== 'owner') {
+      return res.status(403).json({ message: 'Você só pode modificar transações que você criou' });
+    }
+
+    // 1. Adicionar data à lista de excluídas da transação original
+    const dateParts = date.split('-');
+    const excludeDate = new Date(
+      parseInt(dateParts[0]),
+      parseInt(dateParts[1]) - 1,
+      parseInt(dateParts[2])
+    );
+    excludeDate.setHours(0, 0, 0, 0);
+
+    const excludedDates = (originalTransaction.excludedDates || []).map(d => {
+      const date = new Date(d);
+      return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    });
+
+    const excludeDateNormalized = new Date(excludeDate.getFullYear(), excludeDate.getMonth(), excludeDate.getDate());
+    const alreadyExcluded = excludedDates.some(excluded => 
+      excluded.getTime() === excludeDateNormalized.getTime()
+    );
+
+    if (!alreadyExcluded) {
+      excludedDates.push(excludeDateNormalized);
+      await Transaction.findOneAndUpdate(
+        { id: req.params.id },
+        { excludedDates: excludedDates },
+        { new: true }
+      );
+    }
+
+    // 2. Criar nova transação única
+    const newTransaction = new Transaction({
+      ...newTransactionData,
+      id: newTransactionData.id || Date.now().toString(), // Garantir ID
+      userId: req.userId,
+      walletId: req.walletId,
+      createdBy: req.userId,
+      frequency: 'unique', // Forçar ser única
+      dayOfWeek: undefined,
+      dayOfMonth: undefined,
+      excludedDates: []
+    });
+
+    await newTransaction.save();
+    
+    res.status(201).json(newTransaction);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // POST importar transações em bulk
 router.post('/bulk', validateBulkTransactions, requireWalletId, checkWritePermission, async (req, res) => {
   try {

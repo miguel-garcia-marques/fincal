@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import '../utils/page_visibility_web_stub.dart' 
+    if (dart.library.html) '../utils/page_visibility_web.dart' as page_visibility;
 import '../models/transaction.dart';
 import '../models/budget_balances.dart';
 import '../models/period_history.dart';
@@ -17,6 +20,7 @@ import '../utils/responsive_fonts.dart';
 import '../widgets/calendar.dart';
 import '../widgets/transaction_list.dart';
 import '../widgets/loading_screen.dart';
+import '../widgets/app_lock_screen.dart';
 import 'add_transaction_screen.dart';
 import 'settings_menu_screen.dart';
 import 'day_details_screen.dart';
@@ -37,7 +41,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final DatabaseService _databaseService = DatabaseService();
   final AuthService _authService = AuthService();
   final UserService _userService = UserService();
@@ -48,6 +52,39 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Wallet ativa
   Wallet? _activeWallet;
+  
+  // Estado de bloqueio quando app perde foco
+  bool _isLocked = false;
+
+  // Helper para mostrar SnackBars discretos no topo da tela
+  void _showDiscreteSnackBar(String message, {bool isError = false}) {
+    if (!mounted) return;
+    
+    final mediaQuery = MediaQuery.of(context);
+    final screenHeight = mediaQuery.size.height;
+    final paddingTop = mediaQuery.padding.top;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(color: AppTheme.white),
+        ),
+        backgroundColor: isError ? AppTheme.expenseRed : AppTheme.darkGray,
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.only(
+          bottom: screenHeight - paddingTop - 80, // Posicionar próximo ao topo
+          left: 16,
+          right: 16,
+        ),
+        duration: const Duration(seconds: 2),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        elevation: 4,
+      ),
+    );
+  }
 
   int _selectedYear = DateTime.now().year;
   DateTime _startDate = DateTime(DateTime.now().year, DateTime.now().month, 1);
@@ -58,6 +95,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Transaction> _transactions = [];
   bool _isLoading = true;
   bool _isInitialLoading = true; // Novo estado para loading inicial
+  bool _isRetrying = false; // Estado para controlar quando está fazendo retry
   String? _initializationError; // Erro durante inicialização
   List<PeriodHistory> _periodHistories = [];
   bool _periodSelected = false;
@@ -72,6 +110,14 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    // Registrar observer para detectar quando app perde/ganha foco
+    WidgetsBinding.instance.addObserver(this);
+    
+    // Para web, adicionar listener de visibilidade da página (funciona melhor no iOS)
+    if (kIsWeb) {
+      _initPageVisibilityListener();
+    }
+    
     // Assume current year but don't set dates yet
     _selectedYear = DateTime.now().year;
 
@@ -121,8 +167,74 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _cacheRefreshTimer?.cancel();
     super.dispose();
+  }
+  
+  /// Inicializa listener de visibilidade da página para web/iOS
+  void _initPageVisibilityListener() {
+    if (!kIsWeb) return;
+    
+    page_visibility.initPageVisibilityListener((isHidden) {
+      if (!mounted) return;
+      
+      if (isHidden) {
+        // Página perdeu visibilidade - bloquear
+        setState(() {
+          _isLocked = true;
+        });
+      } else {
+        // Página voltou a ser visível - fazer verificações em background
+        _refreshInBackground();
+      }
+    });
+  }
+  
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    // Para não-web, usar AppLifecycleState normalmente
+    if (!kIsWeb) {
+      if (state == AppLifecycleState.paused || 
+          state == AppLifecycleState.inactive ||
+          state == AppLifecycleState.hidden) {
+        // App perdeu o foco - bloquear imediatamente
+        if (mounted) {
+          setState(() {
+            _isLocked = true;
+          });
+        }
+      } else if (state == AppLifecycleState.resumed) {
+        // App voltou ao foreground - fazer verificações em background
+        _refreshInBackground();
+      }
+    }
+  }
+  
+  /// Faz verificações e recarrega dados em background quando app volta ao foco
+  /// Não bloqueia a UI - apenas atualiza silenciosamente
+  void _refreshInBackground() {
+    // Verificar sessão e recarregar dados em background
+    _authService.isSessionValid(forceRefresh: false).then((isValid) {
+      if (isValid) {
+        // Recarregar dados críticos em background
+        _refreshDataInBackground();
+      }
+    }).catchError((e) {
+      // Erros são tratados silenciosamente em background
+      print('[HomeScreen] Erro na verificação em background: $e');
+    });
+  }
+  
+  /// Desbloqueia quando usuário interage com a tela de bloqueio
+  void _handleUnlock() {
+    if (mounted) {
+      setState(() {
+        _isLocked = false;
+      });
+    }
   }
 
   // Iniciar timer para atualizar cache a cada 5 minutos (reduzido para melhorar performance)
@@ -146,17 +258,35 @@ class _HomeScreenState extends State<HomeScreen> {
       // 1. Carregar wallet ativa primeiro com timeout individual
       try {
         await _loadActiveWallet().timeout(
-          const Duration(seconds: 4),
+          const Duration(seconds: 6), // Aumentado para dar mais tempo
           onTimeout: () {
             print('[HomeScreen] Timeout ao carregar wallet ativa');
+            throw TimeoutException('Timeout ao carregar wallet ativa');
           },
         );
       } catch (e) {
         print('[HomeScreen] Erro ao carregar wallet: $e');
-        // Continuar mesmo se falhar - tentar usar cache
+        // Garantir que _activeWallet está null quando há erro
+        if (mounted) {
+          setState(() {
+            _activeWallet = null;
+          });
+        }
+        // Não continuar se não conseguir carregar a wallet - é crítico
+        if (mounted) {
+          setState(() {
+            _isInitialLoading = false;
+            if (e is TimeoutException) {
+              _initializationError = 'Timeout ao carregar dados. Verifique sua conexão e tente novamente.';
+            } else {
+              _initializationError = 'Não foi possível carregar a wallet. Tente novamente.';
+            }
+          });
+        }
+        return;
       }
 
-      // Se não houver wallet ativa após carregar, tentar usar cache ou mostrar erro
+      // Se não houver wallet ativa após carregar, mostrar erro
       if (_activeWallet == null) {
         if (mounted) {
           setState(() {
@@ -269,19 +399,19 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       // Primeiro, carregar dados do usuário para obter personalWalletId com timeout
       final user = await _userService.getCurrentUser().timeout(
-        const Duration(seconds: 3),
+        const Duration(seconds: 5), // Aumentado para 5 segundos no retry
         onTimeout: () {
           print('[HomeScreen] Timeout ao carregar usuário');
-          return null;
+          throw TimeoutException('Timeout ao carregar dados do usuário');
         },
       );
 
       // Buscar todas as wallets e criar lista mutável com timeout
       final walletsList = await _walletService.getAllWallets().timeout(
-        const Duration(seconds: 3),
+        const Duration(seconds: 5), // Aumentado para 5 segundos no retry
         onTimeout: () {
           print('[HomeScreen] Timeout ao carregar wallets');
-          return <Wallet>[];
+          throw TimeoutException('Timeout ao carregar wallets');
         },
       );
       final wallets = List<Wallet>.from(walletsList);
@@ -331,18 +461,20 @@ class _HomeScreenState extends State<HomeScreen> {
           // Se não há wallet pessoal, criar uma (o backend retornará a existente se já houver)
 
           try {
-            personalWallet = await _walletService.createWallet();
+            personalWallet = await _walletService.createWallet().timeout(
+              const Duration(seconds: 5),
+              onTimeout: () {
+                throw TimeoutException('Timeout ao criar wallet');
+              },
+            );
             // Adicionar à lista se não estiver lá
             if (!wallets.any((w) => w.id == personalWallet!.id)) {
               wallets.add(personalWallet);
             }
           } catch (e2) {
-            if (mounted) {
-              setState(() {
-                _isInitialLoading = false;
-              });
-            }
-            return;
+            print('[HomeScreen] Erro ao criar wallet pessoal: $e2');
+            // Se falhar ao criar wallet, lançar exceção para ser capturada acima
+            rethrow;
           }
         }
       }
@@ -387,12 +519,16 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     } catch (e) {
-      // Em caso de erro, não criar wallet aqui - deve ser criada no backend
+      // Em caso de erro, logar e garantir que _activeWallet permaneça null
+      // para que o erro seja detectado em _initializeApp()
+      print('[HomeScreen] Erro ao carregar wallet ativa: $e');
       if (mounted) {
         setState(() {
-          _isInitialLoading = false;
+          _activeWallet = null; // Garantir que está null
         });
       }
+      // Re-lançar exceção para ser capturada em _initializeApp()
+      rethrow;
     }
   }
 
@@ -550,8 +686,8 @@ class _HomeScreenState extends State<HomeScreen> {
             _selectedYear = period.startDate.year;
             _periodSelected = true;
           });
-          // Salvar o período selecionado para que fique ativo
-          await _loadTransactions(savePeriod: true, periodName: period.name, useCache: false);
+          // Não criar período duplicado, apenas carregar transações
+          await _loadTransactions(savePeriod: false, useCache: false);
         } else if (result['type'] == 'new') {
           final periodName = result['name'] as String? ?? '';
           setState(() {
@@ -635,6 +771,33 @@ class _HomeScreenState extends State<HomeScreen> {
     if (savePeriod) {
       final transactionIds = transactions.map((t) => t.id).toList();
       try {
+        // Verificar se já existe um período com as mesmas datas
+        final existingPeriod = _periodHistories.firstWhere(
+          (p) => 
+            p.startDate.year == _startDate.year &&
+            p.startDate.month == _startDate.month &&
+            p.startDate.day == _startDate.day &&
+            p.endDate.year == _endDate.year &&
+            p.endDate.month == _endDate.month &&
+            p.endDate.day == _endDate.day,
+          orElse: () => PeriodHistory(
+            id: '',
+            startDate: DateTime.now(),
+            endDate: DateTime.now(),
+            transactionIds: [],
+          ),
+        );
+        
+        // Se já existe um período com as mesmas datas, não criar duplicado
+        if (existingPeriod.id.isNotEmpty) {
+          // Apenas atualizar o nome se foi fornecido e é diferente
+          if (periodName.isNotEmpty && periodName != existingPeriod.name) {
+            await _apiService.updatePeriodHistory(existingPeriod.id, periodName);
+            await _loadPeriodHistories();
+          }
+          return; // Não criar período duplicado
+        }
+        
         final periodHistory = PeriodHistory(
           id: '', // Will be generated by backend
           startDate: _startDate,
@@ -649,15 +812,11 @@ class _HomeScreenState extends State<HomeScreen> {
         await _apiService.savePeriodHistory(periodHistory, ownerId: ownerId);
         await _loadPeriodHistories();
         if (mounted && periodName.isNotEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Período salvo com sucesso')),
-          );
+          _showDiscreteSnackBar('Período salvo com sucesso');
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Erro ao salvar período: $e')),
-          );
+          _showDiscreteSnackBar('Erro ao salvar período: $e', isError: true);
         }
       }
     }
@@ -759,8 +918,8 @@ class _HomeScreenState extends State<HomeScreen> {
             _selectedYear = period.startDate.year;
             _periodSelected = true;
           });
-          // Salvar o período selecionado para que fique ativo
-          await _loadTransactions(savePeriod: true, periodName: period.name, useCache: false);
+          // Não criar período duplicado, apenas carregar transações
+          await _loadTransactions(savePeriod: false, useCache: false);
         },
         onPeriodDeleted: (id) async {
           try {
@@ -771,18 +930,14 @@ class _HomeScreenState extends State<HomeScreen> {
             await _apiService.deletePeriodHistory(id, ownerId: ownerId);
             await _loadPeriodHistories();
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Período excluído com sucesso')),
-              );
+              _showDiscreteSnackBar('Período excluído com sucesso');
               // Fechar e reabrir o diálogo para atualizar a lista
               Navigator.of(context).pop();
               _showPeriodHistory();
             }
           } catch (e) {
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Erro ao excluir período: $e')),
-              );
+              _showDiscreteSnackBar('Erro ao excluir período: $e', isError: true);
             }
           }
         },
@@ -790,19 +945,14 @@ class _HomeScreenState extends State<HomeScreen> {
           try {
             await _loadPeriodHistories();
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text('Nome do período atualizado com sucesso')),
-              );
+              _showDiscreteSnackBar('Nome do período atualizado com sucesso');
               // Fechar e reabrir o diálogo para atualizar a lista
               Navigator.of(context).pop();
               _showPeriodHistory();
             }
           } catch (e) {
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Erro ao atualizar período: $e')),
-              );
+              _showDiscreteSnackBar('Erro ao atualizar período: $e', isError: true);
             }
           }
         },
@@ -812,30 +962,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _showAddTransactionDialog() async {
     if (_activeWallet == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Por favor, selecione uma carteira primeiro')),
-      );
+      _showDiscreteSnackBar('Por favor, selecione uma carteira primeiro', isError: true);
       return;
     }
 
     final userId = _authService.currentUser?.id;
     if (userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Usuário não autenticado')),
-      );
+      _showDiscreteSnackBar('Usuário não autenticado', isError: true);
       return;
     }
 
     // Verificar permissão antes de abrir o diálogo
     if (_activeWallet!.permission == 'read') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content:
-              Text('Você só tem permissão para visualizar este calendário'),
-          duration: Duration(seconds: 3),
-        ),
-      );
+      _showDiscreteSnackBar('Você só tem permissão para visualizar este calendário', isError: true);
       return;
     }
 
@@ -1362,65 +1501,108 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Método para retentar inicialização
   Future<void> _retryInitialization() async {
+    print('[HomeScreen] Iniciando retry de inicialização...');
+    
+    // Resetar completamente o estado antes de tentar novamente
     setState(() {
-      _isInitialLoading = true;
+      _isRetrying = true;
+      _isInitialLoading = true; // Garantir que está em loading durante retry
       _initializationError = null;
+      _activeWallet = null; // Resetar wallet ativa para forçar recarregamento
+      _transactions = []; // Limpar transações antigas
+      _periodHistories = []; // Limpar histórico de períodos
+      _periodSelected = false; // Resetar seleção de período
     });
-    await _initializeApp();
+    
+    // Pequeno delay para dar tempo à rede se recuperar (se for problema temporário)
+    await Future.delayed(const Duration(milliseconds: 500));
+    
+    try {
+      await _initializeApp();
+      
+      // Verificar se ainda há erro após inicialização
+      if (mounted && _activeWallet == null && _initializationError == null) {
+        // Se não há wallet e não há erro definido, definir erro genérico
+        setState(() {
+          _initializationError = 'Não foi possível carregar a wallet. Verifique sua conexão e tente novamente.';
+          _isInitialLoading = false;
+          _isRetrying = false;
+        });
+      } else if (mounted) {
+        setState(() {
+          _isRetrying = false;
+        });
+      }
+    } catch (e) {
+      print('[HomeScreen] Erro no retry de inicialização: $e');
+      if (mounted) {
+        setState(() {
+          _isInitialLoading = false;
+          _isRetrying = false;
+          _initializationError = 'Erro ao tentar novamente: ${e.toString()}';
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Mostrar tela de loading durante inicialização
-    if (_isInitialLoading) {
-      return LoadingScreen(
-        message: 'Carregando seus dados financeiros...',
+    // Se a app está bloqueada (perdeu foco), mostrar tela de bloqueio minimalista
+    if (_isLocked) {
+      return AppLockScreen(
+        onUnlock: _handleUnlock,
       );
     }
+    
+    // Mostrar tela de loading durante inicialização (mas não durante retry)
+    if (_isInitialLoading && !_isRetrying) {
+      return const LoadingScreen();
+    }
 
-    // Se houver erro na inicialização e não tiver wallet ativa, mostrar tela de erro
+    // Se houver erro na inicialização e não tiver wallet ativa, mostrar tela de erro minimalista
     // MAS se tiver wallet ativa mesmo com erro, mostrar a tela normal (pode ter dados do cache)
     if (_initializationError != null && _activeWallet == null) {
       return Scaffold(
         backgroundColor: AppTheme.white,
         body: SafeArea(
           child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.error_outline,
-                    size: 64,
-                    color: Colors.red,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Erro ao carregar',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _initializationError!,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton.icon(
-                    onPressed: _retryInitialization,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Tentar novamente'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
-                      ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.refresh,
+                  size: 48,
+                  color: AppTheme.darkGray.withOpacity(0.5),
+                ),
+                const SizedBox(height: 24),
+                GestureDetector(
+                  onTap: _isRetrying ? null : _retryInitialization,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 16,
                     ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.darkGray,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: _isRetrying
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Icon(
+                            Icons.refresh,
+                            color: Colors.white,
+                            size: 24,
+                          ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
@@ -2392,6 +2574,36 @@ class _ImportTransactionsDialogState extends State<_ImportTransactionsDialog> {
   String? _errorMessage;
   String? _successMessage;
 
+  // Helper para mostrar SnackBars discretos no topo da tela
+  void _showDiscreteSnackBar(String message, {bool isError = false}) {
+    if (!mounted) return;
+    
+    final mediaQuery = MediaQuery.of(context);
+    final screenHeight = mediaQuery.size.height;
+    final paddingTop = mediaQuery.padding.top;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(color: AppTheme.white),
+        ),
+        backgroundColor: isError ? AppTheme.expenseRed : AppTheme.darkGray,
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.only(
+          bottom: screenHeight - paddingTop - 80, // Posicionar próximo ao topo
+          left: 16,
+          right: 16,
+        ),
+        duration: const Duration(seconds: 2),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        elevation: 4,
+      ),
+    );
+  }
+
   // Verificar se uma transação do JSON é duplicada de uma transação existente
   bool _isDuplicate(Map<String, dynamic> jsonTx, Transaction existingTx) {
     // Comparar periodicidade
@@ -2813,22 +3025,16 @@ class _ImportTransactionsDialogState extends State<_ImportTransactionsDialog> {
                   walletId: widget.walletId,
                 );
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(retryResult['message'] as String? ??
-                          '${retryResult['imported']} transações corrigidas importadas com sucesso'),
-                      backgroundColor: AppTheme.incomeGreen,
-                    ),
+                  _showDiscreteSnackBar(
+                    retryResult['message'] as String? ??
+                        '${retryResult['imported']} transações corrigidas importadas com sucesso',
                   );
                 }
               } catch (e) {
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content:
-                          Text('Erro ao reimportar transações corrigidas: $e'),
-                      backgroundColor: AppTheme.expenseRed,
-                    ),
+                  _showDiscreteSnackBar(
+                    'Erro ao reimportar transações corrigidas: $e',
+                    isError: true,
                   );
                 }
               }

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:app_links/app_links.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/invite_accept_screen.dart';
@@ -17,6 +18,9 @@ import 'services/navigation_service.dart';
 import 'services/onboarding_orchestrator.dart';
 import 'theme/app_theme.dart';
 import 'config/supabase_config.dart';
+import 'widgets/app_lock_screen.dart';
+import 'utils/page_visibility_web_stub.dart' 
+    if (dart.library.html) 'utils/page_visibility_web.dart' as page_visibility;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -176,6 +180,9 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   bool _isLoading = true;
   OnboardingState _onboardingState = OnboardingState.notAuthenticated;
   bool _isCheckingAuth = false; // Flag para prevenir chamadas simultâneas
+  bool _isLocked = false; // Flag para controlar bloqueio quando app perde foco
+  DateTime? _lastAuthCheckTime; // Timestamp da última verificação para evitar verificações muito frequentes
+  bool _isNavigatingAfterPasskeyLogin = false; // Flag para indicar que acabamos de fazer login com passkey
 
   StreamSubscription<AuthState>? _authSubscription;
   StreamSubscription<Uri>? _linkSubscription;
@@ -186,6 +193,12 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     super.initState();
     // Registrar observer para detectar quando app volta ao foreground
     WidgetsBinding.instance.addObserver(this);
+    
+    // Para web, adicionar listener de visibilidade da página (funciona melhor no iOS)
+    if (kIsWeb) {
+      _initPageVisibilityListener();
+    }
+    
     // Inicializar app_links para deep linking (não-web apenas)
     if (!kIsWeb) {
       _appLinks = AppLinks();
@@ -208,15 +221,34 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     // Não verificar imediatamente - apenas quando realmente necessário
     // Isso previne interrupções durante operações do usuário
     _authSubscription = _authService.authStateChanges.listen((AuthState state) {
-      if (mounted && !_isCheckingAuth) {
-        // Debounce mais longo: aguardar 3 segundos antes de re-verificar
+      if (mounted && !_isCheckingAuth && !_isNavigatingAfterPasskeyLogin) {
+        // Prevenir verificações muito frequentes (máximo uma vez a cada 2 segundos)
+        final now = DateTime.now();
+        if (_lastAuthCheckTime != null && 
+            now.difference(_lastAuthCheckTime!).inMilliseconds < 2000) {
+          print('[AuthWrapper] Ignorando verificação muito frequente');
+          return;
+        }
+        
+        // Para signedIn, aguardar mais tempo para garantir que flags de passkey foram salvas
+        final delay = state.event == AuthChangeEvent.signedIn 
+            ? const Duration(milliseconds: 1200)
+            : const Duration(seconds: 3);
+        
+        // Debounce mais longo: aguardar antes de re-verificar
         // Isso dá tempo para operações do usuário completarem
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted && !_isCheckingAuth) {
+        Future.delayed(delay, () {
+          if (mounted && !_isCheckingAuth && !_isNavigatingAfterPasskeyLogin) {
             // Só verificar se realmente houve uma mudança significativa
             // Se o usuário ainda está autenticado, não precisa verificar novamente
             if (state.event == AuthChangeEvent.signedOut || 
                 state.event == AuthChangeEvent.tokenRefreshed) {
+              _lastAuthCheckTime = DateTime.now();
+              _checkAuth();
+            } else if (state.event == AuthChangeEvent.signedIn && 
+                       _onboardingState == OnboardingState.notAuthenticated) {
+              // Só verificar signedIn se ainda não estamos autenticados
+              _lastAuthCheckTime = DateTime.now();
               _checkAuth();
             }
           }
@@ -296,14 +328,67 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  /// Inicializa listener de visibilidade da página para web/iOS
+  void _initPageVisibilityListener() {
+    if (!kIsWeb) return;
+    
+    page_visibility.initPageVisibilityListener((isHidden) {
+      if (!mounted) return;
+      
+      if (isHidden) {
+        // Página perdeu visibilidade - bloquear
+        if (_onboardingState != OnboardingState.notAuthenticated) {
+          setState(() {
+            _isLocked = true;
+          });
+        }
+      } else {
+        // Página voltou a ser visível - fazer verificações em background
+        _verifyInBackground();
+      }
+    });
+  }
+  
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     
-    // Quando o app volta ao foreground (resumed), verificar se a sessão ainda é válida
-    if (state == AppLifecycleState.resumed) {
-      print('[AuthWrapper] App voltou ao foreground - verificando sessão...');
-      _verifySessionOnResume();
+    // Para não-web, usar AppLifecycleState normalmente
+    if (!kIsWeb) {
+      if (state == AppLifecycleState.paused || 
+          state == AppLifecycleState.inactive ||
+          state == AppLifecycleState.hidden) {
+        // App perdeu o foco - bloquear imediatamente
+        if (mounted && _onboardingState != OnboardingState.notAuthenticated) {
+          setState(() {
+            _isLocked = true;
+          });
+        }
+      } else if (state == AppLifecycleState.resumed) {
+        // App voltou ao foreground - fazer verificações em background
+        _verifyInBackground();
+      }
+    }
+  }
+  
+  /// Faz verificações em background quando app volta ao foco
+  /// Não bloqueia a UI - apenas verifica silenciosamente
+  void _verifyInBackground() {
+    if (_onboardingState == OnboardingState.notAuthenticated) return;
+    
+    // Fazer verificação em background sem bloquear
+    _verifySessionOnResume().catchError((e) {
+      // Erros são tratados silenciosamente em background
+      print('[AuthWrapper] Erro na verificação em background: $e');
+    });
+  }
+  
+  /// Desbloqueia quando usuário interage com a tela de bloqueio
+  void _handleUnlock() {
+    if (mounted) {
+      setState(() {
+        _isLocked = false;
+      });
     }
   }
 
@@ -438,11 +523,29 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   Future<void> _checkAuth() async {
     // Prevenir chamadas simultâneas
     if (_isCheckingAuth) {
+      print('[AuthWrapper] _checkAuth já está em execução, ignorando...');
+      return;
+    }
+    
+    // Prevenir verificações muito frequentes
+    final now = DateTime.now();
+    if (_lastAuthCheckTime != null && 
+        now.difference(_lastAuthCheckTime!).inMilliseconds < 1000) {
+      print('[AuthWrapper] Verificação muito frequente, ignorando...');
       return;
     }
     
     _isCheckingAuth = true;
+    _lastAuthCheckTime = now;
+    
     try {
+      // Se o usuário acabou de fazer login (estava não autenticado e agora está autenticado),
+      // aguardar um pouco para garantir que flags de passkey foram salvas
+      if (_onboardingState == OnboardingState.notAuthenticated && _authService.isAuthenticated) {
+        print('[AuthWrapper] Usuário acabou de fazer login, aguardando flags de passkey...');
+        await Future.delayed(const Duration(milliseconds: 800));
+      }
+      
       // PRIMEIRO: Verificar se há uma sessão e se ela ainda é válida
       // Isso previne que o usuário use a app com sessão expirada
       // MAS não fazer refresh forçado para evitar interrupções
@@ -487,6 +590,24 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       }
       
       print('[AuthWrapper] Verificando estado do onboarding...');
+      
+      // Verificar se acabamos de fazer login com passkey verificando a flag
+      if (_authService.isAuthenticated) {
+        try {
+          final currentUser = _authService.currentUser;
+          if (currentUser != null) {
+            final prefs = await SharedPreferences.getInstance();
+            final hasPasskeyAuth = prefs.getBool('passkey_authenticated_${currentUser.id}') ?? false;
+            if (hasPasskeyAuth) {
+              print('[AuthWrapper] Detectado login com passkey, aguardando um pouco mais...');
+              await Future.delayed(const Duration(milliseconds: 300));
+            }
+          }
+        } catch (e) {
+          // Ignorar erros ao verificar flag
+        }
+      }
+      
       final state = await _onboardingOrchestrator.getCurrentState().timeout(
         const Duration(seconds: 5),
         onTimeout: () {
@@ -516,6 +637,8 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
         setState(() {
           _onboardingState = state;
           _isLoading = false;
+          // Resetar flag após verificação
+          _isNavigatingAfterPasskeyLogin = false;
         });
       }
     } catch (e, stackTrace) {
@@ -557,15 +680,73 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     // Tratar erros durante o build
     try {
+      // Se a app está bloqueada (perdeu foco), mostrar tela de bloqueio minimalista
+      if (_isLocked && _onboardingState != OnboardingState.notAuthenticated) {
+        return AppLockScreen(
+          onUnlock: _handleUnlock,
+        );
+      }
+      
       if (_isLoading) {
-        return const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
+        return Scaffold(
+          backgroundColor: Colors.white,
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Image.asset(
+                  'assets/app_icon.png',
+                  width: 80,
+                  height: 80,
+                  fit: BoxFit.cover,
+                ),
+                const SizedBox(height: 24),
+                const CircularProgressIndicator(),
+              ],
+            ),
+          ),
         );
       }
 
       // Navegar baseado no estado do onboarding
       switch (_onboardingState) {
         case OnboardingState.notAuthenticated:
+          // Verificar se o usuário está realmente não autenticado
+          // Pode ser que acabamos de fazer login e o estado ainda não foi atualizado
+          if (_authService.isAuthenticated) {
+            // Usuário está autenticado mas estado ainda não foi atualizado
+            // Aguardar um pouco e verificar novamente
+            print('[AuthWrapper] Usuário autenticado mas estado é notAuthenticated - aguardando atualização...');
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _authService.isAuthenticated) {
+                // Aguardar um pouco para garantir que flags foram salvas
+                Future.delayed(const Duration(milliseconds: 500), () {
+                  if (mounted && _authService.isAuthenticated) {
+                    _checkAuth();
+                  }
+                });
+              }
+            });
+            // Mostrar loading enquanto verifica
+            return Scaffold(
+              backgroundColor: Colors.white,
+              body: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Image.asset(
+                      'assets/app_icon.png',
+                      width: 80,
+                      height: 80,
+                      fit: BoxFit.cover,
+                    ),
+                    const SizedBox(height: 24),
+                    const CircularProgressIndicator(),
+                  ],
+                ),
+              ),
+            );
+          }
           return const LoginScreen();
           
         case OnboardingState.emailNotVerified:
